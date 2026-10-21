@@ -5,10 +5,12 @@
   const I = window.Icons;
   const esc = I.esc;
 
-  const params = new URLSearchParams(location.search);
-  const platform = params.get('platform');
+  // Tauri injects __finderEnv; the Electron shell passes the same values as URL params.
+  const env = window.__finderEnv || Object.fromEntries(new URLSearchParams(location.search));
+  const platform = env.platform;
   const isWin = platform === 'win32';
-  document.body.classList.add(`platform-${platform}`, `material-${params.get('material') || 'none'}`);
+  const isTauri = !!window.__TAURI__;
+  document.body.classList.add(`platform-${platform}`, `material-${env.material || 'none'}`);
 
   const $ = (s, root = document) => root.querySelector(s);
   const $$ = (s, root = document) => [...root.querySelectorAll(s)];
@@ -695,13 +697,14 @@
     api.startDrag(paths);
   });
 
-  function dropTargetFor(ev) {
-    const place = ev.target.closest?.('.place, .crumb');
+  function dropTargetFor(target) {
+    if (!target?.closest) return null;
+    const place = target.closest('.place, .crumb');
     if (place) return { dir: place.dataset.path, el: place };
-    const it = itemFromEl(ev.target);
+    const it = itemFromEl(target);
     if (it?.entry?.isDir) return { dir: it.entry.path, el: it.el };
-    if (ev.target.closest?.('.col')) { const dir = ev.target.closest('.col').dataset.dir; return { dir, el: ev.target.closest('.col') }; }
-    if (ev.target.closest?.('#content') && !state.search.results) return { dir: state.cwd, el: content };
+    if (target.closest('.col')) { const dir = target.closest('.col').dataset.dir; return { dir, el: target.closest('.col') }; }
+    if (target.closest('#content') && !state.search.results) return { dir: state.cwd, el: content };
     return null;
   }
   let dropEl = null;
@@ -715,8 +718,21 @@
     const files = [...(ev.dataTransfer?.files || [])].map((f) => { try { return api.pathForFile(f); } catch { return ''; } }).filter(Boolean);
     return files.length ? files : (state.dragging || []);
   }
+  async function dropInto(target, rawPaths, ctrl) {
+    const t = dropTargetFor(target);
+    setDropEl(null);
+    if (!t) return;
+    const paths = rawPaths.filter((p) => norm(p) !== norm(t.dir));
+    state.dragging = null;
+    if (!paths.length) return;
+    // Same drive moves, another drive copies; Ctrl forces a copy (Windows Explorer rules).
+    const sameRoot = paths.every((p) => norm(P.root(p)) === norm(P.root(t.dir)));
+    const op = ctrl || !sameRoot ? 'copy' : 'move';
+    if (op === 'move' && paths.every((p) => norm(P.dirname(p)) === norm(t.dir))) return;
+    await transfer(op, paths, t.dir);
+  }
   document.addEventListener('dragover', (ev) => {
-    const t = dropTargetFor(ev);
+    const t = dropTargetFor(ev.target);
     if (!t) { setDropEl(null); return; }
     ev.preventDefault();
     const sameRoot = (state.dragging || []).every((p) => norm(P.root(p)) === norm(P.root(t.dir)));
@@ -724,19 +740,21 @@
     setDropEl(t.el);
   });
   document.addEventListener('dragleave', (ev) => { if (!ev.relatedTarget) setDropEl(null); });
-  document.addEventListener('drop', async (ev) => {
-    const t = dropTargetFor(ev);
-    setDropEl(null);
-    if (!t) return;
+  document.addEventListener('drop', (ev) => {
+    if (!dropTargetFor(ev.target)) return;
     ev.preventDefault();
-    const paths = dropPaths(ev).filter((p) => norm(p) !== norm(t.dir));
-    state.dragging = null;
-    if (!paths.length) return;
-    const sameRoot = paths.every((p) => norm(P.root(p)) === norm(P.root(t.dir)));
-    const op = ev.ctrlKey || !sameRoot ? 'copy' : 'move';
-    if (op === 'move' && paths.every((p) => norm(P.dirname(p)) === norm(t.dir))) return;
-    await transfer(op, paths, t.dir);
+    dropInto(ev.target, dropPaths(ev), ev.ctrlKey);
   });
+  // Tauri delivers native drag-and-drop with window coordinates instead of DOM events.
+  let ctrlHeld = false;
+  window.addEventListener('keydown', (ev) => { if (ev.key === 'Control') ctrlHeld = true; });
+  window.addEventListener('keyup', (ev) => { if (ev.key === 'Control') ctrlHeld = false; });
+  window.addEventListener('blur', () => { ctrlHeld = false; });
+  window.__finderDnd = {
+    over: (x, y) => setDropEl(dropTargetFor(document.elementFromPoint(x, y))?.el || null),
+    drop: (x, y, paths) => dropInto(document.elementFromPoint(x, y), paths.length ? paths : (state.dragging || []), ctrlHeld),
+    leave: () => setDropEl(null),
+  };
 
   async function transfer(op, paths, dest) {
     const results = await api.transfer(op, paths, dest);
@@ -1316,7 +1334,8 @@
     if (!b) return;
     ({ close: W.close, min: W.minimize, max: W.toggleMaximize })[b.dataset.act]();
   });
-  $('#toolbar').addEventListener('dblclick', (ev) => { if (!ev.target.closest('button, input')) W.toggleMaximize(); });
+  // Tauri drag regions already maximize on double-click.
+  if (!isTauri) $('#toolbar').addEventListener('dblclick', (ev) => { if (!ev.target.closest('button, input')) W.toggleMaximize(); });
   window.addEventListener('blur', () => document.body.classList.add('blurred'));
   window.addEventListener('focus', () => document.body.classList.remove('blurred'));
 
@@ -1346,9 +1365,13 @@
     document.documentElement.style.setProperty('--sidebar-w', `${prefs.sidebarW}px`);
     document.body.classList.toggle('sidebar-hidden', prefs.sidebarHidden);
     $('#zoom').value = prefs.icon;
-    state.places = await api.places();
-    const start = params.get('dir') || state.places.home;
-    await navigate(start, { root: start });
-    content.focus();
+    try {
+      state.places = await api.places();
+      const start = env.dir || state.places.home;
+      if (!(await navigate(start, { root: start }))) await navigate(state.places.home, { root: state.places.home });
+      content.focus();
+    } finally {
+      window.__finderReady?.();
+    }
   })();
 })();

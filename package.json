@@ -1,21 +1,17 @@
 {
   "name": "finder-win",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A macOS Finder-style file manager for Windows",
   "main": "main.js",
   "private": true,
   "scripts": {
-    "start": "electron .",
-    "dist": "electron-builder --win nsis portable"
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "test": "cd src-tauri && cargo test",
+    "electron": "electron ."
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.12.4",
     "electron": "^33.4.11"
-  },
-  "build": {
-    "appId": "community.finderwin.app",
-    "productName": "Finder for Windows",
-    "files": ["main.js", "preload.js", "renderer/**"],
-    "win": { "target": ["nsis", "portable"] },
-    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true }
   }
 }
