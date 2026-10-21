@@ -1,0 +1,21 @@
+{
+  "name": "finder-win",
+  "version": "0.1.0",
+  "description": "A macOS Finder-style file manager for Windows",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win nsis portable"
+  },
+  "devDependencies": {
+    "electron": "^33.4.11"
+  },
+  "build": {
+    "appId": "community.finderwin.app",
+    "productName": "Finder for Windows",
+    "files": ["main.js", "preload.js", "renderer/**"],
+    "win": { "target": ["nsis", "portable"] },
+    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true }
+  }
+}

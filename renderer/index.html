@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' file: data:; media-src file:; object-src file:; frame-src file:; style-src 'self' 'unsafe-inline'; script-src 'self'">
+  <title>Finder</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+    <aside id="sidebar" class="glass">
+      <div class="traffic" id="traffic">
+        <button class="light close" data-act="close" title="關閉"><svg viewBox="0 0 12 12"><path d="M3.5 3.5l5 5M8.5 3.5l-5 5"/></svg></button>
+        <button class="light min" data-act="min" title="最小化"><svg viewBox="0 0 12 12"><path d="M3 6h6"/></svg></button>
+        <button class="light max" data-act="max" title="放大"><svg viewBox="0 0 12 12"><path d="M3.6 8.4V4.6l3.8 3.8H3.6zM8.4 3.6v3.8L4.6 3.6h3.8z" class="fill"/></svg></button>
+      </div>
+      <nav id="places"></nav>
+    </aside>
+    <div id="sidebar-resizer"></div>
+
+    <main id="main">
+      <header id="toolbar">
+        <div class="capsule nav">
+          <button id="btn-back" class="tb" title="上一頁 (Alt+←)"><svg viewBox="0 0 20 20"><path d="M12.5 4.5L7 10l5.5 5.5"/></svg></button>
+          <button id="btn-fwd" class="tb" title="下一頁 (Alt+→)"><svg viewBox="0 0 20 20"><path d="M7.5 4.5L13 10l-5.5 5.5"/></svg></button>
+        </div>
+        <div id="title-wrap">
+          <div id="title"></div>
+        </div>
+        <div class="spacer"></div>
+        <div class="capsule seg" id="view-seg">
+          <div class="seg-pill"></div>
+          <button class="tb" data-view="icons" title="以圖像顯示 (Ctrl+1)"><svg viewBox="0 0 20 20"><rect x="3.5" y="3.5" width="5" height="5" rx="1.3"/><rect x="11.5" y="3.5" width="5" height="5" rx="1.3"/><rect x="3.5" y="11.5" width="5" height="5" rx="1.3"/><rect x="11.5" y="11.5" width="5" height="5" rx="1.3"/></svg></button>
+          <button class="tb" data-view="list" title="以列表顯示 (Ctrl+2)"><svg viewBox="0 0 20 20"><path d="M7 5.5h10M7 10h10M7 14.5h10"/><circle cx="3.8" cy="5.5" r=".9" class="fill"/><circle cx="3.8" cy="10" r=".9" class="fill"/><circle cx="3.8" cy="14.5" r=".9" class="fill"/></svg></button>
+          <button class="tb" data-view="columns" title="以直欄顯示 (Ctrl+3)"><svg viewBox="0 0 20 20"><rect x="2.8" y="4" width="14.4" height="12" rx="2"/><path d="M7.6 4v12M12.4 4v12"/></svg></button>
+          <button class="tb" data-view="gallery" title="以圖庫顯示 (Ctrl+4)"><svg viewBox="0 0 20 20"><rect x="2.8" y="3.5" width="14.4" height="9" rx="2"/><rect x="3" y="14.5" width="3" height="2.2" rx=".6"/><rect x="8.5" y="14.5" width="3" height="2.2" rx=".6"/><rect x="14" y="14.5" width="3" height="2.2" rx=".6"/></svg></button>
+        </div>
+        <div class="capsule">
+          <button id="btn-newfolder" class="tb" title="新增資料夾 (Ctrl+Shift+N)"><svg viewBox="0 0 20 20"><path d="M2.8 6.2c0-1 .8-1.7 1.7-1.7h3.2l1.6 1.6h6.2c1 0 1.7.8 1.7 1.7v6.4c0 1-.8 1.7-1.7 1.7H4.5c-1 0-1.7-.8-1.7-1.7z"/><path d="M10 8.6v4.6M7.7 10.9h4.6"/></svg></button>
+          <button id="btn-more" class="tb" title="更多選項"><svg viewBox="0 0 20 20"><circle cx="5" cy="10" r="1.2" class="fill"/><circle cx="10" cy="10" r="1.2" class="fill"/><circle cx="15" cy="10" r="1.2" class="fill"/></svg></button>
+        </div>
+        <div class="capsule search" id="search-box">
+          <svg viewBox="0 0 20 20"><circle cx="8.6" cy="8.6" r="5"/><path d="M12.4 12.4l4 4"/></svg>
+          <input id="search" placeholder="搜尋" spellcheck="false">
+          <button id="search-clear" class="tb" title="清除"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="6.5" class="fill soft"/><path d="M7.8 7.8l4.4 4.4M12.2 7.8l-4.4 4.4" class="inv"/></svg></button>
+        </div>
+      </header>
+
+      <div id="search-scope" hidden>
+        <span>搜尋：</span>
+        <button data-scope="folder" class="chip active"></button>
+        <button data-scope="deep" class="chip">包含子資料夾</button>
+        <span id="search-status"></span>
+      </div>
+
+      <section id="content" tabindex="0">
+        <div id="view"></div>
+        <div id="empty" hidden></div>
+        <div id="marquee" hidden></div>
+      </section>
+
+      <footer id="pathbar"></footer>
+      <footer id="statusbar">
+        <span id="status-text"></span>
+        <input id="zoom" type="range" min="48" max="160" step="8" title="圖像大小">
+      </footer>
+    </main>
+  </div>
+
+  <div id="ql" hidden>
+    <div id="ql-backdrop"></div>
+    <div id="ql-window" class="glass">
+      <div id="ql-bar">
+        <button class="light close" id="ql-close" title="關閉 (空白鍵)"><svg viewBox="0 0 12 12"><path d="M3.5 3.5l5 5M8.5 3.5l-5 5"/></svg></button>
+        <div id="ql-title"></div>
+        <button class="ql-open" id="ql-open">以預設 App 打開</button>
+      </div>
+      <div id="ql-body"></div>
+    </div>
+  </div>
+
+  <div id="menu" hidden></div>
+  <div id="toast" hidden></div>
+
+  <script src="icons.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
