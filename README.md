@@ -99,7 +99,7 @@ npm test         # Rust 單元測試
 - 在終端機中開啟（Windows Terminal，沒有安裝時用 PowerShell）
 - 目前資料夾即時篩選、含子資料夾的搜尋；可再依類型、大小、修改日期篩選；有安裝 Everything（含 es.exe）時可搜尋整台電腦
 - 框選、Shift／Ctrl 多選、打字跳選、資料夾變動自動更新
-- Windows 11 Mica 毛玻璃、深色模式、8 種強調色
+- 深色／淺色模式、8 種強調色；視窗完全不透明，啟動時不會閃白
 
 ## 快捷鍵
 

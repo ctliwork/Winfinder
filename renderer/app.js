@@ -2903,14 +2903,6 @@
       content.focus();
     } finally {
       window.__finderReady?.();
-      // Give the window a moment to draw its Mica backdrop, then let the
-      // sidebar fade from opaque to glass (early.js set 'booting').
-      setTimeout(() => {
-        const sb = $('#sidebar');
-        sb.classList.add('settle');
-        document.documentElement.classList.remove('booting');
-        setTimeout(() => sb.classList.remove('settle'), 500);
-      }, 600);
     }
     // Quietly look for a new version once the window is up.
     if (prefs.autoUpdate) setTimeout(() => checkUpdates(false), 4000);
