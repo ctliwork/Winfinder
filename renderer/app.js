@@ -1170,12 +1170,107 @@
     leave: () => setDropEl(null),
   };
 
+  function conflictDialog(op, clash, dest) {
+    return new Promise((resolve) => {
+      let answer = null;
+      const list = clash.slice(0, 5).map((p) => `<li>${esc(P.basename(p))}</li>`).join('') + (clash.length > 5 ? `<li>…還有 ${clash.length - 5} 個</li>` : '');
+      const w = openDialog(`
+        <div class="dlg-title">「${esc(displayName(dest))}」已有 ${clash.length} 個同名的項目</div>
+        <ul class="dlg-list">${list}</ul>
+        <div class="dlg-actions">
+          <button data-act="cancel">取消</button>
+          <button data-act="skip">略過這些項目</button>
+          <button data-act="keep">保留兩者</button>
+          <button class="primary" data-act="replace">取代</button>
+        </div>`, { cls: 'conflict', onClose: () => resolve(answer) });
+      $('[data-act="replace"]', w).focus();
+      w.onclick = (ev) => {
+        const a = ev.target.closest('[data-act]')?.dataset.act;
+        if (!a) return;
+        answer = a === 'cancel' ? null : a;
+        closeDialog();
+      };
+    });
+  }
+
+  // Shown for copies that take a moment; cancellable.
+  const progress = {
+    timer: null,
+    start(op) {
+      clearTimeout(this.timer);
+      $('#prog-title').textContent = op === 'move' ? '正在搬移…' : '正在拷貝…';
+      $('#prog-sub').textContent = '';
+      $('#progress .up-bar i').style.width = '0%';
+      this.timer = setTimeout(() => { $('#progress').hidden = false; }, 400);
+    },
+    update([done, total, name]) {
+      if (!total) return;
+      $('#progress .up-bar i').style.width = `${Math.min(100, (done / total) * 100)}%`;
+      $('#prog-sub').textContent = `${name ? `${name}　` : ''}${fmtSize(done)} / ${fmtSize(total)}`;
+    },
+    end() { clearTimeout(this.timer); $('#progress').hidden = true; },
+  };
+  api.onTransferProgress?.((p) => progress.update(p));
+  $('#prog-cancel').addEventListener('click', () => api.cancelTransfer?.());
+
+  // ---------- undo ----------
+  // Each entry puts one action back; `run` resolves to false if that only
+  // partly worked.
+  const undoStack = [];
+  function pushUndo(label, run) {
+    undoStack.push({ label, run });
+    if (undoStack.length > 50) undoStack.shift();
+  }
+  async function undo() {
+    const u = undoStack.pop();
+    if (!u) { toast('沒有可以復原的動作'); return; }
+    let ok = false;
+    try { ok = (await u.run()) !== false; } catch { ok = false; }
+    dirCache.clear();
+    await refresh(true);
+    toast(ok ? `已復原${u.label}` : `無法完全復原${u.label}`);
+  }
+  const trashUndo = (paths) => async () => (await api.trash(paths)).length === 0;
+
   async function transfer(op, paths, dest) {
-    const results = await api.transfer(op, paths, dest);
-    const failed = results.filter((r) => r.error);
+    // Name clashes: ask once, like Explorer (duplicates in the same folder never ask).
+    let conflict = 'keep';
+    const incoming = paths.filter((p) => norm(P.dirname(p)) !== norm(dest));
+    if (incoming.length) {
+      const there = await api.list(dest);
+      const names = new Set((there.ok ? there.entries : []).map((e) => e.name.toLowerCase()));
+      const clash = incoming.filter((p) => names.has(P.basename(p).toLowerCase()));
+      if (clash.length) {
+        conflict = await conflictDialog(op, clash, dest);
+        if (!conflict) return;
+      }
+    }
+    progress.start(op);
+    let results;
+    try { results = await api.transfer(op, paths, dest, conflict); } finally { progress.end(); }
+    const failed = results.filter((r) => r.error && r.error !== 'SKIPPED' && r.error !== 'CANCELLED');
     const done = results.filter((r) => !r.error);
-    if (failed.length) toast(`${failed.length} 個項目失敗：${errText(failed[0].error)}`);
-    else toast(`已${op === 'move' ? '搬移' : '拷貝'} ${done.length} 個項目到「${displayName(dest)}」`);
+    const skipped = results.filter((r) => r.error === 'SKIPPED').length;
+    const verb = op === 'move' ? '搬移' : '拷貝';
+    if (results.some((r) => r.error === 'CANCELLED')) toast(`已取消，完成 ${done.length} 個項目`);
+    else if (failed.length) toast(`${failed.length} 個項目失敗：${errText(failed[0].error)}`);
+    else if (!done.length && skipped) toast(`已略過 ${skipped} 個同名的項目`);
+    else toast(`已${verb} ${done.length} 個項目到「${displayName(dest)}」${skipped ? `，略過 ${skipped} 個` : ''}`);
+    // Replacing overwrote files, so there's nothing safe to undo then.
+    const moved = done.filter((r) => r.path !== r.src);
+    if (moved.length && conflict !== 'replace') {
+      pushUndo(verb, op === 'move'
+        ? async () => {
+          let ok = true;
+          for (const r of moved.reverse()) {
+            const [back] = await api.transfer('move', [r.path], P.dirname(r.src));
+            if (back?.error) { ok = false; continue; }
+            if (norm(P.basename(back.path)) !== norm(P.basename(r.src))) ok = (await api.rename(back.path, P.basename(r.src))).ok && ok;
+          }
+          return ok;
+        }
+        : async () => (await api.trash(moved.map((r) => r.path))).length === 0);
+    }
     await Promise.all([listDir(dest, true), ...paths.map((p) => listDir(P.dirname(p), true))]);
     if (norm(dest) === norm(state.cwd)) state.sel = new Set(done.map((r) => r.path));
     await refresh(false);
@@ -1186,6 +1281,7 @@
     if (state.search.results || state.cwd === HOME) return;
     const res = await api.mkdir(state.cwd);
     if (!res.ok) { toast(`無法新增資料夾：${errText(res.error)}`); return; }
+    pushUndo('新增資料夾', trashUndo([res.path]));
     await listDir(state.cwd, true);
     state.sel = new Set([res.path]); state.focus = res.path; state.anchor = res.path;
     if (inColumnsMode()) state.colActive = ancestors(state.cwd, state.colRoot).length - 1;
@@ -1198,6 +1294,7 @@
     if (state.search.results || state.cwd === HOME || !api.newFile) return;
     const res = await api.newFile(state.cwd);
     if (!res.ok) { toast(`無法新增檔案：${errText(res.error)}`); return; }
+    pushUndo('新增文字文件', trashUndo([res.path]));
     await listDir(state.cwd, true);
     state.sel = new Set([res.path]); state.focus = res.path; state.anchor = res.path;
     if (inColumnsMode()) state.colActive = ancestors(state.cwd, state.colRoot).length - 1;
@@ -1228,6 +1325,7 @@
     toast('正在壓縮…');
     const res = await api.compress(items.map((e) => e.path));
     if (!res.ok) { toast(`無法壓縮：${errText(res.error)}`); return; }
+    pushUndo('壓縮', trashUndo([res.path]));
     await afterCreate(res.path, `已建立「${P.basename(res.path)}」`);
   }
 
@@ -1235,6 +1333,7 @@
     toast('正在解壓縮…');
     const res = await api.extract(e.path);
     if (!res.ok) { toast(`無法解壓縮：${errText(res.error)}`); return; }
+    pushUndo('解壓縮', trashUndo([res.path]));
     await afterCreate(res.path, `已解壓縮到「${P.basename(res.path)}」`);
   }
 
@@ -1257,6 +1356,8 @@
       items.length === 1 ? `要將「${items[0].name}」丟到資源回收筒嗎？` : `要將 ${items.length} 個項目丟到資源回收筒嗎？`, '丟到資源回收筒'))) return;
     const failed = await api.trash(items.map((e) => e.path));
     const ok = items.length - failed.length;
+    const gone = items.map((e) => e.path).filter((p) => !failed.includes(p));
+    if (gone.length && api.restoreTrash) pushUndo('丟到資源回收筒', async () => (await api.restoreTrash(gone)).length === 0);
     if (ok) toast(`已將 ${ok} 個項目丟到資源回收筒`);
     if (failed.length) toast(`有 ${failed.length} 個項目無法刪除`);
     if (inColumnsMode() && state.colActive < ancestors(state.cwd, state.colRoot).length - 1) {
@@ -1271,15 +1372,25 @@
     const items = selectedEntries().filter((e) => op === 'copy' || !isVirtual(e));
     if (!items.length) return;
     G.clip = { op, paths: items.map((e) => e.path) };
+    api.clipboardWrite?.(G.clip.paths, op === 'move'); // shared with Explorer and the desktop
     toast(op === 'move' ? `已剪下 ${items.length} 個項目` : `已拷貝 ${items.length} 個項目`);
     if (op === 'move') render();
   }
 
+  // Files on the clipboard: on Windows the system clipboard (so files copied
+  // in Explorer paste here and the other way round), elsewhere our own.
+  async function clipboardFiles() {
+    if (!api.clipboardRead) return G.clip;
+    const c = await api.clipboardRead();
+    return c?.paths?.length ? { op: c.cut ? 'move' : 'copy', paths: c.paths } : null;
+  }
+
   async function paste() {
-    if (!G.clip || state.search.results || state.cwd === HOME) return;
-    const { op, paths } = G.clip;
-    if (op === 'move') G.clip = null;
-    await transfer(op, paths, state.cwd);
+    if (state.search.results || state.cwd === HOME) return;
+    const clip = await clipboardFiles();
+    if (!clip) return;
+    if (clip.op === 'move') { G.clip = null; api.clipboardClear?.(); }
+    await transfer(clip.op, clip.paths, state.cwd);
   }
 
   async function duplicateSelected() {
@@ -1335,6 +1446,7 @@
         const res = await api.rename(e.path, name);
         if (!res.ok) toast(`無法重新命名：${errText(res.error)}`);
         else {
+          pushUndo('重新命名', async () => (await api.rename(res.path, e.name)).ok);
           await listDir(P.dirname(e.path), true);
           if (inColumnsMode() && e.isDir && isUnder(state.cwd, e.path)) { await navigate(res.path, { push: false, colActive: state.colActive }); return; }
           state.sel = new Set([res.path]); state.focus = res.path; state.anchor = res.path;
@@ -1424,10 +1536,44 @@
       { label: isWin ? '在檔案總管中顯示' : '在系統檔案管理員中顯示', action: () => api.reveal(entries[0].path) },
       '-',
       { label: '丟到資源回收筒', kbd: 'Delete', disabled: virt, action: trashSelected },
+      ...(api.nativeMenu ? ['-',
+        { label: '內容', kbd: 'Alt+Enter', disabled: virt, action: () => showProperties(entries.map((e) => e.path)) },
+        { label: '顯示更多選項', kbd: 'Shift+F10', disabled: virt, action: () => nativeMenu(entries) }] : []),
     ], x, y);
   }
 
-  function backgroundMenu(x, y) {
+  // Explorer's own context menu (7-Zip, VS Code, Git, OneDrive… entries).
+  async function nativeMenu(entries, { background = false, shift = false } = {}) {
+    if (!api.nativeMenu) return;
+    let paths = [state.cwd];
+    if (!background) {
+      const items = entries.filter((e) => !isVirtual(e));
+      if (!items.length) return;
+      // The shell builds one menu per folder.
+      const dir = norm(P.dirname(items[0].path));
+      paths = items.filter((e) => norm(P.dirname(e.path)) === dir).map((e) => e.path);
+    } else if (state.cwd === HOME || state.search.results) return;
+    closeMenu();
+    let verb = '';
+    try { verb = await api.nativeMenu(paths, background, shift); } catch (err) { toast(`無法顯示選單：${err}`); return; }
+    if (verb === 'rename') {
+      const items = entries.filter((e) => paths.includes(e.path));
+      if (items.length === 1) startRename(items[0]); else batchRename(items);
+      return;
+    }
+    // Copy/Cut in that menu fill the shared clipboard; other commands may
+    // change files, which the folder watcher picks up.
+    setTimeout(() => refresh(true), 500);
+  }
+
+  async function showProperties(paths) {
+    if (!api.properties || !paths.length) return;
+    const dir = norm(P.dirname(paths[0]));
+    try { await api.properties(paths.filter((p) => norm(P.dirname(p)) === dir)); } catch (err) { toast(`無法顯示內容：${err}`); }
+  }
+
+  async function backgroundMenu(x, y) {
+    const clip = state.cwd === HOME ? null : await clipboardFiles();
     if (state.cwd === HOME) {
       openMenu([
         { label: '新分頁', kbd: 'Ctrl+T', action: () => openTab(newTabDir()) },
@@ -1438,7 +1584,8 @@
     openMenu([
       { label: '新增資料夾', kbd: 'Ctrl+Shift+N', disabled: !!state.search.results, action: newFolder },
       ...(api.newFile ? [{ label: '新增文字文件', kbd: 'Ctrl+Alt+N', disabled: !!state.search.results, action: newFile }] : []),
-      { label: G.clip ? `貼上 ${G.clip.paths.length} 個項目` : '貼上', kbd: 'Ctrl+V', disabled: !G.clip || !!state.search.results, action: paste },
+      { label: clip ? `貼上 ${clip.paths.length} 個項目` : '貼上', kbd: 'Ctrl+V', disabled: !clip || !!state.search.results, action: paste },
+      ...(undoStack.length ? [{ label: `復原${undoStack[undoStack.length - 1].label}`, kbd: 'Ctrl+Z', action: undo }] : []),
       '-',
       ...viewItems(),
       '-',
@@ -1447,16 +1594,24 @@
       { label: '顯示隱藏的項目', kbd: 'Ctrl+Shift+.', check: prefs.showHidden, action: toggleHidden },
       ...(api.openTerminal ? [{ label: '在終端機中開啟', action: () => openTerminal(state.cwd) }] : []),
       { label: isWin ? '在檔案總管中打開' : '在系統檔案管理員中打開', action: () => api.open(state.cwd) },
+      ...(api.nativeMenu ? ['-',
+        { label: '內容', kbd: 'Alt+Enter', disabled: !!state.search.results, action: () => showProperties([state.cwd]) },
+        { label: '顯示更多選項', kbd: 'Shift+F10', disabled: !!state.search.results, action: () => nativeMenu([], { background: true }) }] : []),
     ], x, y);
   }
 
   content.addEventListener('contextmenu', async (ev) => {
     ev.preventDefault();
     const it = itemFromEl(ev.target);
+    // Shift+right-click goes straight to Explorer's menu, with its extended items.
+    const native = ev.shiftKey && api.nativeMenu;
     if (it?.entry) {
       if (it.col != null) await columnClick(it.entry, it.col);
       else if (!state.sel.has(it.entry.path)) { state.anchor = it.entry.path; setSelection([it.entry.path]); }
-      itemMenu(it.col != null ? [it.entry] : selectedEntries(), ev.clientX, ev.clientY);
+      const entries = it.col != null ? [it.entry] : selectedEntries();
+      if (native) nativeMenu(entries, { shift: true }); else itemMenu(entries, ev.clientX, ev.clientY);
+    } else if (native) {
+      nativeMenu([], { background: true, shift: true });
     } else {
       backgroundMenu(ev.clientX, ev.clientY);
     }
@@ -1820,6 +1975,19 @@
     if (ctrl && k.toLowerCase() === 'c') { copySelected('copy'); return; }
     if (ctrl && k.toLowerCase() === 'x') { copySelected('move'); return; }
     if (ctrl && k.toLowerCase() === 'v') { paste(); return; }
+    if (ctrl && !ev.shiftKey && k.toLowerCase() === 'z') { ev.preventDefault(); undo(); return; }
+    if (ev.altKey && k === 'Enter') {
+      ev.preventDefault();
+      const s = selectedEntries().filter((e) => !isVirtual(e));
+      showProperties(s.length ? s.map((e) => e.path) : state.cwd !== HOME ? [state.cwd] : []);
+      return;
+    }
+    if (ev.shiftKey && k === 'F10') {
+      ev.preventDefault();
+      const s = selectedEntries();
+      if (s.length) nativeMenu(s); else nativeMenu([], { background: true });
+      return;
+    }
     if (ctrl && k.toLowerCase() === 'd') { ev.preventDefault(); duplicateSelected(); return; }
     if (ctrl && (k === '=' || k === '+')) { ev.preventDefault(); setIconSize(prefs.icon + 8); return; }
     if (ctrl && k === '-') { ev.preventDefault(); setIconSize(prefs.icon - 8); return; }
@@ -2181,11 +2349,18 @@
       if (a !== 'ok') return;
       const next = names();
       closeDialog();
-      const done = []; let failed = 0;
+      const done = []; const renamed = []; let failed = 0;
       for (const [i, e] of items.entries()) {
         if (next[i] === e.name) { done.push(e.path); continue; }
         const res = await api.rename(e.path, next[i]);
-        if (res.ok) done.push(res.path); else failed++;
+        if (res.ok) { done.push(res.path); renamed.push([res.path, e.name]); } else failed++;
+      }
+      if (renamed.length) {
+        pushUndo('批次重新命名', async () => {
+          let ok = true;
+          for (const [p, old] of renamed.reverse()) ok = (await api.rename(p, old)).ok && ok;
+          return ok;
+        });
       }
       await Promise.all([...new Set(items.map((e) => P.dirname(e.path)))].map((d) => listDir(d, true)));
       state.sel = new Set(done);

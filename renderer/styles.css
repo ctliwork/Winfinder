@@ -608,7 +608,7 @@ body.view-icons #zoom { display: block; }
 }
 
 /* ---------- update prompt ---------- */
-#update {
+#update, #progress {
   position: fixed; right: 18px; bottom: 64px; z-index: 110; width: 360px;
   display: flex; gap: 12px; align-items: flex-start; padding: 14px 14px 12px;
   border-radius: 14px; background: var(--glass-strong); box-shadow: var(--shadow-lg);
@@ -723,3 +723,9 @@ body.density-roomy .lrow { height: 34px; }
 .sw input:checked + i { background: var(--accent); }
 .sw input:checked + i::after { transform: translateX(16px); }
 .pv-calc { padding: 1px 10px; border-radius: 6px; background: var(--capsule); box-shadow: var(--shadow-sm); font-size: 11.5px; }
+
+#progress { bottom: 64px; }
+#progress .up-actions { align-self: center; }
+#progress .up-actions button { padding: 4px 12px; border-radius: 8px; background: var(--capsule); box-shadow: var(--shadow-sm); font-size: 12px; }
+.dlg-list { margin: 0 0 4px; padding-left: 20px; font-size: 12.5px; color: var(--text2); max-height: 140px; overflow: auto; }
+#dlg-window.conflict { width: min(480px, 92vw); }
