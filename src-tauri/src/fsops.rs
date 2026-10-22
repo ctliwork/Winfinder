@@ -248,11 +248,20 @@ pub struct DirSize {
     pub dirs: u64,
 }
 
+/// Bumped to stop the background sizes the list view asked for (see dir_size).
+pub static SIZE_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 /// Total size of everything under `dir` (links are not followed; unreadable
-/// entries are skipped).
-pub fn dir_size(dir: &str) -> DirSize {
+/// entries are skipped). A `background` request returns None once SIZE_GEN
+/// moves on (the user left the folder).
+pub fn dir_size(dir: &str, background: bool) -> Option<DirSize> {
+    use std::sync::atomic::Ordering;
+    let gen = SIZE_GEN.load(Ordering::SeqCst);
     let mut out = DirSize::default();
-    for e in jwalk::WalkDir::new(dir).skip_hidden(false).follow_links(false).into_iter().skip(1).flatten() {
+    for (i, e) in jwalk::WalkDir::new(dir).skip_hidden(false).follow_links(false).into_iter().skip(1).flatten().enumerate() {
+        if background && i % 256 == 0 && SIZE_GEN.load(Ordering::SeqCst) != gen {
+            return None;
+        }
         if e.file_type().is_dir() {
             out.dirs += 1;
         } else if let Ok(m) = e.metadata() {
@@ -260,7 +269,7 @@ pub fn dir_size(dir: &str) -> DirSize {
             out.size += m.len();
         }
     }
-    out
+    Some(out)
 }
 
 /// How a transfer treats a name that already exists in the destination.
@@ -314,7 +323,7 @@ pub fn total_size(paths: &[String]) -> u64 {
     paths
         .iter()
         .map(|p| match fs::symlink_metadata(p) {
-            Ok(m) if m.is_dir() => dir_size(p).size,
+            Ok(m) if m.is_dir() => dir_size(p, false).map_or(0, |d| d.size),
             Ok(m) => m.len(),
             Err(_) => 0,
         })
@@ -589,7 +598,7 @@ mod tests {
         assert!(a.ends_with("新文字文件.txt") && b.ends_with("新文字文件 2.txt"));
         fs::create_dir(d.join("sub")).unwrap();
         fs::write(d.join("sub").join("x.bin"), [0u8; 1000]).unwrap();
-        let s = dir_size(d.to_str().unwrap());
+        let s = dir_size(d.to_str().unwrap(), false).unwrap();
         assert_eq!((s.size, s.files, s.dirs), (1000, 3, 1));
     }
 

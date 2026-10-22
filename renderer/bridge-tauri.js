@@ -82,7 +82,8 @@
     rename: (path, newName) => invoke('rename', { path, newName }).then(ok('path'), fail),
     mkdir: (dir) => invoke('mkdir', { dir }).then(ok('path'), fail),
     newFile: (dir) => invoke('new_file', { dir }).then(ok('path'), fail),
-    dirSize: (path) => invoke('dir_size', { path }).catch(() => null),
+    dirSize: (path, background = false) => invoke('dir_size', { path, background }).catch(() => null),
+    cancelDirSizes: () => invoke('cancel_dir_sizes').catch(() => {}),
     compress: (paths) => invoke('compress', { paths }).then(ok('path'), fail),
     extract: (path) => invoke('extract', { path }).then(ok('path'), fail),
     ...(isWin ? {
@@ -104,7 +105,7 @@
     checkUpdate: () => invoke('check_update'),
     installUpdate: () => invoke('install_update'),
     onUpdateProgress: (cb) => T.event.listen('update-progress', (e) => cb(e.payload)),
-    search: (root, query, showHidden) => invoke('search', { root, query, showHidden }),
+    search: (root, query, showHidden, filter) => invoke('search', { root, query, showHidden, filter }),
     everythingAvailable: () => invoke('everything_available').catch(() => false),
     everything: (query) => invoke('everything', { query }).catch(() => null),
     watch: (dirs) => { invoke('watch', { dirs }).catch(() => {}); },

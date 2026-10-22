@@ -22,10 +22,13 @@
     view: 'columns', icon: 72, sidebarW: 220, showHidden: false,
     sort: { key: 'name', dir: 1 }, accent: '#0a84ff', favorites: [], sidebarHidden: false,
     // Settings page
-    startup: 'home', startDir: '', newTab: 'home', theme: 'system', density: 'normal',
+    startup: 'restore', startDir: '', newTab: 'home', theme: 'system', density: 'normal',
     showExt: true, foldersFirst: true, sizeBase: 1000, confirmTrash: false, autoUpdate: true, colPreview: true,
-    rememberView: true, folderViews: {}, menuStyle: 'windows',
+    rememberView: true, folderViews: {}, menuStyle: 'windows', calcSizes: false, smart: [],
   }, readPrefs());
+  // Like Finder, reopen the last tabs. Earlier versions saved 'home' as the
+  // default, so move that over once.
+  if (!prefs.sessionV) { if (prefs.startup === 'home') prefs.startup = 'restore'; prefs.sessionV = 1; }
   function readPrefs() { try { return JSON.parse(localStorage.getItem(PREF_KEY)) || {}; } catch { return {}; } }
   function savePrefs() { try { localStorage.setItem(PREF_KEY, JSON.stringify(prefs)); } catch { /* storage unavailable */ } }
 
@@ -363,6 +366,7 @@
   function listHeaderMenu(x, y) {
     const groups = [['none', '無'], ['kind', '類型'], ['date', '修改日期'], ['size', '大小']];
     openMenu([
+      ...(api.dirSize ? [{ label: '計算所有大小', check: !!prefs.calcSizes, action: toggleCalcSizes }, '-'] : []),
       { html: '<div class="mlabel">顯示的欄位</div>' },
       ...Object.entries(LIST_COLS).map(([k, c]) => ({ label: c.label, check: listCols().includes(k), action: () => toggleListCol(k) })),
       '-',
@@ -371,6 +375,51 @@
       '-',
       { label: '還原欄寬', action: () => { prefs.listW = {}; savePrefs(); render(); } },
     ], x, y);
+  }
+
+  // Finder's 計算所有大小: the list view fills in folder sizes in the
+  // background, two at a time, and stops when the folder is left.
+  const sizeJob = { key: null, running: false };
+  function sizeFresh(e) { const c = dirSizes.get(norm(e.path)); return c && c.mtime === e.mtime; }
+  function queueFolderSizes() {
+    const key = viewMode() === 'list' && prefs.calcSizes && api.dirSize && state.cwd !== HOME
+      ? `${state.id}|${state.cwd}|${state.search.results ? state.search.query : ''}` : null;
+    if (key === sizeJob.key && sizeJob.running) return;
+    if (sizeJob.running) api.cancelDirSizes?.();
+    sizeJob.key = key;
+    sizeJob.running = false;
+    if (!key) return;
+    const todo = state.entries.filter((e) => e.isDir && !isVirtual(e) && !sizeFresh(e));
+    if (!todo.length) return;
+    sizeJob.running = true;
+    let next = 0;
+    let busy = 2;
+    const worker = async () => {
+      while (sizeJob.key === key && next < todo.length) {
+        const e = todo[next++];
+        const r = await api.dirSize(e.path, true);
+        if (sizeJob.key !== key) return;
+        if (r) { dirSizes.set(norm(e.path), { ...r, mtime: e.mtime }); paintSize(e); }
+      }
+      if (--busy === 0 && sizeJob.key === key) sizeJob.running = false;
+    };
+    worker(); worker();
+  }
+  // Fills one row's size cell; a list sorted by size re-sorts once things settle.
+  function paintSize(e) {
+    const i = listCols().indexOf('size');
+    const row = i >= 0 && elForPath(e.path);
+    if (row?.classList.contains('lrow')) row.children[i + 1].innerHTML = LIST_COLS.size.cell(e);
+    if (curSort().key === 'size') {
+      clearTimeout(paintSize.t);
+      paintSize.t = setTimeout(() => { if (viewMode() === 'list') { computeEntries(); renderView(false); } }, 400);
+    }
+    if (state.focus === e.path) updatePane();
+  }
+  function toggleCalcSizes() {
+    prefs.calcSizes = !prefs.calcSizes;
+    savePrefs();
+    queueFolderSizes();
   }
 
   function entryOf(p) {
@@ -559,7 +608,7 @@
     if (!G.places) return;
     const nav = $('#places');
     const scroll = nav.scrollTop;
-    const active = norm(state.cwd || '');
+    const active = state.search.smart ? '' : norm(state.cwd || '');
     const chev = '<svg viewBox="0 0 10 10"><path d="M3.5 2l3 3-3 3"/></svg>';
     const pin = '<svg class="pin" viewBox="0 0 12 12"><path d="M7.6 1.5l2.9 2.9-1.4.5-1.9 1.9.2 2.4-.9.9-2-2-2.6 2.6M3.3 4.4l.9-.9 2.4.2 1.9-1.9z"/></svg>';
     const missing = [];
@@ -576,6 +625,8 @@
     };
     const cloud = (G.places.cloud || []).map((c) => row(c.path, c.label, 'cloud', 0)).join('');
     const pinned = pinnedPlaces().map((f) => row(f.path, f.label, f.icon, 0, `data-pinned="1"${f.custom ? ' data-custom="1"' : ''}`, pin)).join('');
+    const smart = (prefs.smart || []).map((sf) => `<div class="place${state.search.smart === sf.id ? ' active' : ''}" data-smart="${esc(sf.id)}" style="--lvl:0" title="${esc(smartDesc(sf))}">
+        <span class="twisty none"></span>${I.sidebar('smart')}<span>${esc(sf.name)}</span></div>`).join('');
     const pcOpen = !prefs.pcCollapsed;
     const drives = pcOpen ? G.places.locations.map((l) => row(l.path, l.label, 'drive', 1)).join('') : '';
     nav.innerHTML = `
@@ -583,6 +634,7 @@
         <span class="twisty none"></span>${folderIco(HOME, 16)}<span>常用</span></div>
       ${cloud}
       ${pinned ? `<div class="nav-sep"></div>${pinned}` : ''}
+      ${smart ? `<div class="nav-sep"></div>${smart}` : ''}
       <div class="nav-sep"></div>
       <div class="place" data-path="${PC}"><span class="twisty${pcOpen ? ' open' : ''}" data-twisty="${PC}">${chev}</span>${shellIco(SHELL_PC, 16, I.sidebar('pc'))}<span>本機</span></div>
       ${drives}`;
@@ -729,6 +781,7 @@
 
   async function renderView(animate) {
     const mode = viewMode();
+    queueFolderSizes();
     if (mode !== 'columns') { view.className = ''; view.style.minWidth = ''; cancelAnimationFrame(glide); }
     $('#empty').hidden = true;
     const cut = new Set(G.clip?.op === 'move' ? G.clip.paths : []);
@@ -1074,6 +1127,7 @@
 
   // ---------- tabs ----------
   function tabTitle(t) {
+    if (t.search.smart) return smartById(t.search.smart)?.name || '智慧型資料夾';
     if (t.search.results) return `搜尋「${t.search.query}」`;
     if (t.cwd === HOME || !t.cwd) return '常用';
     return displayName(t.cwd);
@@ -1085,8 +1139,9 @@
   function renderTabs() {
     $('#tabs').innerHTML = tabs.map((t) => `
       <div class="tab${t === state ? ' active' : ''}${shownTabs.has(t.id) ? '' : ' new'}" data-tab="${t.id}" title="${esc(t.cwd === HOME ? '常用' : t.cwd || '')}">
-        ${!t.cwd ? I.sidebar('home') : folderIco(t.cwd, 16)}<span>${esc(tabTitle(t))}</span>
+        ${t.search.smart ? I.sidebar('smart') : !t.cwd ? I.sidebar('home') : folderIco(t.cwd, 16)}<span>${esc(tabTitle(t))}</span>
       </div>`).join('');
+    saveSession();
     shownTabs.clear();
     tabs.forEach((t) => shownTabs.add(t.id));
     fillShellIcons($('#tabs'));
@@ -1104,11 +1159,42 @@
     await render();
     content.scrollTop = t.scroll;
     watchCurrent();
+    if (t.search.smart && !t.search.results && t.search.scope !== 'folder') runDeepSearch(); // restored or opened in the background
+  }
+
+  // Reopens the last session's tabs (Settings > 啟動時打開).
+  function saveSession() {
+    if (G.booting) return;
+    prefs.session = {
+      active: tabs.indexOf(state),
+      tabs: tabs.map((t) => (t.search.smart ? { dir: t.cwd || HOME, smart: t.search.smart } : { dir: t.cwd || HOME })),
+    };
+    savePrefs();
+  }
+  async function restoreSession() {
+    const saved = prefs.session?.tabs || [];
+    const restored = [];
+    let active = null;
+    for (const [i, s] of saved.entries()) {
+      state = newTabState();
+      const sf = s.smart && smartById(s.smart);
+      const ok = sf ? await openSmart(sf, { silent: true }) : await navigate(s.dir, { root: s.dir, silent: true });
+      if (!ok) continue; // folder gone or unreachable
+      restored.push(state);
+      if (i === prefs.session.active) active = state;
+    }
+    if (!restored.length) return false;
+    tabs.splice(0, tabs.length, ...restored);
+    const show = active || restored[0];
+    state = { ...show, id: -1 };
+    await switchTab(show);
+    return true;
   }
 
   let lastBg = null; // keeps background tabs in the order they were opened, like browsers
-  async function openTab(dir = HOME, { activate = true } = {}) {
+  async function openTab(dir = HOME, { activate = true, smart = null } = {}) {
     const t = newTabState();
+    const go = (silent) => (smart ? openSmart(smart, { silent }) : navigate(dir, { root: dir, silent }));
     let at = tabs.indexOf(state) + 1;
     if (!activate && lastBg?.opener === state && tabs.includes(lastBg.tab)) at = tabs.indexOf(lastBg.tab) + 1;
     tabs.splice(at, 0, t);
@@ -1117,12 +1203,12 @@
       state.scroll = content.scrollTop;
       state = t;
       syncSearchUi();
-      if (!(await navigate(dir, { root: dir }))) await navigate(HOME);
+      if (!(await go(false))) await navigate(HOME);
     } else {
       // Background tab: load it without touching the visible one.
       const cur = state;
       state = t;
-      const ok = await navigate(dir, { root: dir, silent: true });
+      const ok = await go(true);
       if (!ok) await navigate(HOME, { silent: true });
       state = cur;
       renderTabs();
@@ -1163,7 +1249,11 @@
 
   function renderPathbar() {
     const bar = $('#pathbar');
-    if (state.search.results) { bar.innerHTML = `<span class="crumb">${I.sidebar('recent')}<span>搜尋結果：${state.entries.length} 個項目</span></span>`; return; }
+    if (state.search.results || state.search.smart) {
+      const label = state.search.smart ? tabTitle(state) : '搜尋結果';
+      bar.innerHTML = `<span class="crumb">${I.sidebar(state.search.smart ? 'smart' : 'recent')}<span>${esc(label)}：${state.entries.length} 個項目</span></span>`;
+      return;
+    }
     if (state.cwd === HOME) { bar.innerHTML = `<span class="crumb">${folderIco(HOME, 16)}<span>常用</span></span>`; return; }
     const chain = ancestors(state.cwd, P.root(state.cwd));
     const sep = '<svg class="crumb-sep" viewBox="0 0 10 10"><path d="M3.5 2l3 3-3 3"/></svg>';
@@ -1478,7 +1568,7 @@
   function dropTargetFor(target) {
     if (!target?.closest) return null;
     const place = target.closest('.place, .crumb');
-    if (place) return { dir: place.dataset.path, el: place };
+    if (place) return place.dataset.path ? { dir: place.dataset.path, el: place } : null;
     // A tab takes files into the folder it shows.
     const tabEl = target.closest('.tab');
     if (tabEl) {
@@ -1726,7 +1816,7 @@
     toast(`正在計算「${e.name}」的大小…`);
     const r = await api.dirSize(e.path);
     if (!r) { toast('無法計算大小'); return null; }
-    dirSizes.set(norm(e.path), r);
+    dirSizes.set(norm(e.path), { ...r, mtime: e.mtime });
     toast(`「${e.name}」：${fmtSize(r.size)}，${r.files.toLocaleString()} 個檔案、${r.dirs.toLocaleString()} 個資料夾`);
     if (viewMode() === 'list') renderView(false);
     updatePane();
@@ -2087,6 +2177,7 @@
       { label: '顯示隱藏的項目', kbd: 'Ctrl+Shift+.', check: prefs.showHidden, action: toggleHidden },
       { label: prefs.sidebarHidden ? '顯示側邊欄' : '隱藏側邊欄', kbd: 'Ctrl+Alt+S', action: toggleSidebar },
       { label: inColumnsMode() ? '顯示預覽欄' : '預覽窗格', kbd: 'Alt+P', check: inColumnsMode() ? !!prefs.colPreview : !!prefs.previewPane, action: togglePane },
+      ...(viewMode() === 'list' && api.dirSize ? [{ label: '計算所有大小', check: !!prefs.calcSizes, action: toggleCalcSizes }] : []),
       { label: '重新整理', kbd: 'F5', action: () => refresh(true) },
       '-',
       { label: '設定…', kbd: 'Ctrl+,', action: () => openSettings() },
@@ -2105,17 +2196,19 @@
       return;
     }
     const p = ev.target.closest('.place');
+    if (p?.dataset.smart) { const sf = smartById(p.dataset.smart); if (sf) openSmart(sf); return; }
     if (p?.dataset.path === PC) { toggleTree(PC); return; }
     if (p) navigate(p.dataset.path, { root: p.dataset.path });
   });
   $('#places').addEventListener('dblclick', (ev) => {
     const p = ev.target.closest('.place');
-    if (p && p.dataset.path !== HOME && p.dataset.path !== PC && !ev.target.closest('[data-twisty]')) toggleTree(p.dataset.path);
+    if (p?.dataset.path && p.dataset.path !== HOME && p.dataset.path !== PC && !ev.target.closest('[data-twisty]')) toggleTree(p.dataset.path);
   });
   $('#places').addEventListener('contextmenu', (ev) => {
     ev.preventDefault();
     const p = ev.target.closest('.place');
     if (!p) return;
+    if (p.dataset.smart) { smartMenu(smartById(p.dataset.smart), ev.clientX, ev.clientY); return; }
     const path = p.dataset.path;
     if (path === PC) return;
     if (path === HOME) {
@@ -2142,6 +2235,7 @@
     const tab = ev.target.closest('.tab');
     if (tab) { closeTab(tabs.find((t) => t.id === Number(tab.dataset.tab))); return; }
     const place = ev.target.closest('.place, .crumb');
+    if (place?.dataset.smart) { const sf = smartById(place.dataset.smart); if (sf) openTab(sf.root, { activate: false, smart: sf }); return; }
     if (place?.dataset.path) { openTab(place.dataset.path, { activate: false }); return; }
     const it = itemFromEl(ev.target);
     if (it?.entry?.isDir) openTab(it.entry.path, { activate: false });
@@ -2185,7 +2279,7 @@
     const t = tabs.find((x) => x.id === Number(el.dataset.tab));
     openMenu([
       { label: '新分頁', kbd: 'Ctrl+T', action: () => openTab(newTabDir()) },
-      { label: '複製分頁', action: () => openTab(t.cwd || HOME) },
+      { label: '複製分頁', action: () => openTab(t.cwd || HOME, { smart: smartById(t.search.smart) }) },
       '-',
       { label: '關閉分頁', kbd: '滑鼠中鍵', action: () => closeTab(t) },
       { label: '關閉其他分頁', disabled: tabs.length < 2, action: async () => { tabs.splice(0, tabs.length, t); await switchTab(t); renderTabs(); } },
@@ -2317,12 +2411,15 @@
     else if (ev.key === 'ArrowDown') { content.focus(); moveSelection('down', ev); ev.preventDefault(); }
   });
   $('#search-clear').addEventListener('click', () => clearSearch(true));
+  $('#search-save').addEventListener('click', saveSmart);
   $('#search-scope').addEventListener('click', (ev) => { const b = ev.target.closest('[data-scope]'); if (b) setScope(b.dataset.scope); });
   $('#search-scope').addEventListener('change', (ev) => {
     const sel = ev.target.closest('.sf');
     if (!sel) return;
     state.search.filters = { ...state.search.filters, [sel.id.slice(3)]: sel.value };
     sel.classList.toggle('on', !!sel.value);
+    // Searches below this folder filter while walking (so the result limit counts only matches).
+    if (state.search.scope !== 'folder') { runDeepSearch(); return; }
     computeEntries();
     render();
   });
@@ -2336,15 +2433,40 @@
     else { state.search.results = null; $('#search-status').textContent = ''; computeEntries(); render(); }
   }
 
+  // The type / size / date filters in the form the search backends take.
+  const KIND_CATS = { image: ['image'], video: ['video'], audio: ['audio'], docs: ['pdf', 'doc', 'sheet', 'slide', 'text'], archive: ['archive'], code: ['code'] };
+  function kindExts(kind) {
+    if (kind === 'app') return ['exe', 'msi', 'lnk', 'bat', 'cmd', 'appref-ms'];
+    return (KIND_CATS[kind] || []).flatMap((c) => I.CATS[c].exts.split(' '));
+  }
+  const SIZE_RANGE = { lt100k: { smaller: 100e3 }, gt1m: { larger: 1e6 }, gt100m: { larger: 100e6 }, gt1g: { larger: 1e9 } };
+  function searchFilter(f) {
+    const out = {};
+    if (f.kind === 'dir') out.dirs = true;
+    else if (f.kind) out.exts = kindExts(f.kind);
+    if (f.size) Object.assign(out, SIZE_RANGE[f.size]);
+    if (f.date) out.after = Date.now() - Number(f.date) * DAY;
+    return out;
+  }
+  // Everything takes the same filters as search modifiers.
+  function everythingQuery(q, f) {
+    const parts = [q];
+    if (f.kind === 'dir') parts.push('folder:');
+    else if (f.kind) parts.push(`ext:${kindExts(f.kind).join(';')}`);
+    if (f.size) parts.push({ lt100k: 'size:<100kb', gt1m: 'size:>1mb', gt100m: 'size:>100mb', gt1g: 'size:>1gb' }[f.size]);
+    return parts.filter(Boolean).join(' ');
+  }
+
   async function runDeepSearch() {
     const q = state.search.query.trim();
-    if (!q) return;
+    if (!q && !filtersOn()) return;
     state.search.busy = true;
     $('#search-status').textContent = '搜尋中…';
     renderStatus();
     const tab = state;
     const pc = state.search.scope === 'pc';
-    const res = pc ? await api.everything(q) : await api.search(state.cwd === HOME ? G.places.home : state.cwd, q, prefs.showHidden);
+    const f = state.search.filters || {};
+    const res = pc ? await api.everything(everythingQuery(q, f)) : await api.search(state.cwd === HOME ? G.places.home : state.cwd, q, prefs.showHidden, searchFilter(f));
     if (tab !== state || state.search.query.trim() !== q) return;
     if (!res) {
       state.search.busy = false;
@@ -2358,6 +2480,68 @@
     state.sel.clear();
     computeEntries();
     render({ animate: true });
+  }
+
+  // ---------- smart folders (Finder's saved searches) ----------
+  function smartById(id) { return (id && (prefs.smart || []).find((x) => x.id === id)) || null; }
+  function smartDesc(sf) {
+    const f = sf.filters || {};
+    const opt = (id, v) => (v ? $(`#sf-${id} option[value="${v}"]`)?.textContent : null);
+    const where = sf.scope === 'pc' ? '整台電腦' : `${displayName(sf.root)}${sf.scope === 'deep' ? '（包含子資料夾）' : ''}`;
+    return [sf.query && `「${sf.query}」`, opt('kind', f.kind), opt('size', f.size), opt('date', f.date), `位置：${where}`].filter(Boolean).join('，');
+  }
+  async function openSmart(sf, { silent = false } = {}) {
+    if (!(await navigate(sf.root, { root: sf.root, silent: true }))) return false;
+    state.search = { query: sf.query, scope: sf.scope, results: null, busy: false, filters: { ...sf.filters }, smart: sf.id };
+    if (silent) return true;
+    syncSearchUi();
+    computeEntries();
+    await render({ animate: true });
+    watchCurrent();
+    if (sf.scope !== 'folder') runDeepSearch();
+    return true;
+  }
+  // 儲存 in the search bar: a new smart folder, or saves the criteria of the open one.
+  async function saveSmart() {
+    const crit = { root: state.cwd, query: state.search.query.trim(), scope: state.search.scope, filters: { ...state.search.filters } };
+    if (!crit.query && !filtersOn()) return;
+    const cur = smartById(state.search.smart);
+    if (cur) {
+      Object.assign(cur, crit);
+      savePrefs();
+      renderSidebar();
+      toast(`已更新「${cur.name}」`);
+      return;
+    }
+    const name = await promptDialog('儲存為智慧型資料夾', crit.query || '智慧型資料夾', '加入側邊欄');
+    if (!name) return;
+    const sf = { id: Date.now().toString(36), name, ...crit };
+    prefs.smart = [...(prefs.smart || []), sf];
+    savePrefs();
+    state.search.smart = sf.id;
+    render();
+    toast(`已將「${name}」加入側邊欄`);
+  }
+  function smartMenu(sf, x, y) {
+    if (!sf) return;
+    openMenu([
+      { label: '打開', action: () => openSmart(sf) },
+      { label: '在新分頁中打開', kbd: '滑鼠中鍵', action: () => openTab(sf.root, { activate: false, smart: sf }) },
+      '-',
+      { label: '重新命名…', action: async () => {
+        const name = await promptDialog('重新命名智慧型資料夾', sf.name, '重新命名');
+        if (!name) return;
+        sf.name = name;
+        savePrefs();
+        render();
+      } },
+      { label: '從側邊欄移除', action: () => {
+        prefs.smart = prefs.smart.filter((x) => x !== sf);
+        tabs.forEach((t) => { if (t.search.smart === sf.id) delete t.search.smart; });
+        savePrefs();
+        render();
+      } },
+    ], x, y);
   }
 
   function clearSearch(rerender, silent = false) {
@@ -2375,6 +2559,7 @@
     $('#search-box').classList.toggle('has-text', !!q);
     $('#search-scope').hidden = !q && !filtersOn();
     $('#search-status').textContent = '';
+    $('[data-scope="folder"]').textContent = `「${tabTitle({ ...state, search: { results: null } })}」`;
     for (const sel of $$('#search-scope .sf')) {
       sel.value = state.search.filters?.[sel.id.slice(3)] || '';
       sel.classList.toggle('on', !!sel.value);
@@ -2821,6 +3006,23 @@
     });
   }
 
+  function promptDialog(title, value, okLabel) {
+    return new Promise((resolve) => {
+      let answer = null;
+      const w = openDialog(`
+        <div class="dlg-title">${esc(title)}</div>
+        <input class="dlg-input" value="${esc(value)}" spellcheck="false">
+        <div class="dlg-actions"><button data-act="cancel">取消</button><button class="primary" data-act="ok">${esc(okLabel)}</button></div>`,
+      { cls: 'small', onClose: () => resolve(answer) });
+      const input = $('input', w);
+      input.focus();
+      input.select();
+      const ok = () => { answer = input.value.trim() || null; closeDialog(); };
+      w.onclick = (ev) => { const a = ev.target.closest('[data-act]')?.dataset.act; if (a === 'ok') ok(); else if (a) closeDialog(); };
+      w.onkeydown = (ev) => { if (ev.key === 'Enter') ok(); };
+    });
+  }
+
   // ---------- batch rename ----------
   function batchRename(entries) {
     const items = entries.filter((e) => !isVirtual(e));
@@ -2952,7 +3154,7 @@
     const swatches = `<div class="mrow">${ACCENTS.map(([c, n]) => `<button class="swatch${prefs.accent === c ? ' on' : ''}" style="background:${c};color:${c}" data-accent="${c}" title="${n}"></button>`).join('')}</div>`;
     return [
       { id: 'general', title: '一般', rows: [
-        ['啟動時打開', null, sel('startup', [['home', '常用'], ['last', '上次的位置'], ['custom', '指定的資料夾']])],
+        ['啟動時打開', null, sel('startup', [['restore', '上次的所有分頁'], ['home', '常用'], ['last', '上次的位置'], ['custom', '指定的資料夾']])],
         prefs.startup === 'custom' && ['指定的資料夾', null, `<div class="set-path"><input data-pref="startDir" value="${esc(prefs.startDir)}" placeholder="例如 D:\\Projects" spellcheck="false"><button data-act="use-cwd"${state.cwd === HOME ? ' disabled' : ''}>使用目前的資料夾</button></div>`],
         ['新分頁打開', null, sel('newTab', [['home', '常用'], ['current', '目前的資料夾']])],
         ['預設檢視', '沒有記住檢視方式的資料夾使用這個', sel('view', [['icons', '圖像'], ['list', '列表'], ['columns', '直欄'], ['gallery', '圖庫']])],
@@ -2975,6 +3177,7 @@
         ['顯示受保護的作業系統檔案', '例如「Application Data」「My Documents」這類無法打開的相容性捷徑（檔案總管預設也隱藏）', sw('showSystem')],
         ['顯示副檔名', null, sw('showExt')],
         ['資料夾排在檔案前面', null, sw('foldersFirst')],
+        api.dirSize && ['計算所有大小', '列表檢視在背景算出每個資料夾的大小（Finder 的「計算所有大小」）', sw('calcSizes')],
         ['檔案大小單位', null, sel('sizeBase', [[1000, '1 KB = 1000 位元組（macOS）'], [1024, '1 KB = 1024 位元組（Windows）']])],
         ['直欄寬度', '目前記住了 ' + Object.keys(prefs.colWidths || {}).length + ' 個資料夾的欄寬', '<button data-act="reset-cols">全部還原為預設寬度</button>'],
       ] },
@@ -3014,6 +3217,7 @@
     else if (key === 'density') applyDensity();
     else if (key === 'sidebarHidden') document.body.classList.toggle('sidebar-hidden', !!value);
     else if (key === 'previewPane') updatePane();
+    else if (key === 'calcSizes') queueFolderSizes();
     else if (['folderIcons', 'showHidden', 'showSystem', 'showExt', 'foldersFirst', 'sizeBase'].includes(key)) rerenderItems();
   }
   function openSettings(section) {
@@ -3092,9 +3296,13 @@
     $('#zoom').value = prefs.icon;
     try {
       G.places = await api.places();
-      // Like Explorer: open on Home unless a folder was passed in.
+      // A folder passed in wins; otherwise the startup setting.
+      G.booting = true;
+      const restored = !env.dir && prefs.startup === 'restore' && await restoreSession();
+      G.booting = false;
       const start = env.dir || startupDir();
-      if (!(await navigate(start, { root: start }))) await navigate(HOME);
+      if (!restored && !(await navigate(start, { root: start }))) await navigate(HOME);
+      saveSession();
       content.focus();
     } finally {
       window.__finderReady?.();

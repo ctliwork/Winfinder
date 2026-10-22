@@ -135,8 +135,13 @@ fn new_file(dir: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-async fn dir_size(path: String) -> Result<fsops::DirSize, String> {
-    blocking(move || fsops::dir_size(&path)).await
+async fn dir_size(path: String, background: Option<bool>) -> Result<Option<fsops::DirSize>, String> {
+    blocking(move || fsops::dir_size(&path, background.unwrap_or(false))).await
+}
+
+#[tauri::command]
+fn cancel_dir_sizes() {
+    fsops::SIZE_GEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 }
 
 #[tauri::command]
@@ -299,8 +304,8 @@ async fn everything(query: String) -> Option<search::SearchResult> {
 }
 
 #[tauri::command]
-async fn search(root: String, query: String, show_hidden: bool) -> Option<search::SearchResult> {
-    blocking(move || search::search(&root, &query, show_hidden)).await.ok().flatten()
+async fn search(root: String, query: String, show_hidden: bool, filter: Option<search::Filter>) -> Option<search::SearchResult> {
+    blocking(move || search::search(&root, &query, show_hidden, &filter.unwrap_or_default())).await.ok().flatten()
 }
 
 // ---------- updates ----------
@@ -509,7 +514,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            places, pin_home, list_dir, list_many, new_file, dir_size, compress, extract, open_terminal, native_menu, properties,
+            places, pin_home, list_dir, list_many, new_file, dir_size, cancel_dir_sizes, compress, extract, open_terminal, native_menu, properties,
             clipboard_write, clipboard_read, clipboard_clear, save_theme, cancel_transfer, restore_trash,
             everything_available, everything, disk_free, disk_space, recent_files, folder_count, thumbnail, open_path, reveal, trash, rename, mkdir,
             transfer, read_text, rich_preview, search, watch, check_update, install_update
