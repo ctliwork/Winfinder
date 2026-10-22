@@ -757,3 +757,19 @@ select option { background: var(--solid); color: var(--text); }
 /* Accent swatches in Settings stay round (not padded like buttons) */
 .set-ctl .swatch { padding: 0; width: 18px; height: 18px; border-radius: 50%; }
 .set-ctl .swatch:not(.on) { box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.25); }
+
+/* preview zoom */
+#pv-media, #ql-body { position: relative; }
+#pv-media > img, #pv-media > video, #ql-body > img, #ql-body > video { transition: transform 0.12s ease-out; transform-origin: center; }
+img.zoomed, video.zoomed { cursor: grab; }
+img.panning, video.panning { cursor: grabbing; transition: none; }
+.zbar {
+  position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 5;
+  display: flex; align-items: center; gap: 2px; padding: 3px; border-radius: 999px;
+  background: var(--glass-strong); backdrop-filter: blur(20px); box-shadow: var(--shadow-sm);
+  font-size: 11.5px; opacity: 0; transition: opacity 0.15s;
+}
+#pv-media:hover .zbar, #ql-body:hover .zbar, .zbar.changed { opacity: 1; }
+.zbar button { min-width: 24px; height: 22px; padding: 0 7px; border-radius: 999px; font-size: 12px; }
+.zbar button:hover { background: var(--hover); }
+.zbar span { min-width: 42px; text-align: center; color: var(--text2); font-variant-numeric: tabular-nums; }

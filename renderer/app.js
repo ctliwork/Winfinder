@@ -2265,6 +2265,12 @@
       return;
     }
     if (ctrl && k.toLowerCase() === 'd') { ev.preventDefault(); duplicateSelected(); return; }
+    // Quick Look zoom: Ctrl+= / Ctrl+- / Ctrl+0 (also plain + and -).
+    if (ql.isOpen && $('#ql-body')._zoom && ((ctrl && ['=', '+', '-', '0'].includes(k)) || (!ctrl && ['+', '-', '='].includes(k)))) {
+      ev.preventDefault();
+      $('#ql-body')._zoom.step(k === '0' ? 0 : k === '-' ? -1 : 1);
+      return;
+    }
     if (ctrl && (k === '=' || k === '+')) { ev.preventDefault(); setIconSize(prefs.icon + 8); return; }
     if (ctrl && k === '-') { ev.preventDefault(); setIconSize(prefs.icon - 8); return; }
     if (k === 'F5' || (ctrl && k.toLowerCase() === 'r')) { ev.preventDefault(); refresh(true); return; }
