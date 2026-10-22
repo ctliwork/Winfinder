@@ -425,7 +425,8 @@
     if (dir === HOME) {
       await loadHome();
     } else {
-      const res = await listDir(dir, true);
+      // During a drag, use what was read ahead (see startNativeDrag).
+      const res = await listDir(dir, !(G.dragActive && dirCache.has(dir)));
       if (res.error) {
         toast(`無法打開「${displayName(dir)}」：${errText(res.error)}`);
         return false;
@@ -1356,8 +1357,22 @@
     if (it.col == null && !state.sel.has(it.entry.path)) setSelection([it.entry.path]);
     const paths = it.col != null ? [it.entry.path] : selectedEntries().map((e) => e.path);
     G.dragging = paths;
-    api.startDrag(paths);
+    startNativeDrag(paths);
   });
+
+  // While Windows runs a drag the app gets no answers from its back end until
+  // the drop, so spring-loaded folders couldn't list what they open. Read the
+  // visible folders (and the level below) first, then drag from that cache.
+  async function startNativeDrag(paths) {
+    if (api.listMany) {
+      const shown = inColumnsMode() ? state.colLists.flat() : state.entries;
+      const dirs = [...new Set(shown.filter((e) => e.isDir && !isVirtual(e)).map((e) => e.path))].slice(0, 300);
+      const ahead = await Promise.race([api.listMany(dirs, 3), new Promise((r) => setTimeout(() => r([]), 400))]);
+      for (const [dir, entries] of ahead) dirCache.set(dir, { entries });
+    }
+    G.dragActive = true;
+    try { await api.startDrag(paths); } finally { G.dragActive = false; }
+  }
 
   function dropTargetFor(target) {
     if (!target?.closest) return null;

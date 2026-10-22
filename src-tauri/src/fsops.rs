@@ -128,6 +128,29 @@ pub fn list(dir: &str) -> Result<Vec<Entry>, String> {
         .collect())
 }
 
+/// Lists `dirs` and, level by level, the folders inside them, until `depth`
+/// levels, `max_dirs` folders or `budget` time is reached. Used to read ahead
+/// before a drag, when the app can't ask for listings until the drop.
+pub fn list_many(dirs: &[String], depth: usize, max_dirs: usize, budget: std::time::Duration) -> Vec<(String, Vec<Entry>)> {
+    let start = std::time::Instant::now();
+    let mut out: Vec<(String, Vec<Entry>)> = Vec::new();
+    let mut level: Vec<String> = dirs.to_vec();
+    for _ in 0..depth {
+        if level.is_empty() || out.len() >= max_dirs || start.elapsed() > budget {
+            break;
+        }
+        level.truncate(max_dirs - out.len());
+        let listed: Vec<(String, Vec<Entry>)> =
+            level.par_iter().filter_map(|d| list(d).ok().map(|v| (d.clone(), v))).collect();
+        level = listed
+            .iter()
+            .flat_map(|(_, v)| v.iter().filter(|e| e.is_dir && !e.link && !e.system).map(|e| e.path.clone()))
+            .collect();
+        out.extend(listed);
+    }
+    out
+}
+
 pub fn folder_count(dir: &str) -> Option<usize> {
     fs::read_dir(dir).ok().map(|r| r.count())
 }
@@ -503,6 +526,19 @@ mod tests {
         assert!(ad.link && ad.hidden && ad.system);
         let desktop = v.iter().find(|e| e.name == "Desktop").expect("Desktop");
         assert!(!desktop.system);
+    }
+
+    #[test]
+    fn reads_ahead_level_by_level() {
+        let d = tmp("ahead");
+        fs::create_dir_all(d.join("a/b/c")).unwrap();
+        fs::create_dir_all(d.join("x")).unwrap();
+        let root = d.to_string_lossy().into_owned();
+        let got = list_many(&[root.clone()], 2, 100, std::time::Duration::from_secs(5));
+        let names: Vec<_> = got.iter().map(|(p, _)| Path::new(p).file_name().unwrap().to_string_lossy().into_owned()).collect();
+        assert_eq!(got.len(), 3); // root, a, x
+        assert!(names.contains(&"a".to_string()) && names.contains(&"x".to_string()));
+        assert_eq!(list_many(&[root], 5, 2, std::time::Duration::from_secs(5)).len(), 2); // capped
     }
 
     #[test]
