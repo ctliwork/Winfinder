@@ -24,6 +24,7 @@
     // Settings page
     startup: 'home', startDir: '', newTab: 'home', theme: 'system', density: 'normal',
     showExt: true, foldersFirst: true, sizeBase: 1000, confirmTrash: false, autoUpdate: true,
+    rememberView: true, folderViews: {},
   }, readPrefs());
   function readPrefs() { try { return JSON.parse(localStorage.getItem(PREF_KEY)) || {}; } catch { return {}; } }
   function savePrefs() { try { localStorage.setItem(PREF_KEY, JSON.stringify(prefs)); } catch { /* storage unavailable */ } }
@@ -55,6 +56,7 @@
       colLists: [],
       search: { query: '', scope: 'folder', results: null, busy: false },
       scroll: 0,
+      view: null,           // this tab's view; null = the default (prefs.view)
     };
   }
   let state = newTabState();
@@ -161,14 +163,38 @@
     return value;
   }
 
+  // Per-folder view and sort, like Explorer and Finder: a folder keeps the
+  // view it was last shown in; others use the defaults.
+  function folderPref(dir = state.cwd) {
+    return prefs.rememberView && dir && dir !== HOME ? prefs.folderViews[norm(dir)] : null;
+  }
+  function curView() { return state.view || prefs.view; }
+  function curSort() { return (!state.search.results && folderPref()?.sort) || prefs.sort; }
+  function rememberFolder(patch) {
+    const k = norm(state.cwd);
+    const next = { ...prefs.folderViews[k], ...patch };
+    delete prefs.folderViews[k];
+    prefs.folderViews[k] = next; // most recent last
+    const keys = Object.keys(prefs.folderViews);
+    if (keys.length > 500) delete prefs.folderViews[keys[0]];
+  }
+  function setSort(sort) {
+    if (folderPref() !== null && !state.search.results) rememberFolder({ sort }); else prefs.sort = sort;
+    savePrefs();
+    computeEntries();
+    render();
+  }
+
   function sortEntries(list) {
-    const { key, dir } = prefs.sort;
+    const { key, dir } = curSort();
     const cmp = {
       name: (a, b) => collator.compare(a.name, b.name),
       date: (a, b) => (a.mtime || 0) - (b.mtime || 0),
       size: (a, b) => sizeOf(a) - sizeOf(b),
       kind: (a, b) => collator.compare(I.kindLabel(a), I.kindLabel(b)),
-    }[key];
+      created: (a, b) => (a.birth || 0) - (b.birth || 0),
+      ext: (a, b) => collator.compare(a.ext || '', b.ext || ''),
+    }[key] || ((a, b) => collator.compare(a.name, b.name));
     return list.slice().sort((a, b) => {
       if (prefs.foldersFirst && a.isDir !== b.isDir) return a.isDir ? -1 : 1;
       return (cmp(a, b) || collator.compare(a.name, b.name)) * dir;
@@ -195,6 +221,91 @@
       if (q) list = list.filter((e) => e.name.toLowerCase().includes(q));
       state.entries = list;
     }
+    // Grouped views list each group together (stable, so the sort holds inside).
+    if (state.cwd !== HOME && curGroup() !== 'none' && ['list', 'icons'].includes(viewMode())) {
+      const keyed = state.entries.map((e) => [groupOf(e), e]);
+      keyed.sort((a, b) => a[0].order - b[0].order || collator.compare(a[0].label, b[0].label));
+      state.entries = keyed.map(([, e]) => e);
+    }
+  }
+
+  // ---------- grouping (like Explorer's 分組依據) ----------
+  function curGroup() { return (!state.search.results && folderPref()?.group) || prefs.groupBy || 'none'; }
+  function setGroup(group) {
+    if (folderPref() !== null && !state.search.results) rememberFolder({ group }); else prefs.groupBy = group;
+    savePrefs();
+    computeEntries();
+    render();
+  }
+  const DAY = 86400000;
+  function groupOf(e) {
+    const g = curGroup();
+    if (g === 'kind') return e.isDir ? { order: 0, label: '資料夾' } : { order: 1, label: I.kindLabel(e) };
+    if (g === 'size') {
+      if (e.isDir) return { order: 0, label: '資料夾' };
+      const n = e.size || 0;
+      const tiers = [[0, '空白'], [16e3, '微小（16 KB 以下）'], [1e6, '小（1 MB 以下）'], [128e6, '中（128 MB 以下）'], [1e9, '大（1 GB 以下）'], [4e9, '巨大（4 GB 以下）']];
+      const i = tiers.findIndex(([max]) => n <= max);
+      return i < 0 ? { order: 7, label: '超大（超過 4 GB）' } : { order: i + 1, label: tiers[i][1] };
+    }
+    // date: newest first, Explorer's buckets
+    const t = e.mtime || 0;
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const t0 = today.getTime();
+    const weekStart = t0 - ((today.getDay() + 6) % 7) * DAY; // Monday
+    const monthStart = new Date(today.getFullYear(), today.getMonth(), 1).getTime();
+    const lastMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1).getTime();
+    const yearStart = new Date(today.getFullYear(), 0, 1).getTime();
+    const buckets = [
+      [t >= t0 + DAY, '未來'], [t >= t0, '今天'], [t >= t0 - DAY, '昨天'], [t >= weekStart, '本週稍早'],
+      [t >= weekStart - 7 * DAY, '上週'], [t >= monthStart, '本月稍早'], [t >= lastMonth, '上個月'], [t >= yearStart, '今年稍早'],
+    ];
+    const i = buckets.findIndex(([hit]) => hit);
+    return i < 0 ? { order: 9, label: '很久以前' } : { order: i, label: buckets[i][1] };
+  }
+  // Group header markup to put before item i (empty when the group continues).
+  function groupHead(items, i, counts, cls) {
+    if (curGroup() === 'none' || state.cwd === HOME) return '';
+    const g = groupOf(items[i]);
+    if (i > 0 && groupOf(items[i - 1]).label === g.label) return '';
+    return `<div class="${cls}">${esc(g.label)}<span>${counts.get(g.label)}</span></div>`;
+  }
+  function groupCounts(items) {
+    const m = new Map();
+    if (curGroup() !== 'none') for (const e of items) { const l = groupOf(e).label; m.set(l, (m.get(l) || 0) + 1); }
+    return m;
+  }
+
+  // ---------- list columns ----------
+  const LIST_COLS = {
+    date: { label: '修改日期', w: 170, cell: (e) => fmtDate(e.mtime) },
+    created: { label: '建立日期', w: 170, cell: (e) => fmtDate(e.birth) },
+    size: { label: '大小', w: 96, cell: (e) => (e.isDir ? (dirSizes.has(norm(e.path)) ? fmtSize(dirSizes.get(norm(e.path)).size) : '--') : fmtSize(e.size)) },
+    kind: { label: '類型', w: 150, cell: (e) => esc(I.kindLabel(e)) },
+    ext: { label: '副檔名', w: 80, cell: (e) => (e.isDir ? '' : esc(e.ext)) },
+  };
+  function listCols() { return (prefs.listCols || ['date', 'size', 'kind']).filter((k) => LIST_COLS[k]); }
+  function listTemplate() {
+    const w = prefs.listW || {};
+    return [w.name ? `${w.name}px` : 'minmax(200px, 1fr)', ...listCols().map((k) => `${w[k] || LIST_COLS[k].w}px`)].join(' ');
+  }
+  function toggleListCol(k) {
+    const cols = listCols();
+    prefs.listCols = cols.includes(k) ? cols.filter((c) => c !== k) : Object.keys(LIST_COLS).filter((c) => c === k || cols.includes(c));
+    savePrefs();
+    render();
+  }
+  function listHeaderMenu(x, y) {
+    const groups = [['none', '無'], ['kind', '類型'], ['date', '修改日期'], ['size', '大小']];
+    openMenu([
+      { html: '<div class="mlabel">顯示的欄位</div>' },
+      ...Object.entries(LIST_COLS).map(([k, c]) => ({ label: c.label, check: listCols().includes(k), action: () => toggleListCol(k) })),
+      '-',
+      { html: '<div class="mlabel">分組依據</div>' },
+      ...groups.map(([g, l]) => ({ label: l, check: curGroup() === g, action: () => setGroup(g) })),
+      '-',
+      { label: '還原欄寬', action: () => { prefs.listW = {}; savePrefs(); render(); } },
+    ], x, y);
   }
 
   function entryOf(p) {
@@ -207,8 +318,8 @@
   // What the content area shows: Home has its own page, search results never use columns.
   function viewMode() {
     if (state.cwd === HOME && !state.search.results) return 'home';
-    if (state.search.results && prefs.view === 'columns') return 'list';
-    return prefs.view;
+    if (state.search.results && curView() === 'columns') return 'list';
+    return curView();
   }
   function inColumnsMode() { return viewMode() === 'columns'; }
   const isVirtual = (e) => e.kind === 'pinned' || e.kind === 'drive';
@@ -266,6 +377,9 @@
     else if (root) state.colRoot = root;
     else if (!state.colRoot || !isUnder(dir, state.colRoot)) state.colRoot = guessRoot(dir);
 
+    // Clicking through columns keeps the column view; other navigation shows
+    // the folder the way it was last left.
+    if (colActive == null && dir !== HOME) state.view = folderPref(dir)?.view || prefs.view;
     const chainLen = dir === HOME ? 1 : ancestors(dir, state.colRoot).length;
     state.colActive = colActive ?? chainLen - 1;
 
@@ -356,7 +470,7 @@
     $('#btn-fwd').disabled = state.hIndex >= state.history.length - 1;
     const buttons = $$('#view-seg [data-view]');
     buttons.forEach((b, i) => {
-      const on = b.dataset.view === prefs.view;
+      const on = b.dataset.view === curView();
       b.classList.toggle('active', on);
       if (on) $('#view-seg .seg-pill').style.transform = `translateX(${i * 38}px)`;
     });
@@ -564,22 +678,24 @@
 
     if (mode === 'icons') {
       view.className = `grid${animate ? ' animate' : ''}`;
-      renderRows(view, items, (e, i) => `
+      const counts = groupCounts(items);
+      renderRows(view, items, (e, i) => `${groupHead(items, i, counts, 'ggroup')}
         <div class="gi item${state.sel.has(e.path) ? ' sel' : ''}${cut.has(e.path) ? ' cut' : ''}" data-i="${i}" style="--i:${Math.min(i, 40)}" draggable="true">
           <div class="thumb">${iconHtml(e, prefs.icon)}</div>
           <div class="label">${esc(shownName(e))}</div>
         </div>`);
     } else if (mode === 'list') {
       view.className = 'list';
-      const { key, dir } = prefs.sort;
-      const head = (k, label) => `<div data-sort="${k}" class="${key === k ? 'sorted' : ''}">${label}${key === k ? `<span class="arrow">${dir > 0 ? '▲' : '▼'}</span>` : ''}</div>`;
-      const header = `<div class="lhead">${head('name', '名稱')}${head('date', '修改日期')}${head('size', '大小')}${head('kind', '類型')}</div>`;
-      renderRows(view, items, (e, i) => `
+      view.style.setProperty('--lcols', listTemplate());
+      const { key, dir } = curSort();
+      const cols = listCols();
+      const head = (k, label) => `<div data-sort="${k}" class="${key === k ? 'sorted' : ''}">${label}${key === k ? `<span class="arrow">${dir > 0 ? '▲' : '▼'}</span>` : ''}<span class="lgrip" data-col="${k}"></span></div>`;
+      const header = `<div class="lhead">${head('name', '名稱')}${cols.map((k) => head(k, LIST_COLS[k].label)).join('')}</div>`;
+      const counts = groupCounts(items);
+      renderRows(view, items, (e, i) => `${groupHead(items, i, counts, 'lgroup')}
         <div class="lrow item${state.sel.has(e.path) ? ' sel' : ''}${cut.has(e.path) ? ' cut' : ''}" data-i="${i}" draggable="true">
           <div class="name">${iconHtml(e, 40)}<span class="nm">${esc(shownName(e))}</span></div>
-          <div>${fmtDate(e.mtime)}</div>
-          <div>${e.isDir ? (dirSizes.has(norm(e.path)) ? fmtSize(dirSizes.get(norm(e.path)).size) : '--') : fmtSize(e.size)}</div>
-          <div>${esc(I.kindLabel(e))}</div>
+          ${cols.map((k) => `<div>${LIST_COLS[k].cell(e)}</div>`).join('')}
         </div>`, header);
     } else if (mode === 'gallery') {
       renderGallery();
@@ -704,6 +820,30 @@
       const width = Math.max(COL_MIN, Math.min(COL_MAX, startW + e.clientX - startX));
       if (all) { prefs.colW = width; prefs.colWidths = {}; $$('.colw', view).forEach((x) => { x.style.width = `${width}px`; }); }
       else { setColWidth(w.dataset.dir, width); w.style.width = `${width}px`; }
+    };
+    const up = () => {
+      document.body.classList.remove('col-resizing');
+      savePrefs();
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+  }, true);
+
+  // List column widths: drag the edge of a header cell.
+  view.addEventListener('mousedown', (ev) => {
+    const grip = ev.target.closest('.lgrip');
+    if (!grip || ev.button !== 0) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    const k = grip.dataset.col;
+    const cell = grip.parentElement;
+    const startX = ev.clientX; const startW = cell.getBoundingClientRect().width;
+    document.body.classList.add('col-resizing');
+    const move = (e) => {
+      prefs.listW = { ...prefs.listW, [k]: Math.round(Math.max(k === 'name' ? 140 : 50, Math.min(900, startW + e.clientX - startX))) };
+      view.style.setProperty('--lcols', listTemplate());
     };
     const up = () => {
       document.body.classList.remove('col-resizing');
@@ -1048,17 +1188,15 @@
   });
   content.addEventListener('click', (ev) => {
     const h = ev.target.closest('.lhead [data-sort]');
-    if (!h) return;
+    if (!h || ev.target.closest('.lgrip')) return;
     const k = h.dataset.sort;
-    prefs.sort = prefs.sort.key === k ? { key: k, dir: -prefs.sort.dir } : { key: k, dir: k === 'name' || k === 'kind' ? 1 : -1 };
-    savePrefs();
-    computeEntries();
-    render();
+    const cur = curSort();
+    setSort(cur.key === k ? { key: k, dir: -cur.dir } : { key: k, dir: k === 'name' || k === 'kind' ? 1 : -1 });
   });
 
   // rubber-band selection
   function startMarquee(ev) {
-    const mode = prefs.view;
+    const mode = viewMode();
     if (mode !== 'icons' && mode !== 'list') { if (!ev.ctrlKey) setSelection([]); return; }
     const base = ev.ctrlKey || ev.shiftKey ? new Set(state.sel) : new Set();
     if (!ev.ctrlKey && !ev.shiftKey) setSelection([]);
@@ -1115,6 +1253,12 @@
     if (!target?.closest) return null;
     const place = target.closest('.place, .crumb');
     if (place) return { dir: place.dataset.path, el: place };
+    // A tab takes files into the folder it shows.
+    const tabEl = target.closest('.tab');
+    if (tabEl) {
+      const t = tabs.find((x) => x.id === Number(tabEl.dataset.tab));
+      return t?.cwd && t.cwd !== HOME && !t.search.results ? { dir: t.cwd, el: tabEl } : null;
+    }
     const it = itemFromEl(target);
     if (it?.entry?.isDir) return { dir: it.entry.path, el: it.el };
     if (target.closest('.col')) { const dir = target.closest('.col').dataset.dir; return { dir, el: target.closest('.col') }; }
@@ -1164,8 +1308,21 @@
   window.addEventListener('keydown', (ev) => { if (ev.key === 'Control') ctrlHeld = true; });
   window.addEventListener('keyup', (ev) => { if (ev.key === 'Control') ctrlHeld = false; });
   window.addEventListener('blur', () => { ctrlHeld = false; });
+  // Holding a drag over a tab for a moment switches to it, as in browsers.
+  let tabHover = { el: null, timer: null };
+  function hoverTab(target) {
+    const el = target?.closest?.('.tab') || null;
+    if (el === tabHover.el) return;
+    clearTimeout(tabHover.timer);
+    tabHover = { el, timer: el && setTimeout(() => switchTab(tabs.find((t) => t.id === Number(el.dataset.tab))), 700) };
+  }
+  document.addEventListener('dragover', (ev) => hoverTab(ev.target));
   window.__finderDnd = {
-    over: (x, y) => setDropEl(dropTargetFor(document.elementFromPoint(x, y))?.el || null),
+    over: (x, y) => {
+      const target = document.elementFromPoint(x, y);
+      hoverTab(target);
+      setDropEl(dropTargetFor(target)?.el || null);
+    },
     drop: (x, y, paths) => dropInto(document.elementFromPoint(x, y), paths.length ? paths : (G.dragging || []), ctrlHeld),
     leave: () => setDropEl(null),
   };
@@ -1500,14 +1657,14 @@
   window.addEventListener('blur', closeMenu);
 
   const viewItems = () => [
-    { label: '以圖像顯示', kbd: 'Ctrl+1', check: prefs.view === 'icons', action: () => setView('icons') },
-    { label: '以列表顯示', kbd: 'Ctrl+2', check: prefs.view === 'list', action: () => setView('list') },
-    { label: '以直欄顯示', kbd: 'Ctrl+3', check: prefs.view === 'columns', action: () => setView('columns') },
-    { label: '以圖庫顯示', kbd: 'Ctrl+4', check: prefs.view === 'gallery', action: () => setView('gallery') },
+    { label: '以圖像顯示', kbd: 'Ctrl+1', check: curView() === 'icons', action: () => setView('icons') },
+    { label: '以列表顯示', kbd: 'Ctrl+2', check: curView() === 'list', action: () => setView('list') },
+    { label: '以直欄顯示', kbd: 'Ctrl+3', check: curView() === 'columns', action: () => setView('columns') },
+    { label: '以圖庫顯示', kbd: 'Ctrl+4', check: curView() === 'gallery', action: () => setView('gallery') },
   ];
   const sortItems = () => [['name', '名稱'], ['kind', '類型'], ['date', '修改日期'], ['size', '大小']].map(([k, l]) => ({
-    label: `依${l}排序`, check: prefs.sort.key === k,
-    action: () => { prefs.sort = { key: k, dir: k === 'name' || k === 'kind' ? 1 : -1 }; savePrefs(); computeEntries(); render(); },
+    label: `依${l}排序`, check: curSort().key === k,
+    action: () => setSort({ key: k, dir: k === 'name' || k === 'kind' ? 1 : -1 }),
   }));
 
   function itemMenu(entries, x, y) {
@@ -1602,6 +1759,7 @@
 
   content.addEventListener('contextmenu', async (ev) => {
     ev.preventDefault();
+    if (ev.target.closest('.lhead')) { listHeaderMenu(ev.clientX, ev.clientY); return; }
     const it = itemFromEl(ev.target);
     // Shift+right-click goes straight to Explorer's menu, with its extended items.
     const native = ev.shiftKey && api.nativeMenu;
@@ -1686,9 +1844,37 @@
     const it = itemFromEl(ev.target);
     if (it?.entry?.isDir) openTab(it.entry.path, { activate: false });
   });
+  // Click a tab to switch to it; drag it sideways to reorder.
   $('#tabs').addEventListener('mousedown', (ev) => {
     const tab = ev.target.closest('.tab');
-    if (ev.button === 0 && tab) switchTab(tabs.find((t) => t.id === Number(tab.dataset.tab)));
+    if (ev.button !== 0 || !tab) return;
+    const t = tabs.find((x) => x.id === Number(tab.dataset.tab));
+    switchTab(t);
+    const startX = ev.clientX;
+    let dragging = false;
+    let el = null;
+    const move = (e) => {
+      if (!dragging && Math.abs(e.clientX - startX) < 6) return;
+      el ||= $(`.tab[data-tab="${t.id}"]`);
+      if (!el) return;
+      dragging = true;
+      el.classList.add('dragging');
+      el.style.transform = `translateX(${e.clientX - startX}px)`;
+    };
+    const up = (e) => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+      if (!dragging) return;
+      // Drop position: before the first tab whose middle is right of the pointer.
+      const others = $$('.tab', $('#tabs')).filter((x) => x !== el);
+      let idx = others.findIndex((x) => { const r = x.getBoundingClientRect(); return e.clientX < r.left + r.width / 2; });
+      if (idx < 0) idx = others.length;
+      tabs.splice(tabs.indexOf(t), 1);
+      tabs.splice(idx, 0, t);
+      renderTabs();
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
   });
   $('#tabs').addEventListener('contextmenu', (ev) => {
     ev.preventDefault();
@@ -1758,10 +1944,16 @@
   });
 
   // ---------- view / prefs ----------
-  function setView(v) {
-    if (prefs.view === v) return;
-    prefs.view = v;
-    savePrefs();
+  // `asDefault` (from Settings) changes the default view instead of this folder's.
+  function setView(v, { asDefault = false } = {}) {
+    if (asDefault) { prefs.view = v; savePrefs(); }
+    if (curView() === v) return;
+    state.view = v;
+    if (!asDefault) {
+      if (folderPref() !== null && !state.search.results) rememberFolder({ view: v });
+      else prefs.view = v;
+      savePrefs();
+    }
     if (v === 'columns' && state.cwd !== HOME) state.colActive = ancestors(state.cwd, state.colRoot).length - 1;
     computeEntries();
     render({ animate: true });
@@ -1796,7 +1988,7 @@
     document.documentElement.style.setProperty('--icon', `${prefs.icon}px`);
     $('#zoom').value = prefs.icon;
     clearTimeout(setIconSize.t);
-    setIconSize.t = setTimeout(() => { if (prefs.view === 'icons') renderView(false); }, 250);
+    setIconSize.t = setTimeout(() => { if (viewMode() === 'icons') renderView(false); }, 250);
   }
 
   $('#view-seg').addEventListener('click', (ev) => { const b = ev.target.closest('[data-view]'); if (b) setView(b.dataset.view); });
@@ -2410,7 +2602,9 @@
         ['啟動時打開', null, sel('startup', [['home', '常用'], ['last', '上次的位置'], ['custom', '指定的資料夾']])],
         prefs.startup === 'custom' && ['指定的資料夾', null, `<div class="set-path"><input data-pref="startDir" value="${esc(prefs.startDir)}" placeholder="例如 D:\\Projects" spellcheck="false"><button data-act="use-cwd"${state.cwd === HOME ? ' disabled' : ''}>使用目前的資料夾</button></div>`],
         ['新分頁打開', null, sel('newTab', [['home', '常用'], ['current', '目前的資料夾']])],
-        ['預設檢視', null, sel('view', [['icons', '圖像'], ['list', '列表'], ['columns', '直欄'], ['gallery', '圖庫']])],
+        ['預設檢視', '沒有記住檢視方式的資料夾使用這個', sel('view', [['icons', '圖像'], ['list', '列表'], ['columns', '直欄'], ['gallery', '圖庫']])],
+        ['每個資料夾記住自己的檢視方式', `改變檢視或排序只套用到那個資料夾（目前記住 ${Object.keys(prefs.folderViews).length} 個）`, sw('rememberView')],
+        Object.keys(prefs.folderViews).length && ['', null, '<button data-act="reset-views">全部改回預設檢視</button>'],
         ['丟到資源回收筒前先確認', null, sw('confirmTrash')],
         api.checkUpdate && ['自動檢查更新', '啟動後在背景檢查一次', sw('autoUpdate')],
       ] },
@@ -2457,7 +2651,7 @@
     if (v) (api.appVersion ? api.appVersion() : Promise.resolve('開發版')).then((x) => { v.textContent = x; });
   }
   function setPref(key, value) {
-    if (key === 'view') { setView(value); return; }
+    if (key === 'view') { setView(value, { asDefault: true }); return; }
     if (key === 'folderIcons') value = value ? 'windows' : 'finder';
     prefs[key] = value;
     savePrefs();
@@ -2488,6 +2682,7 @@
       const a = ev.target.closest('[data-act]')?.dataset.act;
       if (a === 'close') closeDialog();
       else if (a === 'use-cwd') { setPref('startDir', state.cwd); renderSettings(w); }
+      else if (a === 'reset-views') { prefs.folderViews = {}; savePrefs(); state.view = null; rerenderItems(); renderSettings(w); toast('所有資料夾已改回預設檢視'); }
       else if (a === 'reset-cols') { prefs.colWidths = {}; prefs.colW = 220; savePrefs(); rerenderItems(); renderSettings(w); toast('已還原所有直欄寬度'); }
       else if (a === 'check-update') checkUpdates(true);
       else if (a === 'reset-all') {
