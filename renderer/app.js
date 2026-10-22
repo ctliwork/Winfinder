@@ -82,13 +82,24 @@
     return chain;
   }
   function baseName(p) { return P.basename(p) || p; }
-  function displayName(p) {
-    const fav = G.places?.favorites.find((f) => norm(f.path) === norm(p));
-    if (fav) return fav.label;
-    const loc = G.places?.locations.find((l) => norm(l.path) === norm(p));
-    if (loc) return loc.label;
-    return baseName(p);
+  function namedPlaces() {
+    const g = G.places;
+    return g ? [...g.favorites, ...(g.pinned || []), ...(g.cloud || []), ...g.locations] : [];
   }
+  function displayName(p) {
+    const hit = namedPlaces().find((f) => norm(f.path) === norm(p));
+    return hit ? hit.label : baseName(p);
+  }
+  // Folders pinned in the navigation pane: Explorer's Quick Access list plus
+  // any pins kept by this app (used when Explorer's list can't be changed).
+  function pinnedPlaces() {
+    const list = [...(G.places?.pinned || [])];
+    for (const p of prefs.favorites) {
+      if (!list.some((f) => norm(f.path) === norm(p))) list.push({ path: p, label: baseName(p), icon: 'folder', custom: true });
+    }
+    return list;
+  }
+  function isPinned(p) { return pinnedPlaces().some((f) => norm(f.path) === norm(p)); }
   function specialBadge(p) {
     const fav = G.places?.favorites.find((f) => norm(f.path) === norm(p));
     return fav ? fav.icon : null;
@@ -201,17 +212,14 @@
   // ---------- navigation ----------
   function guessRoot(dir) {
     let best = null;
-    for (const f of [...(G.places?.favorites || []), ...prefs.favorites.map((p) => ({ path: p }))]) {
+    for (const f of [...namedPlaces().filter((f) => !G.places.locations.includes(f)), ...pinnedPlaces()]) {
       if (isUnder(dir, f.path) && (!best || f.path.length > best.length)) best = f.path;
     }
     return best || P.root(dir);
   }
 
   async function loadHome() {
-    const favs = [
-      ...G.places.favorites.map((f) => ({ path: f.path, name: f.label, badge: f.icon })),
-      ...prefs.favorites.map((p) => ({ path: p, name: baseName(p), badge: null, custom: true })),
-    ];
+    const favs = pinnedPlaces().map((f) => ({ path: f.path, name: f.label, badge: f.icon === 'folder' ? null : f.icon, custom: !!f.custom }));
     const pinned = favs.map((f) => ({ ...f, isDir: true, ext: '', kind: 'pinned' }));
     const drives = G.places.locations.map((l) => ({ name: l.label, path: l.path, isDir: true, ext: '', kind: 'drive' }));
     let recent = [];
@@ -344,43 +352,46 @@
   }
 
   // Explorer-style navigation tree: Home, pinned folders, drives; folders expand in place.
+  // Laid out like Explorer's navigation pane: Home, OneDrive, the Quick Access
+  // pins, then This PC with its drives.
+  const PC = '::pc';
   function renderSidebar() {
     if (!G.places) return;
     const nav = $('#places');
     const scroll = nav.scrollTop;
     const active = norm(state.cwd || '');
     const chev = '<svg viewBox="0 0 10 10"><path d="M3.5 2l3 3-3 3"/></svg>';
+    const pin = '<svg class="pin" viewBox="0 0 12 12"><path d="M7.6 1.5l2.9 2.9-1.4.5-1.9 1.9.2 2.4-.9.9-2-2-2.6 2.6M3.3 4.4l.9-.9 2.4.2 1.9-1.9z"/></svg>';
     const missing = [];
-    const row = (p, label, icon, lvl, extra = '') => {
+    const row = (p, label, icon, lvl, extra = '', tail = '') => {
       const open = G.treeOpen.has(p);
       const kids = subdirs(p);
       if (open && !kids) missing.push(p);
       const leaf = kids && kids.length === 0;
       let html = `<div class="place${norm(p) === active ? ' active' : ''}" data-path="${esc(p)}" style="--lvl:${lvl}" ${extra}>
         <span class="twisty${open && !leaf ? ' open' : ''}${leaf ? ' none' : ''}" data-twisty="${esc(p)}">${chev}</span>
-        ${I.sidebar(icon)}<span>${esc(label)}</span></div>`;
+        ${I.sidebar(icon)}<span>${esc(label)}</span>${tail}</div>`;
       if (open && kids) html += kids.map((k) => row(k.path, k.name, 'folder', lvl + 1)).join('');
       return html;
     };
-    const sec = (key, title, body) => {
-      const closed = prefs.secCollapsed?.[key];
-      return `<div class="sec-title${closed ? ' collapsed' : ''}" data-sec="${key}">${title}<svg viewBox="0 0 10 10"><path d="M2 3.5l3 3 3-3"/></svg></div>${closed ? '' : body}`;
-    };
-    const pinned = [
-      ...G.places.favorites.map((f) => row(f.path, f.label, f.icon, 0)),
-      ...prefs.favorites.map((p) => row(p, baseName(p), 'folder', 0, 'data-custom="1"')),
-    ].join('');
-    const drives = G.places.locations.map((l) => row(l.path, l.label, 'drive', 0)).join('');
+    const cloud = (G.places.cloud || []).map((c) => row(c.path, c.label, 'cloud', 0)).join('');
+    const pinned = pinnedPlaces().map((f) => row(f.path, f.label, f.icon, 0, `data-pinned="1"${f.custom ? ' data-custom="1"' : ''}`, pin)).join('');
+    const pcOpen = !prefs.pcCollapsed;
+    const drives = pcOpen ? G.places.locations.map((l) => row(l.path, l.label, 'drive', 1)).join('') : '';
     nav.innerHTML = `
       <div class="place home-row${state.cwd === HOME ? ' active' : ''}" data-path="${HOME}">
-        <span class="twisty none"></span>${I.sidebar('home')}<span>首頁</span></div>
-      ${sec('pinned', '釘選', pinned)}
-      ${sec('drives', '本機', drives)}`;
+        <span class="twisty none"></span>${I.sidebar('home')}<span>常用</span></div>
+      ${cloud}
+      ${pinned ? `<div class="nav-sep"></div>${pinned}` : ''}
+      <div class="nav-sep"></div>
+      <div class="place" data-path="${PC}"><span class="twisty${pcOpen ? ' open' : ''}" data-twisty="${PC}">${chev}</span>${I.sidebar('pc')}<span>本機</span></div>
+      ${drives}`;
     nav.scrollTop = scroll;
     if (missing.length) Promise.all(missing.map((p) => listDir(p))).then(renderSidebar);
   }
 
   function toggleTree(p) {
+    if (p === PC) { prefs.pcCollapsed = !prefs.pcCollapsed; savePrefs(); renderSidebar(); return; }
     G.treeOpen.has(p) ? G.treeOpen.delete(p) : G.treeOpen.add(p);
     prefs.treeOpen = [...G.treeOpen];
     savePrefs();
@@ -452,7 +463,7 @@
 
   async function renderView(animate) {
     const mode = viewMode();
-    view.className = '';
+    if (mode !== 'columns') view.className = '';
     $('#empty').hidden = true;
     const cut = new Set(G.clip?.op === 'move' ? G.clip.paths : []);
 
@@ -493,35 +504,145 @@
     observeThumbs();
   }
 
+  // Column widths: a per-folder width wins over the default (prefs.colW).
+  const COL_MIN = 120; const COL_MAX = 640;
+  function colWidth(dir) { return prefs.colWidths?.[norm(dir)] || prefs.colW || 220; }
+  function setColWidth(dir, w) {
+    prefs.colWidths = prefs.colWidths || {};
+    const k = norm(dir);
+    delete prefs.colWidths[k];
+    prefs.colWidths[k] = w;
+    const keys = Object.keys(prefs.colWidths);
+    if (keys.length > 300) delete prefs.colWidths[keys[0]]; // keep the most recent 300
+  }
+
+  // Updates the column DOM in place: unchanged columns are kept as-is (scroll
+  // position, thumbnails, no entry animation), so selecting a file no longer
+  // redraws and re-animates every column.
   async function renderColumns() {
     const chain = ancestors(state.cwd, state.colRoot);
     await Promise.all(chain.map((d) => listDir(d)));
     state.colLists = chain.map((d) => visibleOf(dirCache.get(d)?.entries || []));
     const n = chain.length - 1;
-    const prevScroll = $$('.col', view).map((c) => c.scrollTop);
-    const cols = chain.map((dir, j) => {
+    const fresh = view._colsTab !== state.id || !view.classList.contains('columns') || !$('.col-preview', view);
+    if (fresh) { view.innerHTML = '<div class="col-preview"></div>'; view._colsTab = state.id; }
+    view.className = 'columns';
+    const wraps = $$('.colw', view);
+    const preview = $('.col-preview', view);
+    let added = false;
+    chain.forEach((dir, j) => {
       const next = chain[j + 1];
-      const rows = state.colLists[j].map((e, i) => {
-        let cls = '';
-        if (next && norm(e.path) === norm(next)) cls = j === state.colActive ? ' sel' : ' path';
-        else if (j === n && state.sel.has(e.path)) cls = ' sel';
-        return `<div class="crow item${cls}" data-col="${j}" data-i="${i}" draggable="true">
+      const list = state.colLists[j];
+      const classes = list.map((e) => {
+        if (next && norm(e.path) === norm(next)) return j === state.colActive ? 'crow item sel' : 'crow item path';
+        return j === n && state.sel.has(e.path) ? 'crow item sel' : 'crow item';
+      });
+      // Thumbnails are left out of the key so a late-loading thumbnail
+      // doesn't force the column to be rebuilt.
+      const rowsKey = `${j}|${list.map((e) => `${e.path}|${e.mtime}|${e.isDir}`).join('\n')}`;
+      let w = wraps[j];
+      if (w && norm(w.dataset.dir) !== norm(dir)) { wraps.slice(j).forEach((x) => x.remove()); wraps.length = j; w = null; }
+      if (!w) {
+        w = document.createElement('div');
+        w.className = `colw${fresh && j < n ? '' : ' enter'}`;
+        w.dataset.dir = dir;
+        w.innerHTML = `<div class="col" data-dir="${esc(dir)}"></div><div class="col-grip" title="拖曳調整欄寬（Alt：全部欄），按兩下自動調整"></div>`;
+        view.insertBefore(w, preview);
+        wraps[j] = w;
+        added = true;
+      }
+      w.style.width = `${colWidth(dir)}px`;
+      const col = w.firstElementChild;
+      if (col._rows !== rowsKey) {
+        const top = col.scrollTop;
+        col.innerHTML = list.map((e, i) => `<div class="${classes[i]}" data-col="${j}" data-i="${i}" draggable="true">
           ${iconHtml(e, 36)}<span class="nm">${esc(e.name)}</span>
           ${e.isDir ? '<svg class="chev" viewBox="0 0 10 10"><path d="M3.5 2l3 3-3 3"/></svg>' : ''}
-        </div>`;
-      }).join('');
-      return `<div class="col" data-dir="${esc(dir)}">${rows || ''}</div>`;
+        </div>`).join('');
+        col._rows = rowsKey;
+        col.scrollTop = top;
+      } else {
+        // Same rows: only the highlight changed.
+        const els = col.children;
+        for (let i = 0; i < els.length; i++) if (els[i].className !== classes[i]) els[i].className = classes[i];
+      }
     });
+    wraps.slice(chain.length).forEach((x) => x.remove());
+
     const sel = selectedEntries();
-    const preview = sel.length === 1 && !sel[0].isDir && state.colActive === n
-      ? `<div class="col-preview">${previewCard(sel[0])}</div>` : '<div class="col-preview" style="visibility:hidden"></div>';
-    view.className = 'columns';
-    view.innerHTML = cols.join('') + preview;
-    $$('.col', view).forEach((c, i) => { if (prevScroll[i]) c.scrollTop = prevScroll[i]; });
-    $$('.crow.sel, .crow.path', view).forEach((el) => el.scrollIntoView({ block: 'nearest' }));
-    content.scrollLeft = content.scrollWidth;
-    fillPreviewArt();
+    const shown = sel.length === 1 && !sel[0].isDir && state.colActive === n ? sel[0] : null;
+    const key = shown ? `${shown.path}|${shown.mtime}|${shown.size}` : '';
+    if (preview._key !== key) {
+      preview._key = key;
+      preview.innerHTML = shown ? previewCard(shown) : '';
+      preview.classList.toggle('empty', !shown);
+      if (shown) { preview.classList.remove('swap'); void preview.offsetWidth; preview.classList.add('swap'); }
+      fillPreviewArt();
+    }
+    for (const el of $$('.crow.sel, .crow.path', view)) {
+      const col = el.parentElement;
+      if (el.offsetTop < col.scrollTop) col.scrollTop = el.offsetTop - 6;
+      else if (el.offsetTop + el.offsetHeight > col.scrollTop + col.clientHeight) col.scrollTop = el.offsetTop + el.offsetHeight - col.clientHeight + 6;
+    }
+    // Only jump to the right edge when columns were added; keep the
+    // horizontal position steady otherwise.
+    if (fresh || added) content.scrollLeft = content.scrollWidth;
+    else {
+      const active = wraps[state.colActive];
+      if (active && active.offsetLeft < content.scrollLeft) content.scrollLeft = active.offsetLeft;
+    }
   }
+
+  // Width that fits the longest name in a column.
+  function fitColumn(w) {
+    const col = w.firstElementChild;
+    const nm = $('.crow .nm', col);
+    if (!nm) return COL_MIN;
+    const ctx = (fitColumn.ctx ||= document.createElement('canvas').getContext('2d'));
+    const cs = getComputedStyle(nm);
+    ctx.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+    let max = 0;
+    for (const e of state.colLists[$$('.colw', view).indexOf(w)] || []) max = Math.max(max, ctx.measureText(e.name).width);
+    // row padding + icon + gaps + chevron + column padding + scrollbar
+    return Math.round(Math.max(COL_MIN, Math.min(COL_MAX, max + 16 + 18 + 14 + 10 + 12 + 14)));
+  }
+
+  view.addEventListener('mousedown', (ev) => {
+    const grip = ev.target.closest('.col-grip');
+    if (!grip || ev.button !== 0) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    const w = grip.parentElement;
+    const all = ev.altKey;
+    const startX = ev.clientX; const startW = w.offsetWidth;
+    document.body.classList.add('col-resizing');
+    const move = (e) => {
+      const width = Math.max(COL_MIN, Math.min(COL_MAX, startW + e.clientX - startX));
+      if (all) { prefs.colW = width; prefs.colWidths = {}; $$('.colw', view).forEach((x) => { x.style.width = `${width}px`; }); }
+      else { setColWidth(w.dataset.dir, width); w.style.width = `${width}px`; }
+    };
+    const up = () => {
+      document.body.classList.remove('col-resizing');
+      savePrefs();
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+  }, true);
+
+  view.addEventListener('dblclick', (ev) => {
+    const grip = ev.target.closest('.col-grip');
+    if (!grip) return;
+    ev.stopPropagation();
+    const targets = ev.altKey ? $$('.colw', view) : [grip.parentElement];
+    for (const w of targets) {
+      const width = fitColumn(w);
+      setColWidth(w.dataset.dir, width);
+      w.style.width = `${width}px`;
+    }
+    savePrefs();
+  }, true);
 
   function previewCard(e) {
     return `
@@ -618,15 +739,20 @@
   // ---------- tabs ----------
   function tabTitle(t) {
     if (t.search.results) return `搜尋「${t.search.query}」`;
-    if (t.cwd === HOME || !t.cwd) return '首頁';
+    if (t.cwd === HOME || !t.cwd) return '常用';
     return displayName(t.cwd);
   }
 
+  // Only tabs that weren't on screen before get the entry animation; redrawing
+  // the bar on every navigation used to make all tabs jump.
+  const shownTabs = new Set();
   function renderTabs() {
     $('#tabs').innerHTML = tabs.map((t) => `
-      <div class="tab${t === state ? ' active' : ''}" data-tab="${t.id}" title="${esc(t.cwd === HOME ? '首頁' : t.cwd || '')}">
+      <div class="tab${t === state ? ' active' : ''}${shownTabs.has(t.id) ? '' : ' new'}" data-tab="${t.id}" title="${esc(t.cwd === HOME ? '常用' : t.cwd || '')}">
         ${t.cwd === HOME || !t.cwd ? I.sidebar('home') : I.folder(specialBadge(t.cwd))}<span>${esc(tabTitle(t))}</span>
       </div>`).join('');
+    shownTabs.clear();
+    tabs.forEach((t) => shownTabs.add(t.id));
   }
 
   async function switchTab(t) {
@@ -701,7 +827,7 @@
   function renderPathbar() {
     const bar = $('#pathbar');
     if (state.search.results) { bar.innerHTML = `<span class="crumb">${I.sidebar('recent')}<span>搜尋結果：${state.entries.length} 個項目</span></span>`; return; }
-    if (state.cwd === HOME) { bar.innerHTML = `<span class="crumb">${I.sidebar('home')}<span>首頁</span></span>`; return; }
+    if (state.cwd === HOME) { bar.innerHTML = `<span class="crumb">${I.sidebar('home')}<span>常用</span></span>`; return; }
     const chain = ancestors(state.cwd, P.root(state.cwd));
     const sep = '<svg class="crumb-sep" viewBox="0 0 10 10"><path d="M3.5 2l3 3-3 3"/></svg>';
     bar.innerHTML = chain.map((p, i) => `
@@ -1024,9 +1150,15 @@
     navigator.clipboard.writeText(text).then(() => toast('已拷貝路徑'), () => toast('無法存取剪貼簿'));
   }
 
-  function toggleFavorite(p) {
-    const i = prefs.favorites.findIndex((f) => norm(f) === norm(p));
-    if (i >= 0) prefs.favorites.splice(i, 1); else prefs.favorites.push(p);
+  // Pins go to Explorer's Quick Access when possible, so both apps stay in sync.
+  async function toggleFavorite(p) {
+    const own = prefs.favorites.findIndex((f) => norm(f) === norm(p));
+    const pin = !isPinned(p);
+    if (own >= 0) prefs.favorites.splice(own, 1);
+    else if (G.places.pinnedLive && api.pinHome && await api.pinHome(p, pin).then(() => true, () => false)) {
+      G.places = await api.places();
+    } else if (pin) prefs.favorites.push(p);
+    else toast('無法從快速存取取消釘選，請在檔案總管中操作');
     savePrefs();
     if (state.cwd === HOME) refresh(true); else renderSidebar();
   }
@@ -1123,9 +1255,8 @@
 
   function itemMenu(entries, x, y) {
     const one = entries.length === 1 ? entries[0] : null;
-    const isFav = one?.isDir && prefs.favorites.some((f) => norm(f) === norm(one.path));
+    const isFav = one?.isDir && isPinned(one.path);
     const virt = entries.some(isVirtual);
-    const builtinPin = one?.kind === 'pinned' && !one.custom;
     openMenu([
       { label: '打開', kbd: 'Enter', action: () => entries.forEach(openEntry) },
       ...(one?.isDir ? [{ label: '在新分頁中打開', kbd: '滑鼠中鍵', action: () => openTab(one.path, { activate: false }) }] : []),
@@ -1137,7 +1268,7 @@
       { label: '剪下', kbd: 'Ctrl+X', disabled: virt, action: () => copySelected('move') },
       { label: '拷貝路徑', kbd: 'Ctrl+Alt+C', action: copyPath },
       '-',
-      ...(one?.isDir && !builtinPin && one.kind !== 'drive' ? [{ label: isFav ? '取消釘選' : '釘選到快速存取', action: () => toggleFavorite(one.path) }] : []),
+      ...(one?.isDir && one.kind !== 'drive' ? [{ label: isFav ? '從快速存取取消釘選' : '釘選到快速存取', action: () => toggleFavorite(one.path) }] : []),
       { label: isWin ? '在檔案總管中顯示' : '在系統檔案管理員中顯示', action: () => api.reveal(entries[0].path) },
       '-',
       { label: '丟到資源回收筒', kbd: 'Delete', disabled: virt, action: trashSelected },
@@ -1207,29 +1338,32 @@
       return;
     }
     const p = ev.target.closest('.place');
+    if (p?.dataset.path === PC) { toggleTree(PC); return; }
     if (p) navigate(p.dataset.path, { root: p.dataset.path });
   });
   $('#places').addEventListener('dblclick', (ev) => {
     const p = ev.target.closest('.place');
-    if (p && p.dataset.path !== HOME && !ev.target.closest('[data-twisty]')) toggleTree(p.dataset.path);
+    if (p && p.dataset.path !== HOME && p.dataset.path !== PC && !ev.target.closest('[data-twisty]')) toggleTree(p.dataset.path);
   });
   $('#places').addEventListener('contextmenu', (ev) => {
     ev.preventDefault();
     const p = ev.target.closest('.place');
     if (!p) return;
     const path = p.dataset.path;
+    if (path === PC) return;
     if (path === HOME) {
       openMenu([{ label: '在新分頁中打開', action: () => openTab(HOME, { activate: false }) }], ev.clientX, ev.clientY);
       return;
     }
-    const custom = !!p.dataset.custom;
+    const pinnedRow = !!p.dataset.pinned;
     openMenu([
       { label: '打開', action: () => navigate(path, { root: path }) },
       { label: '在新分頁中打開', kbd: '滑鼠中鍵', action: () => openTab(path, { activate: false }) },
       { label: G.treeOpen.has(path) ? '摺疊' : '展開', action: () => toggleTree(path) },
       '-',
       { label: isWin ? '在檔案總管中打開' : '在系統檔案管理員中打開', action: () => api.open(path) },
-      ...(custom ? ['-', { label: '取消釘選', action: () => toggleFavorite(path) }] : []),
+      '-',
+      { label: pinnedRow || isPinned(path) ? '從快速存取取消釘選' : '釘選到快速存取', action: () => toggleFavorite(path) },
     ], ev.clientX, ev.clientY);
   });
 
@@ -1587,7 +1721,7 @@
     media.dataset.kind = 'info';
     if (state.cwd === HOME) {
       media.innerHTML = `<div class="ql-info">${I.sidebar('home')}</div>`;
-      info.innerHTML = '<div class="pv-name">首頁</div><div class="pv-kind">選取檔案即可預覽</div>';
+      info.innerHTML = '<div class="pv-name">常用</div><div class="pv-kind">選取檔案即可預覽</div>';
       return;
     }
     media.innerHTML = `<div class="ql-info">${I.folder(specialBadge(state.cwd))}</div>`;
@@ -1598,7 +1732,7 @@
   function togglePane() {
     prefs.previewPane = !prefs.previewPane;
     savePrefs();
-    if (prefs.previewPane && !paneVisible()) toast('預覽窗格在圖像、列表與首頁檢視中顯示');
+    if (prefs.previewPane && !paneVisible()) toast('預覽窗格在圖像、列表與常用頁中顯示');
     updatePane();
   }
   $('#btn-preview').addEventListener('click', togglePane);

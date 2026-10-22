@@ -128,6 +128,8 @@
     folder: '<path d="M2.8 6.2c0-1 .8-1.7 1.7-1.7h3.2l1.6 1.6h6.2c1 0 1.7.8 1.7 1.7v6.4c0 1-.8 1.7-1.7 1.7H4.5c-1 0-1.7-.8-1.7-1.7z"/>',
     recent: '<circle cx="10" cy="10" r="7"/><path d="M10 6v4.3l2.8 1.7"/>',
     tag: '<circle cx="10" cy="10" r="4.6" class="fill"/>',
+    cloud: '<path d="M6 15.5h8.3a3.2 3.2 0 0 0 .4-6.4A4.6 4.6 0 0 0 5.9 8.4 3.6 3.6 0 0 0 6 15.5z"/>',
+    pc: '<rect x="2.8" y="3.8" width="14.4" height="9.7" rx="1.5"/><path d="M7.5 16.5h5M10 13.5v3"/>',
   };
   function sidebar(name) {
     return `<svg class="sico" viewBox="0 0 20 20">${SIDEBAR[name] || SIDEBAR.folder}</svg>`;

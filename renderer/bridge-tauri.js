@@ -66,7 +66,8 @@
   const fail = (error) => ({ ok: false, error: String(error) });
 
   window.fsApi = {
-    places: () => invoke('places'),
+    places: () => invoke('places').then((p) => ({ ...p, pinnedLive: p.pinned_live })),
+    pinHome: (path, pin) => invoke('pin_home', { path, pin }),
     list: (dir) => invoke('list_dir', { dir }).then(ok('entries'), fail),
     diskFree: (path) => invoke('disk_free', { path }),
     diskSpace: (path) => invoke('disk_space', { path }),
