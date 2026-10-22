@@ -763,3 +763,9 @@ img.panning, video.panning { cursor: grabbing; transition: none; }
 
 /* Solid sidebar (no glass): nothing in the window is see-through. */
 #sidebar { background: var(--side-solid); backdrop-filter: none; border-color: var(--hairline); }
+
+/* spring-loaded folders: a soft pulse while waiting, a double blink on open */
+.springing { animation: springWait 0.7s ease-in-out; }
+@keyframes springWait { 50% { background: rgba(var(--accent-rgb), 0.28); } }
+.sprung { animation: springBlink 0.32s steps(1) 1; }
+@keyframes springBlink { 0%, 50% { background: var(--accent); color: #fff; } 25%, 75% { background: transparent; } }
