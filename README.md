@@ -50,7 +50,7 @@ npm test         # Rust 單元測試
 
 指定起始資料夾：`finder-win.exe --dir=D:\Projects`
 
-GitHub Actions（`.github/workflows/finder-win.yml`）會在 Windows 上跑 Rust 測試並打包安裝檔，可在該次執行的 Artifacts 下載。
+GitHub Actions（`.github/workflows/finder-win.yml`）會在 Windows 上跑 Rust 測試、打包安裝檔，並更新 GitHub 上名為 `finder-win-latest` 的預先發行版本，安裝檔在那裡下載。
 
 ## 功能
 
