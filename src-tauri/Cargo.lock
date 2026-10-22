@@ -1167,7 +1167,6 @@ dependencies = [
  "tauri-plugin-updater",
  "trash",
  "windows 0.61.3",
- "windows-version",
  "zip 2.6.1",
 ]
 

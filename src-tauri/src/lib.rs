@@ -406,16 +406,41 @@ fn saved_theme(app: &AppHandle) -> Option<tauri::Theme> {
     }
 }
 
+/// Whether Windows apps use the dark theme (Settings > Personalization > Colors).
+#[cfg(windows)]
+fn system_dark() -> bool {
+    use windows::core::w;
+    use windows::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD};
+    let mut value: u32 = 1;
+    let mut size = std::mem::size_of::<u32>() as u32;
+    let r = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            w!("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize"),
+            w!("AppsUseLightTheme"),
+            RRF_RT_REG_DWORD,
+            None,
+            Some(&mut value as *mut u32 as *mut _),
+            Some(&mut size),
+        )
+    };
+    r.is_ok() && value == 0
+}
+
+#[cfg(not(windows))]
+fn system_dark() -> bool {
+    false
+}
+
 fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
     let start_dir = std::env::args()
         .find_map(|a| a.strip_prefix("--dir=").map(str::to_owned))
         .or_else(|| std::env::args().nth(1).filter(|a| std::path::Path::new(a).is_dir()));
 
+    // Opaque on every platform: a transparent (Mica) window can show white
+    // for a moment at startup while its layers catch up.
     #[cfg(windows)]
-    let (platform, material) = {
-        let win11 = windows_version::OsVersion::current().build >= 22000;
-        ("win32", if win11 { "mica" } else { "none" })
-    };
+    let (platform, material) = ("win32", "none");
     #[cfg(target_os = "macos")]
     let (platform, material) = ("darwin", "none");
     #[cfg(all(unix, not(target_os = "macos")))]
@@ -440,16 +465,20 @@ fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
 
     #[cfg(windows)]
     {
-        use tauri::utils::config::WindowEffectsConfig;
-        use tauri::window::Effect;
         builder = builder.shadow(true);
-        if material == "mica" {
-            // Mica keeps resizing smooth; acrylic lags on some Windows 11 builds.
-            builder = builder
-                .transparent(true)
-                .effects(WindowEffectsConfig { effects: vec![Effect::Mica], ..Default::default() });
-        }
     }
+    // The window and the webview start out in the page's own background colour
+    // (body / --side-solid in styles.css), so the first frame already matches.
+    let dark = match saved_theme(app) {
+        Some(tauri::Theme::Dark) => true,
+        Some(tauri::Theme::Light) => false,
+        _ => system_dark(),
+    };
+    builder = builder.background_color(if dark {
+        tauri::window::Color(0x26, 0x27, 0x2b, 0xff)
+    } else {
+        tauri::window::Color(0xee, 0xf0, 0xf5, 0xff)
+    });
 
     let window = builder.build()?;
     // Show the window even if the page never signals readiness.
