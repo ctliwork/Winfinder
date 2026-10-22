@@ -104,6 +104,8 @@
     installUpdate: () => invoke('install_update'),
     onUpdateProgress: (cb) => T.event.listen('update-progress', (e) => cb(e.payload)),
     search: (root, query, showHidden) => invoke('search', { root, query, showHidden }),
+    everythingAvailable: () => invoke('everything_available').catch(() => false),
+    everything: (query) => invoke('everything', { query }).catch(() => null),
     watch: (dirs) => { invoke('watch', { dirs }).catch(() => {}); },
     onChanged: (cb) => T.event.listen('fs-changed', (e) => cb(e.payload)),
     startDrag: (files) => {

@@ -54,7 +54,7 @@
       colRoot: null,
       colActive: 0,
       colLists: [],
-      search: { query: '', scope: 'folder', results: null, busy: false },
+      search: { query: '', scope: 'folder', results: null, busy: false, filters: {} },
       scroll: 0,
       view: null,           // this tab's view; null = the default (prefs.view)
     };
@@ -215,11 +215,11 @@
     if (state.cwd === HOME && !state.search.results) {
       state.entries = q ? state.homeItems.filter((e) => e.name.toLowerCase().includes(q)) : state.homeItems.slice();
     } else if (state.search.results) {
-      state.entries = sortEntries(state.search.results);
+      state.entries = sortEntries(state.search.results.filter(passesFilters));
     } else {
       let list = visibleOf(dirCache.get(state.cwd)?.entries || []);
       if (q) list = list.filter((e) => e.name.toLowerCase().includes(q));
-      state.entries = list;
+      state.entries = list.filter(passesFilters);
     }
     // Grouped views list each group together (stable, so the sort holds inside).
     if (state.cwd !== HOME && curGroup() !== 'none' && ['list', 'icons'].includes(viewMode())) {
@@ -228,6 +228,28 @@
       state.entries = keyed.map(([, e]) => e);
     }
   }
+
+  // Search filters (type, size, modified date) from the bar under the toolbar.
+  const KIND_FILTER = {
+    dir: (e) => e.isDir,
+    image: (e) => I.category(e.ext) === 'image',
+    video: (e) => I.category(e.ext) === 'video',
+    audio: (e) => I.category(e.ext) === 'audio',
+    docs: (e) => ['pdf', 'doc', 'sheet', 'slide', 'text'].includes(I.category(e.ext)),
+    archive: (e) => I.category(e.ext) === 'archive',
+    code: (e) => I.category(e.ext) === 'code',
+    app: (e) => ['exe', 'msi', 'lnk', 'bat', 'cmd', 'appref-ms'].includes(e.ext),
+  };
+  const SIZE_FILTER = { lt100k: (n) => n < 100e3, gt1m: (n) => n > 1e6, gt100m: (n) => n > 100e6, gt1g: (n) => n > 1e9 };
+  function passesFilters(e) {
+    const f = state.search.filters || {};
+    if (state.cwd === HOME && !state.search.results) return true;
+    if (f.kind && !KIND_FILTER[f.kind](e)) return false;
+    if (f.size && (e.isDir || !SIZE_FILTER[f.size](e.size || 0))) return false;
+    if (f.date && (e.mtime || 0) < Date.now() - Number(f.date) * DAY) return false;
+    return true;
+  }
+  function filtersOn() { return Object.values(state.search.filters || {}).some(Boolean); }
 
   // ---------- grouping (like Explorer's 分組依據) ----------
   function curGroup() { return (!state.search.results && folderPref()?.group) || prefs.groupBy || 'none'; }
@@ -2003,10 +2025,10 @@
   searchInput.addEventListener('input', () => {
     state.search.query = searchInput.value;
     $('#search-box').classList.toggle('has-text', !!searchInput.value);
-    $('#search-scope').hidden = !searchInput.value;
+    $('#search-scope').hidden = !searchInput.value && !filtersOn();
     $('[data-scope="folder"]').textContent = `「${tabTitle({ ...state, search: { results: null } })}」`;
     clearTimeout(searchTimer);
-    if (state.search.scope === 'deep') searchTimer = setTimeout(runDeepSearch, 300);
+    if (state.search.scope !== 'folder') searchTimer = setTimeout(runDeepSearch, 300);
     else { state.search.results = null; computeEntries(); renderView(false).then(() => { renderStatus(); renderPathbar(); renderToolbar(); }); }
   });
   searchInput.addEventListener('keydown', (ev) => {
@@ -2016,11 +2038,21 @@
   });
   $('#search-clear').addEventListener('click', () => clearSearch(true));
   $('#search-scope').addEventListener('click', (ev) => { const b = ev.target.closest('[data-scope]'); if (b) setScope(b.dataset.scope); });
+  $('#search-scope').addEventListener('change', (ev) => {
+    const sel = ev.target.closest('.sf');
+    if (!sel) return;
+    state.search.filters = { ...state.search.filters, [sel.id.slice(3)]: sel.value };
+    sel.classList.toggle('on', !!sel.value);
+    computeEntries();
+    render();
+  });
+  // Everything (whole-PC search) shows up when its command-line client is installed.
+  api.everythingAvailable?.().then((ok) => { $('[data-scope="pc"]').hidden = !ok; });
 
   function setScope(scope) {
     state.search.scope = scope;
     $$('#search-scope [data-scope]').forEach((b) => b.classList.toggle('active', b.dataset.scope === scope));
-    if (scope === 'deep') runDeepSearch();
+    if (scope !== 'folder') runDeepSearch();
     else { state.search.results = null; $('#search-status').textContent = ''; computeEntries(); render(); }
   }
 
@@ -2031,8 +2063,15 @@
     $('#search-status').textContent = '搜尋中…';
     renderStatus();
     const tab = state;
-    const res = await api.search(state.cwd === HOME ? G.places.home : state.cwd, q, prefs.showHidden);
-    if (!res || tab !== state || state.search.query.trim() !== q) return;
+    const pc = state.search.scope === 'pc';
+    const res = pc ? await api.everything(q) : await api.search(state.cwd === HOME ? G.places.home : state.cwd, q, prefs.showHidden);
+    if (tab !== state || state.search.query.trim() !== q) return;
+    if (!res) {
+      state.search.busy = false;
+      $('#search-status').textContent = pc ? '無法使用 Everything（請確認它正在執行）' : '';
+      renderStatus();
+      return;
+    }
     state.search.busy = false;
     state.search.results = res.entries;
     $('#search-status').textContent = res.partial ? `顯示前 ${res.entries.length} 個結果` : `${res.entries.length} 個結果`;
@@ -2043,7 +2082,7 @@
 
   function clearSearch(rerender, silent = false) {
     const had = state.search.query || state.search.results;
-    state.search = { query: '', scope: 'folder', results: null, busy: false };
+    state.search = { query: '', scope: 'folder', results: null, busy: false, filters: {} };
     if (silent) return; // background tab: leave the visible search box alone
     syncSearchUi();
     if (rerender && had) { computeEntries(); render(); }
@@ -2054,8 +2093,12 @@
     const q = state.search.query;
     searchInput.value = q;
     $('#search-box').classList.toggle('has-text', !!q);
-    $('#search-scope').hidden = !q;
+    $('#search-scope').hidden = !q && !filtersOn();
     $('#search-status').textContent = '';
+    for (const sel of $$('#search-scope .sf')) {
+      sel.value = state.search.filters?.[sel.id.slice(3)] || '';
+      sel.classList.toggle('on', !!sel.value);
+    }
     $$('#search-scope [data-scope]').forEach((b) => b.classList.toggle('active', b.dataset.scope === state.search.scope));
   }
 

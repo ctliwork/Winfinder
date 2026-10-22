@@ -57,6 +57,21 @@
         <span>搜尋：</span>
         <button data-scope="folder" class="chip active"></button>
         <button data-scope="deep" class="chip">包含子資料夾</button>
+        <button data-scope="pc" class="chip" hidden title="用 Everything 的索引搜尋所有磁碟">整台電腦</button>
+        <span class="sf-sep"></span>
+        <select id="sf-kind" class="sf" title="類型">
+          <option value="">所有類型</option><option value="dir">資料夾</option><option value="image">圖片</option>
+          <option value="video">影片</option><option value="audio">音樂</option><option value="docs">文件</option>
+          <option value="archive">壓縮檔</option><option value="code">程式碼</option><option value="app">應用程式</option>
+        </select>
+        <select id="sf-size" class="sf" title="大小">
+          <option value="">任何大小</option><option value="lt100k">小於 100 KB</option><option value="gt1m">大於 1 MB</option>
+          <option value="gt100m">大於 100 MB</option><option value="gt1g">大於 1 GB</option>
+        </select>
+        <select id="sf-date" class="sf" title="修改日期">
+          <option value="">任何時間</option><option value="1">今天</option><option value="7">最近 7 天</option>
+          <option value="30">最近 30 天</option><option value="365">最近一年</option>
+        </select>
         <span id="search-status"></span>
       </div>
 

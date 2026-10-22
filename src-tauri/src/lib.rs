@@ -274,6 +274,16 @@ async fn rich_preview(path: String) -> Result<preview::Preview, String> {
 }
 
 #[tauri::command]
+fn everything_available() -> bool {
+    search::everything_available()
+}
+
+#[tauri::command]
+async fn everything(query: String) -> Option<search::SearchResult> {
+    blocking(move || search::everything(&query)).await.ok().flatten()
+}
+
+#[tauri::command]
 async fn search(root: String, query: String, show_hidden: bool) -> Option<search::SearchResult> {
     blocking(move || search::search(&root, &query, show_hidden)).await.ok().flatten()
 }
@@ -430,7 +440,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             places, pin_home, list_dir, new_file, dir_size, compress, extract, open_terminal, native_menu, properties,
-            clipboard_write, clipboard_read, clipboard_clear, cancel_transfer, restore_trash, disk_free, disk_space, recent_files, folder_count, thumbnail, open_path, reveal, trash, rename, mkdir,
+            clipboard_write, clipboard_read, clipboard_clear, cancel_transfer, restore_trash,
+            everything_available, everything, disk_free, disk_space, recent_files, folder_count, thumbnail, open_path, reveal, trash, rename, mkdir,
             transfer, read_text, rich_preview, search, watch, check_update, install_update
         ])
         .run(tauri::generate_context!())
