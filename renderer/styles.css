@@ -259,7 +259,76 @@ body.blurred .cap { color: var(--text3); }
 .chip.active { background: var(--accent); color: #fff; }
 #search-status { margin-left: auto; color: var(--text3); }
 
-#content { flex: 1; overflow: auto; position: relative; outline: none; }
+#body { flex: 1; min-height: 0; display: flex; }
+#content { flex: 1; min-width: 0; overflow: auto; position: relative; outline: none; }
+#pane-resizer, #preview-pane { display: none; }
+body.pane-open #pane-resizer { display: block; width: 5px; margin-right: -5px; cursor: col-resize; position: relative; z-index: 3; flex: none; }
+body.pane-open #preview-pane {
+  display: flex; flex-direction: column; width: var(--pane-w, 320px); flex: none;
+  border-left: 0.5px solid var(--hairline); background: rgba(0, 0, 0, 0.015);
+  animation: paneIn 0.25s cubic-bezier(.2, .8, .2, 1);
+}
+@keyframes paneIn { from { opacity: 0; transform: translateX(16px); } }
+#pv-media { flex: 1; min-height: 160px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 14px; overflow: hidden; }
+#pv-media img, #pv-media video { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18); }
+#pv-media iframe { width: 100%; height: 100%; border: 0; border-radius: 8px; background: #fff; }
+#pv-media[data-kind="doc"], #pv-media[data-kind="frame"] { align-items: stretch; justify-content: stretch; padding: 10px; }
+#pv-media .ql-info .ico { width: 110px; height: 110px; }
+#pv-media audio { width: 100%; margin-top: 12px; }
+#pv-info { flex: none; padding: 12px 18px 18px; border-top: 0.5px solid var(--hairline); max-height: 45%; overflow: auto; }
+#pv-info .pv-name { text-align: left; font-size: 14px; }
+#pv-info .pv-kind { margin: 2px 0 10px; }
+#pv-info .pv-table { max-width: none; }
+#pv-info .pv-table span:first-child { flex: none; white-space: nowrap; }
+#pv-info .pv-table span:last-child { text-align: right; word-break: break-all; }
+.pv-hint { color: var(--text3); font-size: 12px; }
+.pv-open { margin-top: 12px; width: 100%; padding: 7px 0; border-radius: 8px; background: var(--capsule); box-shadow: var(--shadow-sm); font-size: 12.5px; }
+.pv-open:hover { background: var(--accent); color: #fff; }
+#btn-preview.on { color: var(--accent); background: rgba(var(--accent-rgb), 0.12); }
+.pv-stack { position: relative; width: 140px; height: 120px; }
+.pv-stack span { position: absolute; inset: 0; display: grid; place-items: center; transform: rotate(calc((var(--k) - 1) * 8deg)) translateX(calc((var(--k) - 1) * 10px)); }
+.pv-stack .ico { width: 90px; height: 90px; filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.2)); }
+
+/* rich previews (pane and Quick Look) */
+.pv-scroll { flex: 1; min-height: 0; width: 100%; overflow: auto; border-radius: 8px; }
+.pv-note { flex: none; font-size: 11.5px; color: var(--text3); padding: 6px 4px 0; text-align: center; }
+.pv-doc { user-select: text; line-height: 1.65; font-size: 13px; color: var(--text); }
+.pv-doc.page { background: var(--content-bg); max-width: 760px; margin: 0 auto; padding: 28px 34px; border-radius: 8px; box-shadow: var(--shadow-sm); }
+.pv-doc.md { max-width: 760px; margin: 0 auto; padding: 18px 24px; }
+.pv-doc h1 { font-size: 1.6em; margin: 0.4em 0; } .pv-doc h2 { font-size: 1.35em; margin: 0.6em 0 0.3em; }
+.pv-doc h3, .pv-doc h4 { font-size: 1.12em; margin: 0.6em 0 0.3em; }
+.pv-doc p { margin: 0.45em 0; } .pv-doc ul, .pv-doc ol { padding-left: 1.4em; margin: 0.4em 0; }
+.pv-doc code { font-family: "Cascadia Code", Consolas, monospace; font-size: 0.92em; background: var(--hover); padding: 1px 5px; border-radius: 4px; }
+.pv-doc blockquote { margin: 0.5em 0; padding: 2px 12px; border-left: 3px solid var(--accent); color: var(--text2); }
+.pv-doc hr { border: 0; border-top: 1px solid var(--hairline); margin: 1em 0; }
+.md-code { background: var(--hover); padding: 10px 12px; border-radius: 8px; overflow: auto; font: 12px/1.5 "Cascadia Code", Consolas, monospace; }
+.pv-code { display: flex; font: 12px/1.55 "Cascadia Code", "SF Mono", Consolas, "Noto Sans Mono", monospace; background: var(--content-bg); box-shadow: var(--shadow-sm); }
+.pv-code pre { margin: 0; padding: 12px 0; }
+.pv-code .gutter { padding: 12px 10px 12px 12px; text-align: right; color: var(--text3); user-select: none; border-right: 0.5px solid var(--hairline); position: sticky; left: 0; background: var(--content-bg); }
+.pv-code .src { padding: 12px 14px; user-select: text; color: var(--text); white-space: pre; }
+.pv-sheet { flex: 1; min-height: 0; width: 100%; display: flex; flex-direction: column; }
+.pv-sheet .pv-scroll { background: var(--content-bg); box-shadow: var(--shadow-sm); border-radius: 8px 8px 0 0; }
+.grid-table { border-collapse: collapse; font-size: 12px; user-select: text; }
+.grid-table th, .grid-table td { border: 0.5px solid var(--hairline); padding: 3px 8px; white-space: nowrap; max-width: 260px; overflow: hidden; text-overflow: ellipsis; text-align: left; }
+.grid-table th { position: sticky; top: 0; background: var(--glass-strong); color: var(--text2); font-weight: 500; z-index: 1; }
+.grid-table tr th:first-child { position: sticky; left: 0; text-align: right; z-index: 2; }
+.sheet-tabs { display: flex; gap: 2px; padding: 4px 6px; background: var(--hover); border-radius: 0 0 8px 8px; font-size: 11.5px; overflow: hidden; }
+.sheet-tabs span { padding: 3px 10px; border-radius: 5px; color: var(--text2); white-space: nowrap; }
+.sheet-tabs span.on { background: var(--content-bg); color: #1f9d55; font-weight: 600; box-shadow: var(--shadow-sm); }
+.pv-slides { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; padding: 4px; }
+.slide { position: relative; aspect-ratio: 16 / 9; background: var(--content-bg); border-radius: 8px; box-shadow: var(--shadow-sm), 0 4px 12px rgba(0, 0, 0, 0.08); padding: 12px 14px 10px; overflow: hidden; }
+.slide-no { position: absolute; right: 8px; bottom: 6px; font-size: 10px; color: var(--text3); }
+.slide-body { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--text2); }
+.slide-body b { font-size: 13px; color: var(--text); margin-bottom: 4px; }
+.slide-body span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pv-archive { background: var(--content-bg); border-radius: 8px; box-shadow: var(--shadow-sm); padding: 4px; }
+.arc-row { display: flex; align-items: center; gap: 8px; height: 26px; padding: 0 8px; border-radius: 6px; font-size: 12px; }
+.arc-row:nth-child(even) { background: var(--stripe); }
+.arc-row .ico { width: 16px; height: 16px; flex: none; }
+.arc-row .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.arc-row .sz { color: var(--text3); font-size: 11px; }
+.muted { color: var(--text3); }
+#pv-media .pv-slides { grid-template-columns: 1fr; }
 #view { min-height: 100%; }
 #empty {
   position: absolute; inset: 0; display: grid; place-items: center; align-content: center; gap: 10px;
@@ -483,14 +552,11 @@ body.view-icons #zoom { display: block; }
 .ql-open { padding: 4px 12px; border-radius: 999px; background: var(--capsule); box-shadow: var(--shadow-sm); font-size: 12px; }
 .ql-open:hover { background: var(--accent); color: #fff; }
 #ql-body { flex: 1; min-height: 0; display: grid; place-items: center; overflow: hidden; }
+#ql-body[data-kind="doc"], #ql-body[data-kind="frame"] { display: flex; flex-direction: column; padding: 14px; background: rgba(0, 0, 0, 0.025); }
+#ql-body[data-kind="frame"] { padding: 0; }
 #ql-body img, #ql-body video { max-width: 100%; max-height: 100%; object-fit: contain; }
 #ql-body iframe { width: 100%; height: 100%; border: 0; background: #fff; }
 #ql-body audio { width: 70%; }
-#ql-body pre {
-  margin: 0; width: 100%; height: 100%; overflow: auto; padding: 18px 22px;
-  font: 12.5px/1.55 "Cascadia Code", "SF Mono", Consolas, "Noto Sans Mono", monospace;
-  white-space: pre-wrap; word-break: break-word; user-select: text; color: var(--text);
-}
 .ql-info { display: flex; flex-direction: column; align-items: center; }
 .ql-info .ico { width: 160px; height: 160px; margin-bottom: 14px; filter: drop-shadow(0 10px 20px rgba(0, 0, 0, 0.2)); }
 

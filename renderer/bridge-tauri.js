@@ -81,6 +81,7 @@
     mkdir: (dir) => invoke('mkdir', { dir }).then(ok('path'), fail),
     transfer: (op, files, dest) => invoke('transfer', { op, files, dest }),
     readText: (path) => invoke('read_text', { path }),
+    richPreview: (path) => invoke('rich_preview', { path }),
     search: (root, query, showHidden) => invoke('search', { root, query, showHidden }),
     watch: (dirs) => { invoke('watch', { dirs }).catch(() => {}); },
     onChanged: (cb) => T.event.listen('fs-changed', (e) => cb(e.payload)),

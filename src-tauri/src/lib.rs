@@ -1,6 +1,7 @@
 #[doc(hidden)]
 pub mod fsops;
 mod places;
+mod preview;
 mod recent;
 mod search;
 mod thumb;
@@ -99,6 +100,11 @@ async fn read_text(path: String) -> TextResult {
         Ok(Ok((text, binary, truncated))) => TextResult { text, binary, truncated, error: None },
         Ok(Err(e)) | Err(e) => TextResult { text: None, binary: false, truncated: false, error: Some(e) },
     }
+}
+
+#[tauri::command]
+async fn rich_preview(path: String) -> Result<preview::Preview, String> {
+    blocking(move || preview::preview(&path)).await?
 }
 
 #[tauri::command]
@@ -216,7 +222,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             places, list_dir, disk_free, disk_space, recent_files, folder_count, thumbnail, open_path, reveal, trash, rename, mkdir,
-            transfer, read_text, search, watch
+            transfer, read_text, rich_preview, search, watch
         ])
         .run(tauri::generate_context!())
         .expect("error while running Finder");

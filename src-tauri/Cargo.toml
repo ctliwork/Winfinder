@@ -26,6 +26,8 @@ dirs = "6"
 base64 = "0.22"
 png = "0.17"
 lnk = "0.6"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+quick-xml = "0.37"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

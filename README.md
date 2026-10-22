@@ -18,6 +18,8 @@ Rust 後端各模組：
 - `search.rs`：用 jwalk 多執行緒搜尋子資料夾
 - `places.rs`：側邊欄位置、磁碟代號與名稱、剩餘空間
 - `thumb.rs`：Windows 殼層縮圖（圖片、影片、PDF、Office 檔）
+- `preview.rs`：解析 Word／PowerPoint／Excel 內容與 ZIP 清單，給預覽用
+- `recent.rs`：讀取系統的「最近使用的檔案」
 - `lib.rs`：Tauri 指令、資料夾監看（notify）、視窗（Windows 11 Mica 效果）
 
 ## 效能實測
@@ -61,6 +63,8 @@ npm test         # Rust 單元測試
 - 四種檢視：圖像、列表、**直欄**（預設）、圖庫
 - 直欄檢視：點選逐層展開、右側預覽欄、方向鍵上下選取、左右切換欄位
 - 空白鍵 Quick Look：圖片、影片、音訊、PDF、文字／原始碼，開關有縮放動畫
+- 預覽窗格（Alt+P，同檔案總管）：選取檔案就在右側顯示預覽和詳細資訊
+- 預覽格式：Word（標題與內文）、Excel（表格與工作表名稱）、PowerPoint（逐頁）、ZIP 內容清單、Markdown、CSV／TSV 表格、程式碼（含行號）；Windows 上其他格式用系統縮圖
 - 側邊欄（個人專屬、位置、自訂釘選）、路徑列、狀態列與剩餘空間
 - 拖放：同磁碟搬移、跨磁碟或按 Ctrl 拷貝；可拖到其他 App、也可從檔案總管拖進來
 - 新增資料夾、重新命名、製作副本、拷貝／剪下／貼上、丟到資源回收筒
@@ -78,6 +82,7 @@ npm test         # Rust 單元測試
 | Ctrl+W | 關閉分頁 |
 | Ctrl+Tab / Ctrl+Shift+Tab | 下一個／上一個分頁 |
 | Ctrl+1/2/3/4 | 圖像／列表／直欄／圖庫 |
+| Alt+P | 預覽窗格 |
 | 空白鍵 | Quick Look |
 | Enter、Ctrl+↓ | 打開 |
 | F2 | 重新命名 |

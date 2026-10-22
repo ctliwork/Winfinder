@@ -316,6 +316,7 @@
     await renderView(animate);
     renderPathbar();
     renderStatus();
+    updatePane();
   }
 
   function renderToolbar() {
@@ -694,6 +695,7 @@
       el.classList.toggle('sel', !!e && state.sel.has(e.path));
     }
     renderStatus();
+    updatePane();
   }
 
   function renderPathbar() {
@@ -1184,6 +1186,7 @@
       '-',
       { label: '顯示隱藏的項目', kbd: 'Ctrl+Shift+.', check: prefs.showHidden, action: toggleHidden },
       { label: prefs.sidebarHidden ? '顯示側邊欄' : '隱藏側邊欄', kbd: 'Ctrl+Alt+S', action: toggleSidebar },
+      { label: '預覽窗格', kbd: 'Alt+P', check: !!prefs.previewPane, action: togglePane },
       { label: '重新整理', kbd: 'F5', action: () => refresh(true) },
       '-',
       { html: '<div class="mlabel">強調色</div>' },
@@ -1288,7 +1291,7 @@
   function toggleSidebar() {
     prefs.sidebarHidden = !prefs.sidebarHidden;
     savePrefs();
-    document.body.classList.toggle('sidebar-hidden', prefs.sidebarHidden);
+    document.body.classList.toggle('sidebar-hidden', !!prefs.sidebarHidden);
   }
   function setAccent(c) {
     prefs.accent = c;
@@ -1466,6 +1469,7 @@
     if (ctrl && k.toLowerCase() === 'f') { ev.preventDefault(); searchInput.focus(); searchInput.select(); return; }
     if (inInput) return;
 
+    if (ev.altKey && !ctrl && k.toLowerCase() === 'p') { ev.preventDefault(); togglePane(); return; }
     if (ctrl && k.toLowerCase() === 't') { ev.preventDefault(); openTab(HOME); return; }
     if (ctrl && k.toLowerCase() === 'w') { ev.preventDefault(); closeTab(state); return; }
     if (ctrl && k === 'Tab') { ev.preventDefault(); cycleTab(ev.shiftKey ? -1 : 1); return; }
@@ -1521,6 +1525,94 @@
     if (ev.button === 4) goForward();
   });
 
+  // ---------- preview pane ----------
+  const previewHelpers = { fileUrl: (p) => P.fileUrl(p), fmtSize, fmtDate, badge: specialBadge };
+  const pane = $('#preview-pane');
+  let paneTimer = null;
+  let paneShown = null;
+
+  function paneVisible() {
+    const mode = viewMode();
+    return prefs.previewPane && (mode === 'icons' || mode === 'list' || mode === 'home');
+  }
+
+  // Debounced so holding an arrow key doesn't load every file on the way.
+  function updatePane() {
+    const on = !!paneVisible();
+    document.body.classList.toggle('pane-open', on);
+    $('#btn-preview').classList.toggle('on', !!prefs.previewPane);
+    if (!on) { if (paneShown) { $('#pv-media').innerHTML = ''; paneShown = null; } return; }
+    clearTimeout(paneTimer);
+    paneTimer = setTimeout(renderPane, 90);
+  }
+
+  function infoRows(rows) {
+    return `<div class="pv-table">${rows.filter(([, v]) => v != null && v !== '').map(([k, v]) => `<div><span>${k}</span><span>${esc(v)}</span></div>`).join('')}</div>`;
+  }
+
+  async function renderPane() {
+    const sel = selectedEntries();
+    const media = $('#pv-media');
+    const info = $('#pv-info');
+    if (sel.length === 1) {
+      const e = sel[0];
+      const key = `${e.path}|${e.mtime}`;
+      if (paneShown !== key) {
+        paneShown = key;
+        window.Preview.fill(media, e, { helpers: previewHelpers });
+      }
+      info.innerHTML = `
+        <div class="pv-name">${esc(e.name)}</div>
+        <div class="pv-kind">${esc(I.kindLabel(e))}</div>
+        ${infoRows([
+          ['大小', e.isDir || e.size == null ? null : e.size < 1000 ? fmtSize(e.size) : `${fmtSize(e.size)}（${e.size.toLocaleString()} 位元組）`],
+          ['建立日期', e.birth ? fmtDate(e.birth) : null],
+          ['修改日期', e.mtime ? fmtDate(e.mtime) : null],
+          ['位置', isVirtual(e) ? null : P.dirname(e.path)],
+        ])}
+        <button class="pv-open">${e.isDir ? '打開' : '以預設 App 打開'}</button>`;
+      $('.pv-open', info).onclick = () => openEntry(e);
+      return;
+    }
+    paneShown = null;
+    if (sel.length > 1) {
+      const files = sel.filter((e) => !e.isDir);
+      const total = files.reduce((n, e) => n + (e.size || 0), 0);
+      media.innerHTML = `<div class="pv-stack">${sel.slice(0, 3).map((e, i) => `<span style="--k:${i}">${e.isDir ? I.folder() : I.file(e.ext)}</span>`).join('')}</div>`;
+      media.dataset.kind = 'info';
+      info.innerHTML = `<div class="pv-name">已選取 ${sel.length} 個項目</div>${infoRows([['檔案大小合計', files.length ? fmtSize(total) : null]])}`;
+      return;
+    }
+    media.dataset.kind = 'info';
+    if (state.cwd === HOME) {
+      media.innerHTML = `<div class="ql-info">${I.sidebar('home')}</div>`;
+      info.innerHTML = '<div class="pv-name">首頁</div><div class="pv-kind">選取檔案即可預覽</div>';
+      return;
+    }
+    media.innerHTML = `<div class="ql-info">${I.folder(specialBadge(state.cwd))}</div>`;
+    info.innerHTML = `<div class="pv-name">${esc(displayName(state.cwd))}</div><div class="pv-kind">${state.entries.length} 個項目</div>
+      <div class="pv-hint">選取檔案即可預覽</div>`;
+  }
+
+  function togglePane() {
+    prefs.previewPane = !prefs.previewPane;
+    savePrefs();
+    if (prefs.previewPane && !paneVisible()) toast('預覽窗格在圖像、列表與首頁檢視中顯示');
+    updatePane();
+  }
+  $('#btn-preview').addEventListener('click', togglePane);
+
+  $('#pane-resizer').addEventListener('mousedown', (ev) => {
+    const startX = ev.clientX; const startW = prefs.paneW || 320;
+    const move = (e) => {
+      prefs.paneW = Math.max(240, Math.min(720, startW - (e.clientX - startX)));
+      document.documentElement.style.setProperty('--pane-w', `${prefs.paneW}px`);
+    };
+    const up = () => { savePrefs(); window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+  });
+
   // ---------- quick look ----------
   const ql = {
     isOpen: false,
@@ -1549,34 +1641,7 @@
     async show(e) {
       this.current = e;
       $('#ql-title').textContent = e.name;
-      const body = $('#ql-body');
-      body.innerHTML = '';
-      const cat = I.category(e.ext);
-      const info = (extra = '') => `<div class="ql-info">${e.isDir ? I.folder(specialBadge(e.path)) : I.file(e.ext)}
-        <div class="pv-name">${esc(e.name)}</div><div class="pv-kind">${esc(I.kindLabel(e))}${e.isDir ? '' : ` — ${fmtSize(e.size)}`}</div>
-        <div class="pv-table"><div><span>修改日期</span><span>${fmtDate(e.mtime)}</span></div>${extra}</div></div>`;
-      if (e.isDir) {
-        const count = await api.folderCount(e.path);
-        body.innerHTML = info(`<div><span>內容</span><span>${count == null ? '--' : `${count} 個項目`}</span></div>`);
-        return;
-      }
-      const url = P.fileUrl(e.path);
-      if (WEB_IMAGES.has(e.ext)) { body.innerHTML = `<img src="${url}" draggable="false">`; return; }
-      if (cat === 'video') { body.innerHTML = `<video src="${url}" controls autoplay></video>`; return; }
-      if (cat === 'audio') { body.innerHTML = `<div class="ql-info">${I.file(e.ext)}<div class="pv-name">${esc(e.name)}</div><audio src="${url}" controls autoplay style="margin-top:16px;width:360px"></audio></div>`; return; }
-      if (e.ext === 'pdf') { body.innerHTML = `<iframe src="${url}"></iframe>`; return; }
-      if ((cat === 'text' || cat === 'code' || cat === 'other' || e.ext === 'csv' || e.ext === 'tsv') && (e.size || 0) < 20e6) {
-        const res = await api.readText(e.path);
-        if (this.current !== e) return;
-        if (res.text != null) {
-          body.innerHTML = '<pre></pre>';
-          $('pre', body).textContent = res.text + (res.truncated ? '\n\n…（只顯示前 256 KB）' : '');
-          return;
-        }
-      }
-      const thumb = await api.thumb(e.path, 1024);
-      if (this.current !== e) return;
-      body.innerHTML = thumb ? `<img src="${thumb}" draggable="false">` : info();
+      await window.Preview.fill($('#ql-body'), e, { autoplay: true, helpers: previewHelpers });
     },
     close() {
       if (!this.isOpen) return;
@@ -1638,7 +1703,8 @@
     applyAccent();
     document.documentElement.style.setProperty('--icon', `${prefs.icon}px`);
     document.documentElement.style.setProperty('--sidebar-w', `${prefs.sidebarW}px`);
-    document.body.classList.toggle('sidebar-hidden', prefs.sidebarHidden);
+    document.documentElement.style.setProperty('--pane-w', `${prefs.paneW || 320}px`);
+    document.body.classList.toggle('sidebar-hidden', !!prefs.sidebarHidden);
     $('#zoom').value = prefs.icon;
     try {
       G.places = await api.places();
