@@ -132,7 +132,7 @@
     const alive = () => el._tok === token;
     el.innerHTML = '';
     el.dataset.kind = '';
-    const set = (html, kind) => { if (alive()) { el.innerHTML = html; el.dataset.kind = kind; h.after?.(el); } };
+    const set = (html, kind) => { if (alive()) { el.innerHTML = html; el.dataset.kind = kind; h.after?.(el); zoomable(el); } };
     const cat = I.category(e.ext);
 
     if (e.isDir) {
@@ -174,6 +174,88 @@
     const thumb = await api.thumb(e.path, 1024);
     if (!alive()) return;
     set(thumb ? `<img src="${thumb}" draggable="false">` : infoCard(e, h), thumb ? 'media' : 'info');
+  }
+
+  // Zoom for previews: images and videos zoom around the pointer (wheel,
+  // double-click, or the bar) and pan by dragging; documents, tables and code
+  // zoom with Ctrl+wheel or the bar and keep scrolling normally.
+  // `el._zoom.step(+1 / -1 / 0)` serves keyboard shortcuts.
+  const ZOOMS = [0.25, 0.33, 0.5, 0.67, 0.75, 0.9, 1, 1.25, 1.5, 2, 3, 4, 6, 8];
+  function zoomable(el) {
+    el._zoom = null;
+    const media = el.querySelector(':scope > img, :scope > video');
+    const doc = el.querySelector('.pv-scroll');
+    if (!media && !doc) return;
+    let z = 1; let x = 0; let y = 0;
+    const bar = document.createElement('div');
+    bar.className = 'zbar';
+    bar.innerHTML = '<button data-z="-1" title="縮小 (Ctrl+-)">−</button><span>100%</span><button data-z="1" title="放大 (Ctrl+=)">+</button><button data-z="0" title="符合視窗 (Ctrl+0)">符合</button>';
+    el.appendChild(bar);
+    const apply = () => {
+      if (media) {
+        media.style.transform = z === 1 ? '' : `translate(${x}px, ${y}px) scale(${z})`;
+        media.classList.toggle('zoomed', z > 1);
+      } else {
+        for (const c of doc.children) c.style.zoom = z === 1 ? '' : z;
+      }
+      bar.querySelector('span').textContent = `${Math.round(z * 100)}%`;
+      bar.classList.toggle('changed', z !== 1);
+    };
+    // Zoom to `nz`, keeping the point (px, py) — relative to the box centre — still.
+    const zoomTo = (nz, px = 0, py = 0) => {
+      nz = Math.max(ZOOMS[0], Math.min(ZOOMS[ZOOMS.length - 1], nz));
+      if (media) {
+        x = px - (px - x) * (nz / z);
+        y = py - (py - y) * (nz / z);
+        if (nz <= 1) { x = 0; y = 0; }
+      }
+      z = nz;
+      apply();
+    };
+    const step = (dir, px, py) => {
+      if (dir === 0) { zoomTo(1); return; }
+      const next = dir > 0 ? ZOOMS.find((v) => v > z + 1e-3) : [...ZOOMS].reverse().find((v) => v < z - 1e-3);
+      if (next) zoomTo(next, px, py);
+    };
+    const rel = (ev) => {
+      const r = el.getBoundingClientRect();
+      return [ev.clientX - (r.left + r.width / 2), ev.clientY - (r.top + r.height / 2)];
+    };
+    el._zoom = { step };
+    bar.addEventListener('click', (ev) => {
+      const b = ev.target.closest('[data-z]');
+      if (b) step(Number(b.dataset.z));
+    });
+    bar.addEventListener('mousedown', (ev) => ev.stopPropagation());
+    el.addEventListener('wheel', (ev) => {
+      if (!el.contains(bar)) return; // content was replaced
+      if (!media && !ev.ctrlKey) return; // documents scroll normally
+      ev.preventDefault();
+      const [px, py] = rel(ev);
+      // A mouse-wheel notch is one 25% step; touchpads send small deltas.
+      const f = Math.abs(ev.deltaY) >= 50 ? (ev.deltaY < 0 ? 1.25 : 0.8) : Math.exp(-ev.deltaY * 0.01);
+      zoomTo(z * f, px, py);
+    }, { passive: false });
+    if (!media) return;
+    media.addEventListener('dblclick', (ev) => {
+      const [px, py] = rel(ev);
+      zoomTo(z > 1 ? 1 : 2, px, py);
+    });
+    media.addEventListener('mousedown', (ev) => {
+      if (z <= 1 || ev.button !== 0) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      const sx = ev.clientX - x; const sy = ev.clientY - y;
+      media.classList.add('panning');
+      const move = (e) => { x = e.clientX - sx; y = e.clientY - sy; apply(); };
+      const up = () => {
+        media.classList.remove('panning');
+        window.removeEventListener('mousemove', move);
+        window.removeEventListener('mouseup', up);
+      };
+      window.addEventListener('mousemove', move);
+      window.addEventListener('mouseup', up);
+    });
   }
 
   window.Preview = { fill, markdown, parseDelimited };
