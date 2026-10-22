@@ -7,12 +7,14 @@ use std::sync::Mutex;
 
 static CACHE: Mutex<Option<HashMap<String, Option<String>>>> = Mutex::new(None);
 
-pub fn thumbnail(path: &str, size: i32) -> Option<String> {
-    let key = format!("{path}|{size}");
+/// `icon_only` asks for the icon Explorer shows (e.g. a folder's own icon,
+/// including custom desktop.ini icons) rather than a content preview.
+pub fn thumbnail(path: &str, size: i32, icon_only: bool) -> Option<String> {
+    let key = format!("{path}|{size}|{icon_only}");
     if let Some(hit) = CACHE.lock().unwrap().get_or_insert_with(HashMap::new).get(&key) {
         return hit.clone();
     }
-    let value = platform_thumbnail(path, size);
+    let value = platform_thumbnail(path, size, icon_only);
     let mut cache = CACHE.lock().unwrap();
     let map = cache.get_or_insert_with(HashMap::new);
     if map.len() > 4000 {
@@ -37,7 +39,7 @@ fn encode_png(rgba: &[u8], w: u32, h: u32) -> Option<String> {
 }
 
 #[cfg(windows)]
-fn platform_thumbnail(path: &str, size: i32) -> Option<String> {
+fn platform_thumbnail(path: &str, size: i32, icon_only: bool) -> Option<String> {
     use std::ffi::c_void;
     use windows::core::PCWSTR;
     use windows::Win32::Foundation::SIZE;
@@ -46,14 +48,15 @@ fn platform_thumbnail(path: &str, size: i32) -> Option<String> {
         DIB_RGB_COLORS, HGDIOBJ,
     };
     use windows::Win32::System::Com::{CoInitializeEx, COINIT_APARTMENTTHREADED};
-    use windows::Win32::UI::Shell::{IShellItemImageFactory, SHCreateItemFromParsingName, SIIGBF_BIGGERSIZEOK};
+    use windows::Win32::UI::Shell::{IShellItemImageFactory, SHCreateItemFromParsingName, SIIGBF_BIGGERSIZEOK, SIIGBF_ICONONLY};
 
     unsafe {
         // Each worker thread needs COM; repeated calls on the same thread are harmless.
         let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
         let wide: Vec<u16> = path.encode_utf16().chain(Some(0)).collect();
         let factory: IShellItemImageFactory = SHCreateItemFromParsingName(PCWSTR(wide.as_ptr()), None).ok()?;
-        let hbmp = factory.GetImage(SIZE { cx: size, cy: size }, SIIGBF_BIGGERSIZEOK).ok()?;
+        let flags = if icon_only { SIIGBF_BIGGERSIZEOK | SIIGBF_ICONONLY } else { SIIGBF_BIGGERSIZEOK };
+        let hbmp = factory.GetImage(SIZE { cx: size, cy: size }, flags).ok()?;
         let obj = HGDIOBJ(hbmp.0);
 
         let mut bm = BITMAP::default();
@@ -96,7 +99,7 @@ fn platform_thumbnail(path: &str, size: i32) -> Option<String> {
 }
 
 #[cfg(not(windows))]
-fn platform_thumbnail(_path: &str, _size: i32) -> Option<String> {
+fn platform_thumbnail(_path: &str, _size: i32, _icon_only: bool) -> Option<String> {
     None
 }
 
@@ -117,7 +120,15 @@ mod tests {
         let bytes = base64::engine::general_purpose::STANDARD.decode(url.split(',').nth(1).unwrap()).unwrap();
         let file = std::env::temp_dir().join(format!("finder-win-thumb-{}.png", std::process::id()));
         std::fs::write(&file, bytes).unwrap();
-        let thumb = super::platform_thumbnail(file.to_str().unwrap(), 48);
+        let thumb = super::platform_thumbnail(file.to_str().unwrap(), 48, false);
         assert!(thumb.is_some_and(|t| t.starts_with("data:image/png;base64,")));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn shell_icon_for_folder() {
+        let dir = std::env::temp_dir();
+        let icon = super::platform_thumbnail(dir.to_str().unwrap(), 64, true);
+        assert!(icon.is_some_and(|t| t.starts_with("data:image/png;base64,")));
     }
 }

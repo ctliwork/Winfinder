@@ -325,6 +325,7 @@
     renderPathbar();
     renderStatus();
     updatePane();
+    fillFolderIcons();
   }
 
   function renderToolbar() {
@@ -355,6 +356,8 @@
   // Laid out like Explorer's navigation pane: Home, OneDrive, the Quick Access
   // pins, then This PC with its drives.
   const PC = '::pc';
+  // Rows whose glyph is replaced by the Windows icon when that option is on.
+  const SHELL_ICON_ROWS = new Set(['desktop', 'doc', 'download', 'photo', 'music', 'video', 'cloud']);
   function renderSidebar() {
     if (!G.places) return;
     const nav = $('#places');
@@ -370,7 +373,7 @@
       const leaf = kids && kids.length === 0;
       let html = `<div class="place${norm(p) === active ? ' active' : ''}" data-path="${esc(p)}" style="--lvl:${lvl}" ${extra}>
         <span class="twisty${open && !leaf ? ' open' : ''}${leaf ? ' none' : ''}" data-twisty="${esc(p)}">${chev}</span>
-        ${I.sidebar(icon)}<span>${esc(label)}</span>${tail}</div>`;
+        ${winFolderIcons() && (icon === 'folder' || SHELL_ICON_ROWS.has(icon)) ? folderIco(p, 16) : I.sidebar(icon)}<span>${esc(label)}</span>${tail}</div>`;
       if (open && kids) html += kids.map((k) => row(k.path, k.name, 'folder', lvl + 1)).join('');
       return html;
     };
@@ -387,6 +390,7 @@
       <div class="place" data-path="${PC}"><span class="twisty${pcOpen ? ' open' : ''}" data-twisty="${PC}">${chev}</span>${I.sidebar('pc')}<span>本機</span></div>
       ${drives}`;
     nav.scrollTop = scroll;
+    fillFolderIcons(nav);
     if (missing.length) Promise.all(missing.map((p) => listDir(p))).then(renderSidebar);
   }
 
@@ -398,9 +402,40 @@
     renderSidebar();
   }
 
+  // Folders show the icon Windows gives them (special folders, custom
+  // desktop.ini icons) unless the Finder look is picked in the ⋯ menu.
+  function winFolderIcons() { return isWin && !!api.folderIcon && prefs.folderIcons !== 'finder'; }
+  const folderIconCache = new Map(); // `${path}|${px}` -> data URL, or null when Windows has none
+  const fkey = (p, px) => `${norm(p)}|${px}`;
+  function folderIco(p, px, badge = specialBadge(p)) {
+    if (!winFolderIcons() || !p || p === HOME) return I.folder(badge);
+    const hit = folderIconCache.get(fkey(p, px));
+    if (hit) return `<img class="fico" src="${hit}" draggable="false">`;
+    if (hit === null) return I.folder(badge);
+    return `<span class="fpend" data-ficon="${esc(p)}" data-px="${px}">${I.folder(badge)}</span>`;
+  }
+  async function folderIconUrl(p, px) {
+    const k = fkey(p, px);
+    if (!folderIconCache.has(k)) folderIconCache.set(k, (await api.folderIcon(p, Math.min(256, px * 2))) || null);
+    return folderIconCache.get(k);
+  }
+  // Swaps placeholders left by folderIco() for the real icons.
+  function fillFolderIcons(root = document) {
+    for (const el of $$('[data-ficon]', root)) {
+      const p = el.dataset.ficon;
+      el.removeAttribute('data-ficon');
+      folderIconUrl(p, Number(el.dataset.px)).then((url) => {
+        if (url && el.isConnected) el.outerHTML = `<img class="fico" src="${url}" draggable="false">`;
+      });
+    }
+  }
+
   function iconHtml(e, px) {
     if (e.isDir) {
-      return `<span class="tw">${I.folder(specialBadge(e.path))}</span>`;
+      if (!winFolderIcons()) return `<span class="tw">${I.folder(specialBadge(e.path))}</span>`;
+      const hit = folderIconCache.get(fkey(e.path, px));
+      if (hit) return `<span class="tw"><img class="fico" src="${hit}" draggable="false"></span>`;
+      return `<span class="tw"${hit === null ? '' : ` data-thumb="${esc(e.path)}" data-px="${px}" data-folder="1"`}>${I.folder(specialBadge(e.path))}</span>`;
     }
     const key = thumbKey(e, px);
     const cached = thumbCache.get(key);
@@ -422,6 +457,11 @@
   async function loadThumb(el) {
     const p = el.dataset.thumb;
     const px = Number(el.dataset.px);
+    if (el.dataset.folder) {
+      const url = await folderIconUrl(p, px);
+      if (url && el.isConnected) el.innerHTML = `<img class="fico" src="${url}" draggable="false">`;
+      return;
+    }
     const e = entryOf(p);
     if (!e) return;
     const key = thumbKey(e, px);
@@ -576,6 +616,7 @@
       preview._key = key;
       preview.innerHTML = shown ? previewCard(shown) : '';
       preview.classList.toggle('empty', !shown);
+      fillFolderIcons(preview);
       if (shown) { preview.classList.remove('swap'); void preview.offsetWidth; preview.classList.add('swap'); }
       fillPreviewArt();
     }
@@ -646,7 +687,7 @@
 
   function previewCard(e) {
     return `
-      <div class="pv-art" data-art="${esc(e.path)}">${e.isDir ? I.folder(specialBadge(e.path)) : I.file(e.ext)}</div>
+      <div class="pv-art" data-art="${esc(e.path)}">${e.isDir ? folderIco(e.path, 128) : I.file(e.ext)}</div>
       <div class="pv-name">${esc(e.name)}</div>
       <div class="pv-kind">${esc(I.kindLabel(e))}${e.isDir ? '' : ` — ${fmtSize(e.size)}`}</div>
       <div class="pv-table">
@@ -683,12 +724,13 @@
     if (!cur) { cur = items[0]; state.sel = new Set([cur.path]); state.focus = cur.path; state.anchor = cur.path; }
     view.className = 'gallery';
     view.innerHTML = `
-      <div class="g-stage"><div class="hero" data-art="${esc(cur.path)}">${cur.isDir ? I.folder(specialBadge(cur.path)) : I.file(cur.ext)}</div></div>
+      <div class="g-stage"><div class="hero" data-art="${esc(cur.path)}">${cur.isDir ? folderIco(cur.path, 128) : I.file(cur.ext)}</div></div>
       <div class="g-caption"><b>${esc(cur.name)}</b><small>${esc(I.kindLabel(cur))}${cur.isDir ? '' : ` · ${fmtSize(cur.size)}`} · ${fmtDate(cur.mtime)}</small></div>
       <div class="g-strip">${items.map((e, i) => `
         <div class="g-item item${state.sel.has(e.path) ? ' sel' : ''}" data-i="${i}" draggable="true" title="${esc(e.name)}">${iconHtml(e, 64)}</div>`).join('')}
       </div>`;
     fillPreviewArt();
+    fillFolderIcons(view);
     $('.g-item.sel', view)?.scrollIntoView({ block: 'nearest', inline: 'center' });
   }
 
@@ -709,7 +751,7 @@
     const recent = items.filter((e) => e.kind === 'recent');
     const where = (p) => (G.places.favorites.some((f) => norm(f.path) === norm(p)) ? '本機' : P.dirname(p));
     const qa = pinned.map((e) => `
-      <div class="qa item${sel(e)}" data-i="${at(e)}">${I.folder(e.badge)}<div><b>${esc(e.name)}</b><small>${esc(where(e.path))}</small></div></div>`).join('');
+      <div class="qa item${sel(e)}" data-i="${at(e)}">${folderIco(e.path, 48, e.badge)}<div><b>${esc(e.name)}</b><small>${esc(where(e.path))}</small></div></div>`).join('');
     const drv = drives.map((e) => `
       <div class="drv item${sel(e)}" data-i="${at(e)}" data-drive="${esc(e.path)}">${I.drive()}<div><b>${esc(e.name)}</b>
         <div class="bar"><i style="width:0%"></i></div><small class="space">&nbsp;</small></div></div>`).join('');
@@ -749,10 +791,11 @@
   function renderTabs() {
     $('#tabs').innerHTML = tabs.map((t) => `
       <div class="tab${t === state ? ' active' : ''}${shownTabs.has(t.id) ? '' : ' new'}" data-tab="${t.id}" title="${esc(t.cwd === HOME ? '常用' : t.cwd || '')}">
-        ${t.cwd === HOME || !t.cwd ? I.sidebar('home') : I.folder(specialBadge(t.cwd))}<span>${esc(tabTitle(t))}</span>
+        ${t.cwd === HOME || !t.cwd ? I.sidebar('home') : folderIco(t.cwd, 16)}<span>${esc(tabTitle(t))}</span>
       </div>`).join('');
     shownTabs.clear();
     tabs.forEach((t) => shownTabs.add(t.id));
+    fillFolderIcons($('#tabs'));
   }
 
   async function switchTab(t) {
@@ -831,7 +874,7 @@
     const chain = ancestors(state.cwd, P.root(state.cwd));
     const sep = '<svg class="crumb-sep" viewBox="0 0 10 10"><path d="M3.5 2l3 3-3 3"/></svg>';
     bar.innerHTML = chain.map((p, i) => `
-      <button class="crumb" data-path="${esc(p)}">${i === 0 ? I.drive() : I.folder(specialBadge(p))}<span>${esc(displayName(p))}</span></button>`).join(sep);
+      <button class="crumb" data-path="${esc(p)}">${i === 0 ? I.drive() : folderIco(p, 16)}<span>${esc(displayName(p))}</span></button>`).join(sep);
     bar.scrollLeft = bar.scrollWidth;
   }
 
@@ -1318,6 +1361,7 @@
       { label: '顯示隱藏的項目', kbd: 'Ctrl+Shift+.', check: prefs.showHidden, action: toggleHidden },
       { label: prefs.sidebarHidden ? '顯示側邊欄' : '隱藏側邊欄', kbd: 'Ctrl+Alt+S', action: toggleSidebar },
       { label: '預覽窗格', kbd: 'Alt+P', check: !!prefs.previewPane, action: togglePane },
+      ...(isWin && api.folderIcon ? [{ label: '使用 Windows 資料夾圖示', check: winFolderIcons(), action: toggleFolderIcons }] : []),
       { label: '重新整理', kbd: 'F5', action: () => refresh(true) },
       ...(api.checkUpdate ? [{ label: '檢查更新…', action: () => checkUpdates(true) }] : []),
       '-',
@@ -1724,9 +1768,17 @@
       info.innerHTML = '<div class="pv-name">常用</div><div class="pv-kind">選取檔案即可預覽</div>';
       return;
     }
-    media.innerHTML = `<div class="ql-info">${I.folder(specialBadge(state.cwd))}</div>`;
+    media.innerHTML = `<div class="ql-info">${folderIco(state.cwd, 128)}</div>`;
+      fillFolderIcons(media);
     info.innerHTML = `<div class="pv-name">${esc(displayName(state.cwd))}</div><div class="pv-kind">${state.entries.length} 個項目</div>
       <div class="pv-hint">選取檔案即可預覽</div>`;
+  }
+
+  function toggleFolderIcons() {
+    prefs.folderIcons = winFolderIcons() ? 'finder' : 'windows';
+    savePrefs();
+    view._colsTab = null; // rebuild the columns with the other icon set
+    render();
   }
 
   function togglePane() {

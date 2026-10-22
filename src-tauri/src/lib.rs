@@ -57,8 +57,8 @@ async fn folder_count(dir: String) -> Option<usize> {
 }
 
 #[tauri::command]
-async fn thumbnail(path: String, size: i32) -> Option<String> {
-    blocking(move || thumb::thumbnail(&path, size.clamp(16, 1024))).await.ok().flatten()
+async fn thumbnail(path: String, size: i32, icon: Option<bool>) -> Option<String> {
+    blocking(move || thumb::thumbnail(&path, size.clamp(16, 1024), icon.unwrap_or(false))).await.ok().flatten()
 }
 
 #[tauri::command]
