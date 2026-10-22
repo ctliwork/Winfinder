@@ -24,7 +24,7 @@
     // Settings page
     startup: 'home', startDir: '', newTab: 'home', theme: 'system', density: 'normal',
     showExt: true, foldersFirst: true, sizeBase: 1000, confirmTrash: false, autoUpdate: true,
-    rememberView: true, folderViews: {},
+    rememberView: true, folderViews: {}, menuStyle: 'windows',
   }, readPrefs());
   function readPrefs() { try { return JSON.parse(localStorage.getItem(PREF_KEY)) || {}; } catch { return {}; } }
   function savePrefs() { try { localStorage.setItem(PREF_KEY, JSON.stringify(prefs)); } catch { /* storage unavailable */ } }
@@ -1722,27 +1722,70 @@
   }
 
   // Explorer's own context menu (7-Zip, VS Code, Git, OneDrive… entries).
-  async function nativeMenu(entries, { background = false, shift = false } = {}) {
-    if (!api.nativeMenu) return;
+  // Our menu items (with actions) -> the plain list the native side inserts.
+  function toExtras(items) {
+    const actions = [];
+    const conv = (list) => list.filter(Boolean).map((it) => {
+      if (it === '-') return { label: '-' };
+      if (it.children) return { label: it.label, children: conv(it.children) };
+      return { id: actions.push(it.action) - 1, label: it.label, checked: !!it.check, disabled: !!it.disabled };
+    });
+    return { extras: conv(items), actions };
+  }
+
+  // What Explorer's menu lacks, shown above its own items.
+  function appItemsFor(entries) {
+    const one = entries.length === 1 ? entries[0] : null;
+    return [
+      one?.isDir && { label: '在新分頁中打開', action: () => openTab(one.path, { activate: false }) },
+      { label: one ? '快速查看' : `快速查看 ${entries.length} 個項目`, action: () => ql.open() },
+      entries.length > 1 && { label: `批次重新命名 ${entries.length} 個項目…`, action: () => batchRename(entries) },
+      { label: '拷貝路徑', action: copyPath },
+      one?.isDir && api.dirSize && { label: '計算大小', action: () => calcSize(one) },
+    ];
+  }
+  function appItemsForBackground() {
+    const views = [['icons', '圖像'], ['list', '列表'], ['columns', '直欄'], ['gallery', '圖庫']];
+    const sorts = [['name', '名稱'], ['date', '修改日期'], ['size', '大小'], ['kind', '類型']];
+    const groups = [['none', '（無）'], ['kind', '類型'], ['date', '修改日期'], ['size', '大小']];
+    return [
+      { label: '檢視', children: views.map(([v, l]) => ({ label: l, check: curView() === v, action: () => setView(v) })) },
+      { label: '排序方式', children: sorts.map(([k, l]) => ({ label: l, check: curSort().key === k, action: () => setSort({ key: k, dir: k === 'name' || k === 'kind' ? 1 : -1 }) })) },
+      ['list', 'icons'].includes(viewMode()) && { label: '分組依據', children: groups.map(([g, l]) => ({ label: l, check: curGroup() === g, action: () => setGroup(g) })) },
+      { label: '重新整理', action: () => refresh(true) },
+      '-',
+      undoStack.length && { label: `復原${undoStack[undoStack.length - 1].label}`, action: undo },
+      { label: '顯示隱藏的項目', check: prefs.showHidden, action: toggleHidden },
+      api.openTerminal && { label: '在終端機中開啟', action: () => openTerminal(state.cwd) },
+    ];
+  }
+  // Right-click on Windows shows Explorer's own menu unless Settings say otherwise.
+  function useWinMenu() { return !!api.nativeMenu && prefs.menuStyle !== 'finder'; }
+
+  async function nativeMenu(entries, { background = false, shift = false, items = null } = {}) {
+    if (!api.nativeMenu) return false;
     let paths = [state.cwd];
     if (!background) {
       const items = entries.filter((e) => !isVirtual(e));
-      if (!items.length) return;
+      if (!items.length) return false;
       // The shell builds one menu per folder.
       const dir = norm(P.dirname(items[0].path));
       paths = items.filter((e) => norm(P.dirname(e.path)) === dir).map((e) => e.path);
-    } else if (state.cwd === HOME || state.search.results) return;
+    } else if (state.cwd === HOME || state.search.results) return false;
     closeMenu();
+    const { extras, actions } = toExtras(items || []);
     let verb = '';
-    try { verb = await api.nativeMenu(paths, background, shift); } catch (err) { toast(`無法顯示選單：${err}`); return; }
+    try { verb = await api.nativeMenu(paths, background, shift, extras); } catch (err) { toast(`無法顯示選單：${err}`); return true; }
+    if (verb.startsWith('app:')) { await actions[Number(verb.slice(4))]?.(); return true; }
     if (verb === 'rename') {
       const items = entries.filter((e) => paths.includes(e.path));
       if (items.length === 1) startRename(items[0]); else batchRename(items);
-      return;
+      return true;
     }
     // Copy/Cut in that menu fill the shared clipboard; other commands may
     // change files, which the folder watcher picks up.
     setTimeout(() => refresh(true), 500);
+    return true;
   }
 
   async function showProperties(paths) {
@@ -1783,16 +1826,14 @@
     ev.preventDefault();
     if (ev.target.closest('.lhead')) { listHeaderMenu(ev.clientX, ev.clientY); return; }
     const it = itemFromEl(ev.target);
-    // Shift+right-click goes straight to Explorer's menu, with its extended items.
-    const native = ev.shiftKey && api.nativeMenu;
+    // Windows: Explorer's menu (Shift adds its extended items); otherwise ours.
+    const native = useWinMenu() || (ev.shiftKey && api.nativeMenu);
     if (it?.entry) {
       if (it.col != null) await columnClick(it.entry, it.col);
       else if (!state.sel.has(it.entry.path)) { state.anchor = it.entry.path; setSelection([it.entry.path]); }
       const entries = it.col != null ? [it.entry] : selectedEntries();
-      if (native) nativeMenu(entries, { shift: true }); else itemMenu(entries, ev.clientX, ev.clientY);
-    } else if (native) {
-      nativeMenu([], { background: true, shift: true });
-    } else {
+      if (!(native && await nativeMenu(entries, { shift: ev.shiftKey, items: appItemsFor(entries) }))) itemMenu(entries, ev.clientX, ev.clientY);
+    } else if (!(native && await nativeMenu([], { background: true, shift: ev.shiftKey, items: appItemsForBackground() }))) {
       backgroundMenu(ev.clientX, ev.clientY);
     }
   });
@@ -2217,10 +2258,10 @@
       showProperties(s.length ? s.map((e) => e.path) : state.cwd !== HOME ? [state.cwd] : []);
       return;
     }
-    if (ev.shiftKey && k === 'F10') {
+    if ((ev.shiftKey && k === 'F10') || k === 'ContextMenu') {
       ev.preventDefault();
       const s = selectedEntries();
-      if (s.length) nativeMenu(s); else nativeMenu([], { background: true });
+      if (s.length) nativeMenu(s, { items: appItemsFor(s) }); else nativeMenu([], { background: true, items: appItemsForBackground() });
       return;
     }
     if (ctrl && k.toLowerCase() === 'd') { ev.preventDefault(); duplicateSelected(); return; }
@@ -2655,6 +2696,7 @@
       { id: 'look', title: '外觀', rows: [
         ['主題', null, sel('theme', [['system', '跟隨系統'], ['light', '淺色'], ['dark', '深色']])],
         ['強調色', null, swatches],
+        api.nativeMenu && ['右鍵選單', 'Windows：檔案總管的選單（含 7-Zip、VS Code 等加入的項目），上方加上本程式的功能', sel('menuStyle', [['windows', 'Windows'], ['finder', 'Finder 風格']])],
         isWin && api.shellIcon && ['使用 Windows 圖示', '應用程式、檔案類型、資料夾與磁碟機都用檔案總管的圖示', sw('folderIcons')],
         ['列表密度', '列表與直欄的行高', sel('density', [['compact', '精簡'], ['normal', '標準'], ['roomy', '寬鬆']])],
         ['顯示側邊欄', null, sw('sidebarHidden', true)],

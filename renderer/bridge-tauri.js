@@ -86,7 +86,7 @@
     compress: (paths) => invoke('compress', { paths }).then(ok('path'), fail),
     extract: (path) => invoke('extract', { path }).then(ok('path'), fail),
     ...(isWin ? {
-      nativeMenu: (paths, background, shift) => invoke('native_menu', { paths, background, shift }),
+      nativeMenu: (paths, background, shift, extras) => invoke('native_menu', { paths, background, shift, extras }),
       properties: (paths) => invoke('properties', { paths }),
       clipboardWrite: (paths, cut) => invoke('clipboard_write', { paths, cut }).catch(() => {}),
       clipboardRead: () => invoke('clipboard_read').catch(() => null),

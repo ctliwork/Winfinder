@@ -191,12 +191,21 @@ async fn on_ui<T: Send + 'static>(
 
 /// Shows Explorer's context menu; returns a verb the UI handles itself.
 #[tauri::command]
-async fn native_menu(window: tauri::WebviewWindow, paths: Vec<String>, background: bool, shift: bool) -> Result<String, String> {
+async fn native_menu(
+    window: tauri::WebviewWindow,
+    paths: Vec<String>,
+    background: bool,
+    shift: bool,
+    extras: Option<serde_json::Value>,
+) -> Result<String, String> {
     #[cfg(windows)]
-    return on_ui(window, move |h| winshell::show_menu(h, &paths, background, shift)).await?;
+    {
+        let extras: Vec<winshell::Extra> = extras.map(serde_json::from_value).transpose().map_err(|e| e.to_string())?.unwrap_or_default();
+        on_ui(window, move |h| winshell::show_menu(h, &paths, background, shift, &extras)).await?
+    }
     #[cfg(not(windows))]
     {
-        let _ = (window, paths, background, shift);
+        let _ = (window, paths, background, shift, extras);
         Err("unsupported".into())
     }
 }
