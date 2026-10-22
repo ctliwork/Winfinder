@@ -796,6 +796,7 @@
     if (preview._key !== key) {
       preview._key = key;
       preview.innerHTML = shown ? previewCard(shown) : '';
+      if (shown) window.Preview.fill($('.cp-media', preview), shown, { helpers: previewHelpers });
       preview.classList.toggle('empty', !shown);
       fillShellIcons(preview);
       if (shown) { preview.classList.remove('swap'); void preview.offsetWidth; preview.classList.add('swap'); }
@@ -890,9 +891,11 @@
     savePrefs();
   }, true);
 
+  // Column view's preview column: the same live preview as the pane (images,
+  // video, Word/Excel/PowerPoint, PDF, text), zoomable, then the details.
   function previewCard(e) {
     return `
-      <div class="pv-art" data-art="${esc(e.path)}">${fileIco(e, 128)}</div>
+      <div class="cp-media"></div>
       <div class="pv-name">${esc(e.name)}</div>
       <div class="pv-kind">${esc(I.kindLabel(e))}${e.isDir ? '' : ` — ${fmtSize(e.size)}`}</div>
       <div class="pv-table">
