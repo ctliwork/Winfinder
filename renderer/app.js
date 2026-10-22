@@ -2712,8 +2712,10 @@
   function applyTheme(initial = false) {
     if (prefs.theme === 'system') delete document.documentElement.dataset.theme;
     else document.documentElement.dataset.theme = prefs.theme;
-    // The window already follows the system at startup; don't poke it then.
-    if (!(initial && prefs.theme === 'system')) W.setTheme?.(prefs.theme);
+    // The window opens in the saved theme (see save_theme); only a change
+    // needs to reach it.
+    if (!initial) W.setTheme?.(prefs.theme);
+    api.saveTheme?.(prefs.theme);
   }
   function applyDensity() {
     document.body.classList.toggle('density-compact', prefs.density === 'compact');
@@ -2893,7 +2895,7 @@
         sb.classList.add('settle');
         document.documentElement.classList.remove('booting');
         setTimeout(() => sb.classList.remove('settle'), 500);
-      }, 350);
+      }, 600);
     }
     // Quietly look for a new version once the window is up.
     if (prefs.autoUpdate) setTimeout(() => checkUpdates(false), 4000);
