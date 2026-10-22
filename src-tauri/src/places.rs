@@ -116,22 +116,33 @@ fn drives() -> Vec<Place> {
     }]
 }
 
-#[cfg(windows)]
+#[derive(Serialize)]
+pub struct Space {
+    pub free: u64,
+    pub total: u64,
+}
+
 pub fn disk_free(path: &str) -> Option<u64> {
+    disk_space(path).map(|s| s.free)
+}
+
+#[cfg(windows)]
+pub fn disk_space(path: &str) -> Option<Space> {
     use windows::core::PCWSTR;
     use windows::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
     let w = wide(path);
-    let mut avail = 0u64;
-    unsafe { GetDiskFreeSpaceExW(PCWSTR(w.as_ptr()), Some(&mut avail), None, None) }.ok()?;
-    Some(avail)
+    let (mut free, mut total) = (0u64, 0u64);
+    unsafe { GetDiskFreeSpaceExW(PCWSTR(w.as_ptr()), Some(&mut free), Some(&mut total), None) }.ok()?;
+    Some(Space { free, total })
 }
 
 #[cfg(unix)]
-pub fn disk_free(path: &str) -> Option<u64> {
+pub fn disk_space(path: &str) -> Option<Space> {
     let c = std::ffi::CString::new(path).ok()?;
     let mut s: libc::statvfs = unsafe { std::mem::zeroed() };
     if unsafe { libc::statvfs(c.as_ptr(), &mut s) } != 0 {
         return None;
     }
-    Some(s.f_bavail as u64 * s.f_frsize as u64)
+    let unit = s.f_frsize as u64;
+    Some(Space { free: s.f_bavail as u64 * unit, total: s.f_blocks as u64 * unit })
 }

@@ -6,6 +6,8 @@ contextBridge.exposeInMainWorld('fsApi', {
   places: () => ipcRenderer.invoke('fs:places'),
   list: (dir) => ipcRenderer.invoke('fs:list', dir),
   diskFree: (dir) => ipcRenderer.invoke('fs:diskFree', dir),
+  diskSpace: (dir) => ipcRenderer.invoke('fs:diskSpace', dir),
+  recentFiles: () => ipcRenderer.invoke('fs:recent'),
   folderCount: (dir) => ipcRenderer.invoke('fs:folderCount', dir),
   thumb: (file, size) => ipcRenderer.invoke('fs:thumb', file, size),
   nativeIcon: (file) => ipcRenderer.invoke('fs:nativeIcon', file),

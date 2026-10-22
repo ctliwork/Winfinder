@@ -25,6 +25,7 @@ trash = "5"
 dirs = "6"
 base64 = "0.22"
 png = "0.17"
+lnk = "0.6"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -44,4 +45,3 @@ lto = true
 codegen-units = 1
 opt-level = 3
 strip = true
-panic = "abort"

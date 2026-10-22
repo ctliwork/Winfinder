@@ -150,6 +150,42 @@ ipcMain.handle('fs:diskFree', async (_e, dir) => {
   } catch { return null; }
 });
 
+ipcMain.handle('fs:diskSpace', async (_e, dir) => {
+  try {
+    const s = await fsp.statfs(dir);
+    return { free: s.bavail * s.bsize, total: s.blocks * s.bsize };
+  } catch { return null; }
+});
+
+// Recently used files from the OS list (Windows Recent shortcuts / freedesktop xbel).
+ipcMain.handle('fs:recent', async () => {
+  let targets = [];
+  try {
+    if (isWin) {
+      const dir = path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Recent');
+      const links = (await fsp.readdir(dir)).filter((n) => n.toLowerCase().endsWith('.lnk')).map((n) => path.join(dir, n));
+      const stats = await Promise.all(links.map(async (l) => ({ l, t: (await fsp.stat(l)).mtimeMs })));
+      stats.sort((a, b) => b.t - a.t);
+      targets = stats.slice(0, 80).map(({ l }) => { try { return shell.readShortcutLink(l).target; } catch { return null; } });
+    } else {
+      const xml = await fsp.readFile(path.join(os.homedir(), '.local/share/recently-used.xbel'), 'utf8');
+      targets = [...xml.matchAll(/href="file:\/\/([^"]+)"/g)].map((m) => decodeURIComponent(m[1])).reverse();
+    }
+  } catch { return []; }
+  const seen = new Set();
+  const out = [];
+  for (const t of targets) {
+    if (!t || seen.has(t.toLowerCase())) continue;
+    seen.add(t.toLowerCase());
+    try {
+      if (!(await fsp.stat(t)).isFile()) continue;
+      out.push(await statEntry(path.dirname(t), { name: path.basename(t), isDirectory: () => false, isSymbolicLink: () => false }));
+    } catch { /* gone */ }
+    if (out.length >= 20) break;
+  }
+  return out;
+});
+
 ipcMain.handle('fs:folderCount', async (_e, dir) => {
   try { return (await fsp.readdir(dir)).length; } catch { return null; }
 });

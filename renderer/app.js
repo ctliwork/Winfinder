@@ -31,23 +31,31 @@
   ];
 
   // ---------- state ----------
-  const state = {
-    places: null,
-    cwd: null,
-    history: [],
-    hIndex: -1,
-    entries: [],          // what the flat views show (sorted + filtered)
-    sel: new Set(),       // selected paths
-    anchor: null,
-    focus: null,
-    colRoot: null,
-    colActive: 0,
-    colLists: [],
-    search: { query: '', scope: 'folder', results: null, busy: false },
-    clip: null,
-    renaming: null,
-    dragging: null,
-  };
+  const HOME = '::home';
+  // Shared by all tabs.
+  const G = { places: null, clip: null, renaming: null, dragging: null, space: new Map(), treeOpen: new Set(prefs.treeOpen || []) };
+  // One per tab; `state` always points at the active tab.
+  let tabSeq = 0;
+  function newTabState() {
+    return {
+      id: ++tabSeq,
+      cwd: null,
+      history: [],
+      hIndex: -1,
+      entries: [],          // what the views show (sorted + filtered)
+      homeItems: [],
+      sel: new Set(),       // selected paths
+      anchor: null,
+      focus: null,
+      colRoot: null,
+      colActive: 0,
+      colLists: [],
+      search: { query: '', scope: 'folder', results: null, busy: false },
+      scroll: 0,
+    };
+  }
+  let state = newTabState();
+  const tabs = [state];
   const dirCache = new Map();
   const thumbCache = new Map();
 
@@ -75,14 +83,14 @@
   }
   function baseName(p) { return P.basename(p) || p; }
   function displayName(p) {
-    const fav = state.places?.favorites.find((f) => norm(f.path) === norm(p));
+    const fav = G.places?.favorites.find((f) => norm(f.path) === norm(p));
     if (fav) return fav.label;
-    const loc = state.places?.locations.find((l) => norm(l.path) === norm(p));
+    const loc = G.places?.locations.find((l) => norm(l.path) === norm(p));
     if (loc) return loc.label;
     return baseName(p);
   }
   function specialBadge(p) {
-    const fav = state.places?.favorites.find((f) => norm(f.path) === norm(p));
+    const fav = G.places?.favorites.find((f) => norm(f.path) === norm(p));
     return fav ? fav.icon : null;
   }
 
@@ -152,7 +160,9 @@
 
   function computeEntries() {
     const q = state.search.query.trim().toLowerCase();
-    if (state.search.results) {
+    if (state.cwd === HOME && !state.search.results) {
+      state.entries = q ? state.homeItems.filter((e) => e.name.toLowerCase().includes(q)) : state.homeItems.slice();
+    } else if (state.search.results) {
       state.entries = sortEntries(state.search.results);
     } else {
       let list = visibleOf(dirCache.get(state.cwd)?.entries || []);
@@ -168,7 +178,14 @@
     return state.entries.find((e) => e.path === p) || null;
   }
 
-  function inColumnsMode() { return prefs.view === 'columns' && !state.search.results; }
+  // What the content area shows: Home has its own page, search results never use columns.
+  function viewMode() {
+    if (state.cwd === HOME && !state.search.results) return 'home';
+    if (state.search.results && prefs.view === 'columns') return 'list';
+    return prefs.view;
+  }
+  function inColumnsMode() { return viewMode() === 'columns'; }
+  const isVirtual = (e) => e.kind === 'pinned' || e.kind === 'drive';
 
   function selectedEntries() {
     if (inColumnsMode()) {
@@ -184,18 +201,34 @@
   // ---------- navigation ----------
   function guessRoot(dir) {
     let best = null;
-    for (const f of [...(state.places?.favorites || []), ...prefs.favorites.map((p) => ({ path: p }))]) {
+    for (const f of [...(G.places?.favorites || []), ...prefs.favorites.map((p) => ({ path: p }))]) {
       if (isUnder(dir, f.path) && (!best || f.path.length > best.length)) best = f.path;
     }
     return best || P.root(dir);
   }
 
+  async function loadHome() {
+    const favs = [
+      ...G.places.favorites.map((f) => ({ path: f.path, name: f.label, badge: f.icon })),
+      ...prefs.favorites.map((p) => ({ path: p, name: baseName(p), badge: null, custom: true })),
+    ];
+    const pinned = favs.map((f) => ({ ...f, isDir: true, ext: '', kind: 'pinned' }));
+    const drives = G.places.locations.map((l) => ({ name: l.label, path: l.path, isDir: true, ext: '', kind: 'drive' }));
+    let recent = [];
+    try { recent = (await api.recentFiles()).map((e) => ({ ...e, kind: 'recent' })); } catch { /* not available */ }
+    state.homeItems = [...pinned, ...drives, ...recent];
+  }
+
   async function navigate(dir, opts = {}) {
-    const { push = true, select = null, root = null, colActive = null, animate = true } = opts;
-    const res = await listDir(dir, true);
-    if (res.error) {
-      toast(`無法打開「${displayName(dir)}」：${errText(res.error)}`);
-      return false;
+    const { push = true, select = null, root = null, colActive = null, animate = true, silent = false } = opts;
+    if (dir === HOME) {
+      await loadHome();
+    } else {
+      const res = await listDir(dir, true);
+      if (res.error) {
+        toast(`無法打開「${displayName(dir)}」：${errText(res.error)}`);
+        return false;
+      }
     }
     if (push && norm(dir) !== norm(state.cwd || '')) {
       state.history = state.history.slice(0, state.hIndex + 1);
@@ -205,21 +238,23 @@
     const prev = state.cwd;
     const changed = norm(prev || '') !== norm(dir);
     state.cwd = dir;
-    if (changed) clearSearch(false);
-    if (root) state.colRoot = root;
+    if (changed) clearSearch(false, silent);
+    if (dir === HOME) state.colRoot = null;
+    else if (root) state.colRoot = root;
     else if (!state.colRoot || !isUnder(dir, state.colRoot)) state.colRoot = guessRoot(dir);
 
-    const chainLen = ancestors(dir, state.colRoot).length;
+    const chainLen = dir === HOME ? 1 : ancestors(dir, state.colRoot).length;
     state.colActive = colActive ?? chainLen - 1;
 
     state.sel.clear();
     let target = select;
-    if (!target && prev && changed && norm(P.dirname(prev)) === norm(dir)) target = prev; // went up: highlight where we came from
+    if (!target && prev && prev !== HOME && dir !== HOME && changed && norm(P.dirname(prev)) === norm(dir)) target = prev; // went up: highlight where we came from
     if (target && !inColumnsMode()) { state.sel.add(target); state.anchor = target; state.focus = target; }
     else if (target && inColumnsMode() && state.colActive === chainLen - 1) { state.sel.add(target); state.anchor = target; state.focus = target; }
     else { state.anchor = null; state.focus = null; }
 
     computeEntries();
+    if (silent) return true;
     await render({ animate: animate && changed });
     watchCurrent();
     return true;
@@ -228,11 +263,14 @@
   function goBack() { if (state.hIndex > 0) { state.hIndex--; navigate(state.history[state.hIndex], { push: false }); } }
   function goForward() { if (state.hIndex < state.history.length - 1) { state.hIndex++; navigate(state.history[state.hIndex], { push: false }); } }
   function goUp() {
+    if (state.cwd === HOME) return;
     const parent = P.dirname(state.cwd);
-    if (parent !== state.cwd) navigate(parent, { select: state.cwd, root: isUnder(parent, state.colRoot) ? null : P.root(parent) });
+    if (parent === state.cwd) { navigate(HOME); return; } // drive root: up goes to Home, like Explorer
+    navigate(parent, { select: state.cwd, root: isUnder(parent, state.colRoot) ? null : P.root(parent) });
   }
 
   function watchCurrent() {
+    if (state.cwd === HOME) { api.watch([]); return; }
     const dirs = inColumnsMode() ? ancestors(state.cwd, state.colRoot) : [state.cwd];
     api.watch(dirs);
   }
@@ -245,7 +283,7 @@
     refreshTimer = setTimeout(flushRefresh, 80);
   });
   async function flushRefresh() {
-    if (state.renaming) { refreshTimer = setTimeout(flushRefresh, 400); return; }
+    if (G.renaming) { refreshTimer = setTimeout(flushRefresh, 400); return; }
     const dirs = [...refreshQueued];
     refreshQueued = new Set();
     await Promise.all(dirs.map((d) => listDir(d, true)));
@@ -253,6 +291,12 @@
   }
 
   async function refresh(reload = true) {
+    if (state.cwd === HOME) {
+      if (reload) await loadHome();
+      computeEntries();
+      await render({ animate: false });
+      return;
+    }
     if (reload) await listDir(state.cwd, true);
     const valid = new Set((dirCache.get(state.cwd)?.entries || []).map((e) => e.path));
     if (!state.search.results) for (const p of [...state.sel]) if (!valid.has(p)) state.sel.delete(p);
@@ -265,7 +309,8 @@
 
   async function render({ animate = false } = {}) {
     document.body.className = document.body.className.replace(/\bview-\S+/g, '').trim();
-    document.body.classList.add(`view-${state.search.results && prefs.view === 'columns' ? 'list' : prefs.view}`);
+    document.body.classList.add(`view-${viewMode()}`);
+    renderTabs();
     renderToolbar();
     renderSidebar();
     await renderView(animate);
@@ -275,7 +320,7 @@
 
   function renderToolbar() {
     const title = $('#title');
-    const text = state.search.results ? `搜尋「${state.search.query}」` : displayName(state.cwd);
+    const text = tabTitle(state);
     if (title.textContent !== text) {
       title.textContent = text;
       title.classList.remove('anim'); void title.offsetWidth; title.classList.add('anim');
@@ -291,20 +336,54 @@
     });
   }
 
+  function subdirs(p) {
+    const c = dirCache.get(p);
+    if (!c || c.error) return null;
+    return sortEntries(c.entries.filter((e) => e.isDir && (prefs.showHidden || !e.hidden)));
+  }
+
+  // Explorer-style navigation tree: Home, pinned folders, drives; folders expand in place.
   function renderSidebar() {
-    if (!state.places) return;
+    if (!G.places) return;
     const nav = $('#places');
+    const scroll = nav.scrollTop;
     const active = norm(state.cwd || '');
-    const row = (p, icon, label, extra = '') => `
-      <div class="place${norm(p) === active ? ' active' : ''}" data-path="${esc(p)}" ${extra}>
-        ${I.sidebar(icon)}<span>${esc(label)}</span>
-      </div>`;
-    const favs = state.places.favorites.map((f) => row(f.path, f.icon, f.label));
-    const custom = prefs.favorites.map((p) => row(p, 'folder', baseName(p), 'data-custom="1"'));
-    const locs = state.places.locations.map((l) => row(l.path, 'drive', l.label));
+    const chev = '<svg viewBox="0 0 10 10"><path d="M3.5 2l3 3-3 3"/></svg>';
+    const missing = [];
+    const row = (p, label, icon, lvl, extra = '') => {
+      const open = G.treeOpen.has(p);
+      const kids = subdirs(p);
+      if (open && !kids) missing.push(p);
+      const leaf = kids && kids.length === 0;
+      let html = `<div class="place${norm(p) === active ? ' active' : ''}" data-path="${esc(p)}" style="--lvl:${lvl}" ${extra}>
+        <span class="twisty${open && !leaf ? ' open' : ''}${leaf ? ' none' : ''}" data-twisty="${esc(p)}">${chev}</span>
+        ${I.sidebar(icon)}<span>${esc(label)}</span></div>`;
+      if (open && kids) html += kids.map((k) => row(k.path, k.name, 'folder', lvl + 1)).join('');
+      return html;
+    };
+    const sec = (key, title, body) => {
+      const closed = prefs.secCollapsed?.[key];
+      return `<div class="sec-title${closed ? ' collapsed' : ''}" data-sec="${key}">${title}<svg viewBox="0 0 10 10"><path d="M2 3.5l3 3 3-3"/></svg></div>${closed ? '' : body}`;
+    };
+    const pinned = [
+      ...G.places.favorites.map((f) => row(f.path, f.label, f.icon, 0)),
+      ...prefs.favorites.map((p) => row(p, baseName(p), 'folder', 0, 'data-custom="1"')),
+    ].join('');
+    const drives = G.places.locations.map((l) => row(l.path, l.label, 'drive', 0)).join('');
     nav.innerHTML = `
-      <div class="sec-title">個人專屬</div>${favs.join('')}${custom.join('')}
-      <div class="sec-title">位置</div>${locs.join('')}`;
+      <div class="place home-row${state.cwd === HOME ? ' active' : ''}" data-path="${HOME}">
+        <span class="twisty none"></span>${I.sidebar('home')}<span>首頁</span></div>
+      ${sec('pinned', '釘選', pinned)}
+      ${sec('drives', '本機', drives)}`;
+    nav.scrollTop = scroll;
+    if (missing.length) Promise.all(missing.map((p) => listDir(p))).then(renderSidebar);
+  }
+
+  function toggleTree(p) {
+    G.treeOpen.has(p) ? G.treeOpen.delete(p) : G.treeOpen.add(p);
+    prefs.treeOpen = [...G.treeOpen];
+    savePrefs();
+    renderSidebar();
   }
 
   function iconHtml(e, px) {
@@ -371,12 +450,13 @@
   }
 
   async function renderView(animate) {
-    const mode = state.search.results && prefs.view === 'columns' ? 'list' : prefs.view;
+    const mode = viewMode();
     view.className = '';
     $('#empty').hidden = true;
-    const cut = new Set(state.clip?.op === 'move' ? state.clip.paths : []);
+    const cut = new Set(G.clip?.op === 'move' ? G.clip.paths : []);
 
     if (mode === 'columns') { await renderColumns(); observeThumbs(); return; }
+    if (mode === 'home') { renderHome(); observeThumbs(); return; }
 
     const items = state.entries;
     if (!items.length) {
@@ -490,8 +570,124 @@
     $('.g-item.sel', view)?.scrollIntoView({ block: 'nearest', inline: 'center' });
   }
 
+  // Explorer-like Home: pinned folders, drives with capacity, recent files.
+  function renderHome() {
+    view.className = 'home';
+    const items = state.entries;
+    const cut = new Set(G.clip?.op === 'move' ? G.clip.paths : []);
+    const sel = (e) => (state.sel.has(e.path) ? ' sel' : '');
+    const at = (e) => items.indexOf(e);
+    const chev = '<svg viewBox="0 0 10 10"><path d="M2 3.5l3 3 3-3"/></svg>';
+    const sec = (key, title, body) => {
+      const closed = prefs.homeCollapsed?.[key];
+      return `<section class="h-sec${closed ? ' collapsed' : ''}" data-hsec="${key}"><button class="h-title">${chev}${title}</button><div class="h-body">${body}</div></section>`;
+    };
+    const pinned = items.filter((e) => e.kind === 'pinned');
+    const drives = items.filter((e) => e.kind === 'drive');
+    const recent = items.filter((e) => e.kind === 'recent');
+    const where = (p) => (G.places.favorites.some((f) => norm(f.path) === norm(p)) ? '本機' : P.dirname(p));
+    const qa = pinned.map((e) => `
+      <div class="qa item${sel(e)}" data-i="${at(e)}">${I.folder(e.badge)}<div><b>${esc(e.name)}</b><small>${esc(where(e.path))}</small></div></div>`).join('');
+    const drv = drives.map((e) => `
+      <div class="drv item${sel(e)}" data-i="${at(e)}" data-drive="${esc(e.path)}">${I.drive()}<div><b>${esc(e.name)}</b>
+        <div class="bar"><i style="width:0%"></i></div><small class="space">&nbsp;</small></div></div>`).join('');
+    const rec = recent.map((e) => `
+      <div class="lrow item${sel(e)}${cut.has(e.path) ? ' cut' : ''}" data-i="${at(e)}" draggable="true">
+        <div class="name">${iconHtml(e, 40)}<span class="nm">${esc(e.name)}</span></div>
+        <div>${fmtDate(e.mtime)}</div><div>${esc(P.dirname(e.path))}</div></div>`).join('');
+    view.innerHTML =
+      sec('pinned', '快速存取', pinned.length ? `<div class="qa-grid">${qa}</div>` : '<div class="h-empty">沒有釘選的資料夾</div>') +
+      sec('drives', '裝置與磁碟機', `<div class="drv-grid">${drv}</div>`) +
+      sec('recent', '最近使用的檔案', recent.length ? `<div class="list">${rec}</div>` : '<div class="h-empty">沒有最近使用的檔案</div>');
+    for (const el of $$('[data-drive]', view)) fillDriveSpace(el);
+  }
+
+  async function fillDriveSpace(el) {
+    const p = el.dataset.drive;
+    if (!G.space.has(p)) G.space.set(p, await api.diskSpace(p).catch(() => null));
+    const sp = G.space.get(p);
+    if (!sp || !sp.total || !el.isConnected) { if (el.isConnected) $('.space', el).textContent = ''; return; }
+    const used = (sp.total - sp.free) / sp.total;
+    const bar = $('.bar i', el);
+    requestAnimationFrame(() => { bar.style.width = `${Math.round(used * 100)}%`; });
+    bar.classList.toggle('full', used > 0.9);
+    $('.space', el).textContent = `${fmtSize(sp.free)} 可用，共 ${fmtSize(sp.total)}`;
+  }
+
+  // ---------- tabs ----------
+  function tabTitle(t) {
+    if (t.search.results) return `搜尋「${t.search.query}」`;
+    if (t.cwd === HOME || !t.cwd) return '首頁';
+    return displayName(t.cwd);
+  }
+
+  function renderTabs() {
+    $('#tabs').innerHTML = tabs.map((t) => `
+      <div class="tab${t === state ? ' active' : ''}" data-tab="${t.id}" title="${esc(t.cwd === HOME ? '首頁' : t.cwd || '')}">
+        ${t.cwd === HOME || !t.cwd ? I.sidebar('home') : I.folder(specialBadge(t.cwd))}<span>${esc(tabTitle(t))}</span>
+      </div>`).join('');
+  }
+
+  async function switchTab(t) {
+    if (t === state) return;
+    lastBg = null;
+    state.scroll = content.scrollTop;
+    state = t;
+    syncSearchUi();
+    if (t.cwd === HOME) await loadHome();
+    else await listDir(t.cwd, true);
+    computeEntries();
+    await render();
+    content.scrollTop = t.scroll;
+    watchCurrent();
+  }
+
+  let lastBg = null; // keeps background tabs in the order they were opened, like browsers
+  async function openTab(dir = HOME, { activate = true } = {}) {
+    const t = newTabState();
+    let at = tabs.indexOf(state) + 1;
+    if (!activate && lastBg?.opener === state && tabs.includes(lastBg.tab)) at = tabs.indexOf(lastBg.tab) + 1;
+    tabs.splice(at, 0, t);
+    lastBg = activate ? null : { opener: state, tab: t };
+    if (activate) {
+      state.scroll = content.scrollTop;
+      state = t;
+      syncSearchUi();
+      if (!(await navigate(dir, { root: dir }))) await navigate(HOME);
+    } else {
+      // Background tab: load it without touching the visible one.
+      const cur = state;
+      state = t;
+      const ok = await navigate(dir, { root: dir, silent: true });
+      if (!ok) await navigate(HOME, { silent: true });
+      state = cur;
+      renderTabs();
+    }
+  }
+
+  async function closeTab(t) {
+    if (tabs.length === 1) { // keep the window open: the last tab becomes Home
+      t.history = []; t.hIndex = -1;
+      await navigate(HOME);
+      return;
+    }
+    const i = tabs.indexOf(t);
+    tabs.splice(i, 1);
+    if (t === state) {
+      state = { ...state, id: -1 }; // detached so switchTab doesn't early-return
+      await switchTab(tabs[Math.min(i, tabs.length - 1)]);
+    } else {
+      renderTabs();
+    }
+  }
+
+  function cycleTab(step) {
+    const i = tabs.indexOf(state);
+    switchTab(tabs[(i + step + tabs.length) % tabs.length]);
+  }
+
   function paintSelection() {
-    const mode = state.search.results && prefs.view === 'columns' ? 'list' : prefs.view;
+    const mode = viewMode();
     if (mode === 'gallery' || mode === 'columns') { renderView(false).then(() => { renderStatus(); }); return; }
     for (const el of $$('.item[data-i]', view)) {
       const e = state.entries[Number(el.dataset.i)];
@@ -503,6 +699,7 @@
   function renderPathbar() {
     const bar = $('#pathbar');
     if (state.search.results) { bar.innerHTML = `<span class="crumb">${I.sidebar('recent')}<span>搜尋結果：${state.entries.length} 個項目</span></span>`; return; }
+    if (state.cwd === HOME) { bar.innerHTML = `<span class="crumb">${I.sidebar('home')}<span>首頁</span></span>`; return; }
     const chain = ancestors(state.cwd, P.root(state.cwd));
     const sep = '<svg class="crumb-sep" viewBox="0 0 10 10"><path d="M3.5 2l3 3-3 3"/></svg>';
     bar.innerHTML = chain.map((p, i) => `
@@ -514,9 +711,10 @@
   async function renderStatus() {
     const n = state.entries.length;
     const s = selectedEntries().length;
-    const root = P.root(state.cwd || '/');
     let text = s ? `已選取 ${s} 個項目，共 ${n} 個` : `${n} 個項目`;
     if (state.search.busy) text += '，搜尋中…';
+    if (state.cwd === HOME) { $('#status-text').textContent = text; return; }
+    const root = P.root(state.cwd || '/');
     $('#status-text').textContent = text + (freeCache.has(root) && freeCache.get(root) != null ? `，可用空間 ${fmtSize(freeCache.get(root))}` : '');
     if (!freeCache.has(root)) {
       freeCache.set(root, null);
@@ -594,7 +792,8 @@
   async function openEntry(e) {
     if (!e) return;
     if (e.isDir) {
-      if (state.search.results) await navigate(e.path, { root: guessRoot(e.path) });
+      if (isVirtual(e)) await navigate(e.path, { root: e.path });
+      else if (state.search.results || state.cwd === HOME) await navigate(e.path, { root: guessRoot(e.path) });
       else await navigate(e.path);
     } else {
       const err = await api.open(e.path);
@@ -605,9 +804,9 @@
   // ---------- content events ----------
   let pendingSingle = null;
   content.addEventListener('mousedown', (ev) => {
-    if (ev.button !== 0 || state.renaming) return;
+    if (ev.button !== 0 || G.renaming) return;
     closeMenu();
-    state.dragging = null;
+    G.dragging = null;
     const it = itemFromEl(ev.target);
     if (ev.target.closest('.lhead')) return;
     if (!it?.entry) {
@@ -689,11 +888,11 @@
   content.addEventListener('dragstart', (ev) => {
     const it = itemFromEl(ev.target);
     ev.preventDefault();
-    if (!it?.entry) return;
+    if (!it?.entry || isVirtual(it.entry)) return;
     pendingSingle = null;
     if (it.col == null && !state.sel.has(it.entry.path)) setSelection([it.entry.path]);
     const paths = it.col != null ? [it.entry.path] : selectedEntries().map((e) => e.path);
-    state.dragging = paths;
+    G.dragging = paths;
     api.startDrag(paths);
   });
 
@@ -704,7 +903,7 @@
     const it = itemFromEl(target);
     if (it?.entry?.isDir) return { dir: it.entry.path, el: it.el };
     if (target.closest('.col')) { const dir = target.closest('.col').dataset.dir; return { dir, el: target.closest('.col') }; }
-    if (target.closest('#content') && !state.search.results) return { dir: state.cwd, el: content };
+    if (target.closest('#content') && !state.search.results && state.cwd !== HOME) return { dir: state.cwd, el: content };
     return null;
   }
   let dropEl = null;
@@ -716,14 +915,14 @@
   }
   function dropPaths(ev) {
     const files = [...(ev.dataTransfer?.files || [])].map((f) => { try { return api.pathForFile(f); } catch { return ''; } }).filter(Boolean);
-    return files.length ? files : (state.dragging || []);
+    return files.length ? files : (G.dragging || []);
   }
   async function dropInto(target, rawPaths, ctrl) {
     const t = dropTargetFor(target);
     setDropEl(null);
     if (!t) return;
     const paths = rawPaths.filter((p) => norm(p) !== norm(t.dir));
-    state.dragging = null;
+    G.dragging = null;
     if (!paths.length) return;
     // Same drive moves, another drive copies; Ctrl forces a copy (Windows Explorer rules).
     const sameRoot = paths.every((p) => norm(P.root(p)) === norm(P.root(t.dir)));
@@ -735,7 +934,7 @@
     const t = dropTargetFor(ev.target);
     if (!t) { setDropEl(null); return; }
     ev.preventDefault();
-    const sameRoot = (state.dragging || []).every((p) => norm(P.root(p)) === norm(P.root(t.dir)));
+    const sameRoot = (G.dragging || []).every((p) => norm(P.root(p)) === norm(P.root(t.dir)));
     ev.dataTransfer.dropEffect = ev.ctrlKey || !sameRoot ? 'copy' : 'move';
     setDropEl(t.el);
   });
@@ -752,7 +951,7 @@
   window.addEventListener('blur', () => { ctrlHeld = false; });
   window.__finderDnd = {
     over: (x, y) => setDropEl(dropTargetFor(document.elementFromPoint(x, y))?.el || null),
-    drop: (x, y, paths) => dropInto(document.elementFromPoint(x, y), paths.length ? paths : (state.dragging || []), ctrlHeld),
+    drop: (x, y, paths) => dropInto(document.elementFromPoint(x, y), paths.length ? paths : (G.dragging || []), ctrlHeld),
     leave: () => setDropEl(null),
   };
 
@@ -769,7 +968,7 @@
 
   // ---------- file actions ----------
   async function newFolder() {
-    if (state.search.results) return;
+    if (state.search.results || state.cwd === HOME) return;
     const res = await api.mkdir(state.cwd);
     if (!res.ok) { toast(`無法新增資料夾：${errText(res.error)}`); return; }
     await listDir(state.cwd, true);
@@ -781,7 +980,7 @@
   }
 
   async function trashSelected() {
-    const items = selectedEntries();
+    const items = selectedEntries().filter((e) => !isVirtual(e));
     if (!items.length) return;
     const failed = await api.trash(items.map((e) => e.path));
     const ok = items.length - failed.length;
@@ -796,22 +995,22 @@
   }
 
   function copySelected(op) {
-    const items = selectedEntries();
+    const items = selectedEntries().filter((e) => op === 'copy' || !isVirtual(e));
     if (!items.length) return;
-    state.clip = { op, paths: items.map((e) => e.path) };
+    G.clip = { op, paths: items.map((e) => e.path) };
     toast(op === 'move' ? `已剪下 ${items.length} 個項目` : `已拷貝 ${items.length} 個項目`);
     if (op === 'move') render();
   }
 
   async function paste() {
-    if (!state.clip || state.search.results) return;
-    const { op, paths } = state.clip;
-    if (op === 'move') state.clip = null;
+    if (!G.clip || state.search.results || state.cwd === HOME) return;
+    const { op, paths } = G.clip;
+    if (op === 'move') G.clip = null;
     await transfer(op, paths, state.cwd);
   }
 
   async function duplicateSelected() {
-    const items = selectedEntries();
+    const items = selectedEntries().filter((e) => !isVirtual(e));
     for (const dir of new Set(items.map((e) => P.dirname(e.path)))) {
       await transfer('copy', items.filter((e) => P.dirname(e.path) === dir).map((e) => e.path), dir);
     }
@@ -819,7 +1018,7 @@
 
   function copyPath() {
     const items = selectedEntries();
-    const text = (items.length ? items.map((e) => e.path) : [state.cwd]).join('\n');
+    const text = (items.length ? items.map((e) => e.path) : [state.cwd === HOME ? '' : state.cwd]).join('\n');
     navigator.clipboard.writeText(text).then(() => toast('已拷貝路徑'), () => toast('無法存取剪貼簿'));
   }
 
@@ -827,17 +1026,17 @@
     const i = prefs.favorites.findIndex((f) => norm(f) === norm(p));
     if (i >= 0) prefs.favorites.splice(i, 1); else prefs.favorites.push(p);
     savePrefs();
-    renderSidebar();
+    if (state.cwd === HOME) refresh(true); else renderSidebar();
   }
 
   function startRename(e) {
-    if (!e) return;
+    if (!e || isVirtual(e)) return;
     const el = elForPath(e.path);
     if (!el) return;
     const label = $('.label, .nm', el);
     if (!label) return;
     el.scrollIntoView({ block: 'nearest' });
-    state.renaming = e.path;
+    G.renaming = e.path;
     const input = document.createElement('input');
     input.className = 'rename';
     input.value = e.name;
@@ -851,7 +1050,7 @@
     const finish = async (commit) => {
       if (done) return;
       done = true;
-      state.renaming = null;
+      G.renaming = null;
       const name = input.value.trim();
       if (commit && name && name !== e.name) {
         const res = await api.rename(e.path, name);
@@ -923,27 +1122,37 @@
   function itemMenu(entries, x, y) {
     const one = entries.length === 1 ? entries[0] : null;
     const isFav = one?.isDir && prefs.favorites.some((f) => norm(f) === norm(one.path));
+    const virt = entries.some(isVirtual);
+    const builtinPin = one?.kind === 'pinned' && !one.custom;
     openMenu([
       { label: '打開', kbd: 'Enter', action: () => entries.forEach(openEntry) },
+      ...(one?.isDir ? [{ label: '在新分頁中打開', kbd: '滑鼠中鍵', action: () => openTab(one.path, { activate: false }) }] : []),
       { label: one ? `快速查看「${one.name}」` : `快速查看 ${entries.length} 個項目`, kbd: 'Space', action: () => ql.open() },
       '-',
-      { label: '重新命名', kbd: 'F2', disabled: !one, action: () => startRename(one) },
-      { label: '製作副本', kbd: 'Ctrl+D', action: duplicateSelected },
+      { label: '重新命名', kbd: 'F2', disabled: !one || virt, action: () => startRename(one) },
+      { label: '製作副本', kbd: 'Ctrl+D', disabled: virt, action: duplicateSelected },
       { label: '拷貝', kbd: 'Ctrl+C', action: () => copySelected('copy') },
-      { label: '剪下', kbd: 'Ctrl+X', action: () => copySelected('move') },
+      { label: '剪下', kbd: 'Ctrl+X', disabled: virt, action: () => copySelected('move') },
       { label: '拷貝路徑', kbd: 'Ctrl+Alt+C', action: copyPath },
       '-',
-      ...(one?.isDir ? [{ label: isFav ? '從側邊欄移除' : '加入側邊欄', action: () => toggleFavorite(one.path) }] : []),
+      ...(one?.isDir && !builtinPin && one.kind !== 'drive' ? [{ label: isFav ? '取消釘選' : '釘選到快速存取', action: () => toggleFavorite(one.path) }] : []),
       { label: isWin ? '在檔案總管中顯示' : '在系統檔案管理員中顯示', action: () => api.reveal(entries[0].path) },
       '-',
-      { label: '丟到資源回收筒', kbd: 'Delete', action: trashSelected },
+      { label: '丟到資源回收筒', kbd: 'Delete', disabled: virt, action: trashSelected },
     ], x, y);
   }
 
   function backgroundMenu(x, y) {
+    if (state.cwd === HOME) {
+      openMenu([
+        { label: '新分頁', kbd: 'Ctrl+T', action: () => openTab(HOME) },
+        { label: '重新整理', kbd: 'F5', action: () => refresh(true) },
+      ], x, y);
+      return;
+    }
     openMenu([
       { label: '新增資料夾', kbd: 'Ctrl+Shift+N', disabled: !!state.search.results, action: newFolder },
-      { label: state.clip ? `貼上 ${state.clip.paths.length} 個項目` : '貼上', kbd: 'Ctrl+V', disabled: !state.clip || !!state.search.results, action: paste },
+      { label: G.clip ? `貼上 ${G.clip.paths.length} 個項目` : '貼上', kbd: 'Ctrl+V', disabled: !G.clip || !!state.search.results, action: paste },
       '-',
       ...viewItems(),
       '-',
@@ -984,19 +1193,75 @@
 
   // sidebar
   $('#places').addEventListener('click', (ev) => {
+    const tw = ev.target.closest('[data-twisty]');
+    if (tw && !tw.classList.contains('none')) { toggleTree(tw.dataset.twisty); return; }
+    const sec = ev.target.closest('[data-sec]');
+    if (sec) {
+      prefs.secCollapsed = { ...prefs.secCollapsed, [sec.dataset.sec]: !prefs.secCollapsed?.[sec.dataset.sec] };
+      savePrefs();
+      renderSidebar();
+      return;
+    }
     const p = ev.target.closest('.place');
     if (p) navigate(p.dataset.path, { root: p.dataset.path });
+  });
+  $('#places').addEventListener('dblclick', (ev) => {
+    const p = ev.target.closest('.place');
+    if (p && p.dataset.path !== HOME && !ev.target.closest('[data-twisty]')) toggleTree(p.dataset.path);
   });
   $('#places').addEventListener('contextmenu', (ev) => {
     ev.preventDefault();
     const p = ev.target.closest('.place');
     if (!p) return;
+    const path = p.dataset.path;
+    if (path === HOME) {
+      openMenu([{ label: '在新分頁中打開', action: () => openTab(HOME, { activate: false }) }], ev.clientX, ev.clientY);
+      return;
+    }
     const custom = !!p.dataset.custom;
     openMenu([
-      { label: '打開', action: () => navigate(p.dataset.path, { root: p.dataset.path }) },
-      { label: isWin ? '在檔案總管中打開' : '在系統檔案管理員中打開', action: () => api.open(p.dataset.path) },
-      ...(custom ? ['-', { label: '從側邊欄移除', action: () => toggleFavorite(p.dataset.path) }] : []),
+      { label: '打開', action: () => navigate(path, { root: path }) },
+      { label: '在新分頁中打開', kbd: '滑鼠中鍵', action: () => openTab(path, { activate: false }) },
+      { label: G.treeOpen.has(path) ? '摺疊' : '展開', action: () => toggleTree(path) },
+      '-',
+      { label: isWin ? '在檔案總管中打開' : '在系統檔案管理員中打開', action: () => api.open(path) },
+      ...(custom ? ['-', { label: '取消釘選', action: () => toggleFavorite(path) }] : []),
     ], ev.clientX, ev.clientY);
+  });
+
+  // ---------- tab bar & middle-click ----------
+  // Middle-click: close a tab, or open a folder in a new background tab.
+  document.addEventListener('mousedown', (ev) => { if (ev.button === 1) ev.preventDefault(); }); // no autoscroll
+  document.addEventListener('auxclick', (ev) => {
+    if (ev.button !== 1) return;
+    const tab = ev.target.closest('.tab');
+    if (tab) { closeTab(tabs.find((t) => t.id === Number(tab.dataset.tab))); return; }
+    const place = ev.target.closest('.place, .crumb');
+    if (place?.dataset.path) { openTab(place.dataset.path, { activate: false }); return; }
+    const it = itemFromEl(ev.target);
+    if (it?.entry?.isDir) openTab(it.entry.path, { activate: false });
+  });
+  $('#tabs').addEventListener('mousedown', (ev) => {
+    const tab = ev.target.closest('.tab');
+    if (ev.button === 0 && tab) switchTab(tabs.find((t) => t.id === Number(tab.dataset.tab)));
+  });
+  $('#tabs').addEventListener('contextmenu', (ev) => {
+    ev.preventDefault();
+    const el = ev.target.closest('.tab');
+    if (!el) return;
+    const t = tabs.find((x) => x.id === Number(el.dataset.tab));
+    openMenu([
+      { label: '新分頁', kbd: 'Ctrl+T', action: () => openTab(HOME) },
+      { label: '複製分頁', action: () => openTab(t.cwd || HOME) },
+      '-',
+      { label: '關閉分頁', kbd: '滑鼠中鍵', action: () => closeTab(t) },
+      { label: '關閉其他分頁', disabled: tabs.length < 2, action: async () => { tabs.splice(0, tabs.length, t); await switchTab(t); renderTabs(); } },
+    ], ev.clientX, ev.clientY);
+  });
+  $('#tab-new').addEventListener('click', () => openTab(HOME));
+  $('#tabbar').addEventListener('dblclick', (ev) => {
+    if (ev.target.closest('.tab, button')) return;
+    if (!isTauri) W.toggleMaximize(); // Tauri drag regions maximize on their own
   });
   $('#pathbar').addEventListener('click', (ev) => {
     const c = ev.target.closest('.crumb');
@@ -1008,7 +1273,7 @@
     if (prefs.view === v) return;
     prefs.view = v;
     savePrefs();
-    if (v === 'columns') state.colActive = ancestors(state.cwd, state.colRoot).length - 1;
+    if (v === 'columns' && state.cwd !== HOME) state.colActive = ancestors(state.cwd, state.colRoot).length - 1;
     computeEntries();
     render({ animate: true });
     watchCurrent();
@@ -1058,7 +1323,7 @@
     state.search.query = searchInput.value;
     $('#search-box').classList.toggle('has-text', !!searchInput.value);
     $('#search-scope').hidden = !searchInput.value;
-    $('[data-scope="folder"]').textContent = `「${displayName(state.cwd)}」`;
+    $('[data-scope="folder"]').textContent = `「${tabTitle({ ...state, search: { results: null } })}」`;
     clearTimeout(searchTimer);
     if (state.search.scope === 'deep') searchTimer = setTimeout(runDeepSearch, 300);
     else { state.search.results = null; computeEntries(); renderView(false).then(() => { renderStatus(); renderPathbar(); renderToolbar(); }); }
@@ -1084,36 +1349,40 @@
     state.search.busy = true;
     $('#search-status').textContent = '搜尋中…';
     renderStatus();
-    const res = await api.search(state.cwd, q, prefs.showHidden);
-    if (!res || state.search.query.trim() !== q) return;
+    const tab = state;
+    const res = await api.search(state.cwd === HOME ? G.places.home : state.cwd, q, prefs.showHidden);
+    if (!res || tab !== state || state.search.query.trim() !== q) return;
     state.search.busy = false;
     state.search.results = res.entries;
-    for (const e of res.entries) {
-      // Make entries resolvable for thumbnails and actions.
-      if (!dirCache.has(P.dirname(e.path))) continue;
-    }
     $('#search-status').textContent = res.partial ? `顯示前 ${res.entries.length} 個結果` : `${res.entries.length} 個結果`;
     state.sel.clear();
     computeEntries();
     render({ animate: true });
   }
 
-  function clearSearch(rerender) {
+  function clearSearch(rerender, silent = false) {
     const had = state.search.query || state.search.results;
     state.search = { query: '', scope: 'folder', results: null, busy: false };
-    searchInput.value = '';
-    $('#search-box').classList.remove('has-text');
-    $('#search-scope').hidden = true;
-    $('#search-status').textContent = '';
-    $$('#search-scope [data-scope]').forEach((b) => b.classList.toggle('active', b.dataset.scope === 'folder'));
+    if (silent) return; // background tab: leave the visible search box alone
+    syncSearchUi();
     if (rerender && had) { computeEntries(); render(); }
+  }
+
+  // The search box shows the active tab's search.
+  function syncSearchUi() {
+    const q = state.search.query;
+    searchInput.value = q;
+    $('#search-box').classList.toggle('has-text', !!q);
+    $('#search-scope').hidden = !q;
+    $('#search-status').textContent = '';
+    $$('#search-scope [data-scope]').forEach((b) => b.classList.toggle('active', b.dataset.scope === state.search.scope));
   }
 
   // ---------- keyboard ----------
   let typeBuf = ''; let typeTimer = null;
 
   function moveSelection(dir, ev) {
-    const mode = state.search.results && prefs.view === 'columns' ? 'list' : prefs.view;
+    const mode = viewMode();
     if (mode === 'columns') { moveColumns(dir); return; }
     const list = state.entries;
     if (!list.length) return;
@@ -1126,6 +1395,8 @@
       if (perRow < 1) perRow = items.length;
       step = { left: -1, right: 1, up: -perRow, down: perRow }[dir];
     } else if (mode === 'gallery') {
+      step = { left: -1, right: 1, up: -1, down: 1 }[dir];
+    } else if (mode === 'home') {
       step = { left: -1, right: 1, up: -1, down: 1 }[dir];
     } else {
       if (dir === 'left' || dir === 'right') return;
@@ -1181,7 +1452,7 @@
   }
 
   document.addEventListener('keydown', async (ev) => {
-    if (state.renaming) return;
+    if (G.renaming) return;
     const inInput = ev.target.matches?.('input, textarea');
     const ctrl = ev.ctrlKey || ev.metaKey;
     const k = ev.key;
@@ -1195,6 +1466,9 @@
     if (ctrl && k.toLowerCase() === 'f') { ev.preventDefault(); searchInput.focus(); searchInput.select(); return; }
     if (inInput) return;
 
+    if (ctrl && k.toLowerCase() === 't') { ev.preventDefault(); openTab(HOME); return; }
+    if (ctrl && k.toLowerCase() === 'w') { ev.preventDefault(); closeTab(state); return; }
+    if (ctrl && k === 'Tab') { ev.preventDefault(); cycleTab(ev.shiftKey ? -1 : 1); return; }
     if (ctrl && ['1', '2', '3', '4'].includes(k)) { ev.preventDefault(); setView(['icons', 'list', 'columns', 'gallery'][Number(k) - 1]); return; }
     if (ctrl && ev.shiftKey && k.toLowerCase() === 'n') { ev.preventDefault(); newFolder(); return; }
     if (ctrl && ev.shiftKey && (k === '.' || k === '>')) { ev.preventDefault(); toggleHidden(); return; }
@@ -1329,11 +1603,12 @@
   $('#ql-open').addEventListener('click', () => { if (ql.current) { const e = ql.current; ql.close(); openEntry(e); } });
 
   // ---------- window chrome ----------
-  $('#traffic').addEventListener('click', (ev) => {
+  $('#caption').addEventListener('click', (ev) => {
     const b = ev.target.closest('[data-act]');
     if (!b) return;
     ({ close: W.close, min: W.minimize, max: W.toggleMaximize })[b.dataset.act]();
   });
+  W.onState((s) => document.body.classList.toggle('maximized', !!s.maximized));
   // Tauri drag regions already maximize on double-click.
   if (!isTauri) $('#toolbar').addEventListener('dblclick', (ev) => { if (!ev.target.closest('button, input')) W.toggleMaximize(); });
   window.addEventListener('blur', () => document.body.classList.add('blurred'));
@@ -1366,9 +1641,10 @@
     document.body.classList.toggle('sidebar-hidden', prefs.sidebarHidden);
     $('#zoom').value = prefs.icon;
     try {
-      state.places = await api.places();
-      const start = env.dir || state.places.home;
-      if (!(await navigate(start, { root: start }))) await navigate(state.places.home, { root: state.places.home });
+      G.places = await api.places();
+      // Like Explorer: open on Home unless a folder was passed in.
+      const start = env.dir || HOME;
+      if (!(await navigate(start, { root: start }))) await navigate(HOME);
       content.focus();
     } finally {
       window.__finderReady?.();

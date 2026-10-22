@@ -1,6 +1,7 @@
 #[doc(hidden)]
 pub mod fsops;
 mod places;
+mod recent;
 mod search;
 mod thumb;
 
@@ -29,6 +30,16 @@ async fn list_dir(dir: String) -> Result<Vec<fsops::Entry>, String> {
 #[tauri::command]
 async fn disk_free(path: String) -> Option<u64> {
     blocking(move || places::disk_free(&path)).await.ok().flatten()
+}
+
+#[tauri::command]
+async fn disk_space(path: String) -> Option<places::Space> {
+    blocking(move || places::disk_space(&path)).await.ok().flatten()
+}
+
+#[tauri::command]
+async fn recent_files() -> Vec<fsops::Entry> {
+    blocking(recent::recent_files).await.unwrap_or_default()
 }
 
 #[tauri::command]
@@ -204,7 +215,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            places, list_dir, disk_free, folder_count, thumbnail, open_path, reveal, trash, rename, mkdir,
+            places, list_dir, disk_free, disk_space, recent_files, folder_count, thumbnail, open_path, reveal, trash, rename, mkdir,
             transfer, read_text, search, watch
         ])
         .run(tauri::generate_context!())

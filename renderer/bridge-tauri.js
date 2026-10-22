@@ -69,6 +69,8 @@
     places: () => invoke('places'),
     list: (dir) => invoke('list_dir', { dir }).then(ok('entries'), fail),
     diskFree: (path) => invoke('disk_free', { path }),
+    diskSpace: (path) => invoke('disk_space', { path }),
+    recentFiles: () => invoke('recent_files'),
     folderCount: (dir) => invoke('folder_count', { dir }),
     thumb: (path, size) => invoke('thumbnail', { path, size: Math.round(size) }).catch(() => null),
     nativeIcon: (path) => invoke('thumbnail', { path, size: 96 }).catch(() => null),
@@ -96,12 +98,16 @@
     minimize: () => win.minimize(),
     toggleMaximize: () => win.toggleMaximize(),
     close: () => win.close(),
-    onState: () => {},
+    onState: (cb) => {
+      const update = async () => cb({ maximized: await win.isMaximized() });
+      win.onResized(update);
+      update();
+    },
   };
   window.__finderReady = () => win.show();
 
   // Native drag regions: Tauri only honours the attribute on the element itself.
-  for (const sel of ['#sidebar', '#toolbar', '#title-wrap', '#title', '#toolbar .spacer', '.traffic']) {
+  for (const sel of ['#sidebar', '.sb-top', '#tabbar', '#tabs', '.tb-drag', '#toolbar', '#title-wrap', '#title', '#toolbar .spacer']) {
     document.querySelectorAll(sel).forEach((el) => el.setAttribute('data-tauri-drag-region', ''));
   }
 

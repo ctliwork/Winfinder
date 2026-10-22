@@ -9,16 +9,22 @@
 <body>
   <div id="app">
     <aside id="sidebar" class="glass">
-      <div class="traffic" id="traffic">
-        <button class="light close" data-act="close" title="關閉"><svg viewBox="0 0 12 12"><path d="M3.5 3.5l5 5M8.5 3.5l-5 5"/></svg></button>
-        <button class="light min" data-act="min" title="最小化"><svg viewBox="0 0 12 12"><path d="M3 6h6"/></svg></button>
-        <button class="light max" data-act="max" title="放大"><svg viewBox="0 0 12 12"><path d="M3.6 8.4V4.6l3.8 3.8H3.6zM8.4 3.6v3.8L4.6 3.6h3.8z" class="fill"/></svg></button>
-      </div>
+      <div class="sb-top"></div>
       <nav id="places"></nav>
     </aside>
     <div id="sidebar-resizer"></div>
 
     <main id="main">
+      <div id="tabbar">
+        <div id="tabs"></div>
+        <button id="tab-new" class="tab-new" title="新分頁 (Ctrl+T)"><svg viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></svg></button>
+        <div class="tb-drag"></div>
+        <div class="caption" id="caption">
+          <button class="cap" data-act="min" title="最小化"><svg viewBox="0 0 10 10"><path d="M0 5h10"/></svg></button>
+          <button class="cap" data-act="max" title="最大化"><svg class="i-max" viewBox="0 0 10 10"><rect x=".5" y=".5" width="9" height="9" rx="1"/></svg><svg class="i-restore" viewBox="0 0 10 10"><rect x=".5" y="2.5" width="7" height="7" rx="1"/><path d="M2.5 2.5V1.5a1 1 0 0 1 1-1h5a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-1"/></svg></button>
+          <button class="cap close" data-act="close" title="關閉"><svg viewBox="0 0 10 10"><path d="M.5.5l9 9M9.5.5l-9 9"/></svg></button>
+        </div>
+      </div>
       <header id="toolbar">
         <div class="capsule nav">
           <button id="btn-back" class="tb" title="上一頁 (Alt+←)"><svg viewBox="0 0 20 20"><path d="M12.5 4.5L7 10l5.5 5.5"/></svg></button>
