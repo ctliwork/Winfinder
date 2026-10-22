@@ -201,18 +201,153 @@ pub fn mkdir(dir: &str) -> Result<String, String> {
     Ok(target.to_string_lossy().into_owned())
 }
 
-fn copy_recursive(src: &Path, dst: &Path) -> io::Result<()> {
+/// Creates an empty text file ("新文字文件.txt", "新文字文件 2.txt"…).
+pub fn new_file(dir: &str) -> Result<String, String> {
+    let target = unique_path(Path::new(dir), "新文字文件.txt");
+    fs::OpenOptions::new().write(true).create_new(true).open(&target).map_err(|e| code(&e))?;
+    Ok(target.to_string_lossy().into_owned())
+}
+
+#[derive(Serialize, Default)]
+pub struct DirSize {
+    pub size: u64,
+    pub files: u64,
+    pub dirs: u64,
+}
+
+/// Total size of everything under `dir` (links are not followed; unreadable
+/// entries are skipped).
+pub fn dir_size(dir: &str) -> DirSize {
+    let mut out = DirSize::default();
+    for e in jwalk::WalkDir::new(dir).skip_hidden(false).follow_links(false).into_iter().skip(1).flatten() {
+        if e.file_type().is_dir() {
+            out.dirs += 1;
+        } else if let Ok(m) = e.metadata() {
+            out.files += 1;
+            out.size += m.len();
+        }
+    }
+    out
+}
+
+/// How a transfer treats a name that already exists in the destination.
+#[derive(Clone, Copy, PartialEq)]
+pub enum Conflict {
+    /// "名稱 2" next to the existing item (the default).
+    KeepBoth,
+    /// Overwrite files; merge folders.
+    Replace,
+    Skip,
+}
+
+impl Conflict {
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "replace" => Conflict::Replace,
+            "skip" => Conflict::Skip,
+            _ => Conflict::KeepBoth,
+        }
+    }
+}
+
+/// Byte progress for a running transfer, with cancellation.
+pub struct Progress<'a> {
+    pub report: &'a (dyn Fn(u64, u64, &str) + Sync),
+    pub cancel: &'a std::sync::atomic::AtomicBool,
+    pub total: u64,
+    done: std::cell::Cell<u64>,
+    last: std::cell::Cell<std::time::Instant>,
+}
+
+impl<'a> Progress<'a> {
+    pub fn new(report: &'a (dyn Fn(u64, u64, &str) + Sync), cancel: &'a std::sync::atomic::AtomicBool, total: u64) -> Self {
+        Progress { report, cancel, total, done: 0.into(), last: std::time::Instant::now().into() }
+    }
+    fn add(&self, n: u64, name: &str) -> io::Result<()> {
+        self.done.set(self.done.get() + n);
+        if self.last.get().elapsed().as_millis() >= 100 {
+            self.last.set(std::time::Instant::now());
+            (self.report)(self.done.get(), self.total, name);
+        }
+        if self.cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err(io::Error::new(io::ErrorKind::Interrupted, "CANCELLED"));
+        }
+        Ok(())
+    }
+}
+
+/// Bytes a copy of `paths` will write (links not followed).
+pub fn total_size(paths: &[String]) -> u64 {
+    paths
+        .iter()
+        .map(|p| match fs::symlink_metadata(p) {
+            Ok(m) if m.is_dir() => dir_size(p).size,
+            Ok(m) => m.len(),
+            Err(_) => 0,
+        })
+        .sum()
+}
+
+fn copy_file(src: &Path, dst: &Path, progress: Option<&Progress>) -> io::Result<()> {
+    let Some(p) = progress else {
+        fs::copy(src, dst)?;
+        return Ok(());
+    };
+    let name = src.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let result = (|| {
+        let mut from = fs::File::open(src)?;
+        let mut to = fs::File::create(dst)?;
+        let mut buf = vec![0u8; 1 << 20];
+        loop {
+            let n = from.read(&mut buf)?;
+            if n == 0 {
+                break;
+            }
+            io::Write::write_all(&mut to, &buf[..n])?;
+            p.add(n as u64, &name)?;
+        }
+        // Keep what fs::copy would keep: permissions and the modified time.
+        let meta = from.metadata()?;
+        to.set_permissions(meta.permissions())?;
+        if let Ok(t) = meta.modified() {
+            let _ = to.set_modified(t);
+        }
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(dst);
+    }
+    result
+}
+
+/// Copies a file or folder. With `merge`, an existing folder at `dst` is
+/// filled in and existing files are overwritten.
+fn copy_tree(src: &Path, dst: &Path, merge: bool, progress: Option<&Progress>) -> io::Result<()> {
     let meta = fs::symlink_metadata(src)?;
     if meta.is_dir() {
-        fs::create_dir(dst)?;
+        match fs::create_dir(dst) {
+            Err(e) if merge && e.kind() == io::ErrorKind::AlreadyExists && dst.is_dir() => {}
+            r => r?,
+        }
         for e in fs::read_dir(src)? {
             let e = e?;
-            copy_recursive(&e.path(), &dst.join(e.file_name()))?;
+            copy_tree(&e.path(), &dst.join(e.file_name()), merge, progress)?;
         }
     } else {
-        fs::copy(src, dst)?;
+        if merge && dst.is_dir() {
+            fs::remove_dir_all(dst)?;
+        }
+        copy_file(src, dst, progress)?;
     }
     Ok(())
+}
+
+fn remove_any(p: &Path) -> io::Result<()> {
+    if fs::symlink_metadata(p)?.is_dir() {
+        fs::remove_dir_all(p)
+    } else {
+        fs::remove_file(p)
+    }
 }
 
 fn is_inside(child: &Path, parent: &Path) -> bool {
@@ -229,6 +364,10 @@ pub struct TransferResult {
 }
 
 pub fn transfer(op: &str, files: &[String], dest: &str) -> Vec<TransferResult> {
+    transfer_with(op, files, dest, Conflict::KeepBoth, None)
+}
+
+pub fn transfer_with(op: &str, files: &[String], dest: &str, conflict: Conflict, progress: Option<&Progress>) -> Vec<TransferResult> {
     let dest = Path::new(dest);
     files
         .iter()
@@ -241,23 +380,79 @@ pub fn transfer(op: &str, files: &[String], dest: &str) -> Vec<TransferResult> {
             if op == "move" && src.parent() == Some(dest) {
                 return TransferResult { src: src_s.clone(), path: Some(src_s.clone()), error: None };
             }
+            if progress.is_some_and(|p| p.cancel.load(std::sync::atomic::Ordering::Relaxed)) {
+                return fail("CANCELLED".into());
+            }
             let name = src.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            let target = unique_path(dest, &name);
-            let res = if op == "move" {
-                fs::rename(src, &target).or_else(|_| {
-                    // Different volume: copy then delete.
-                    copy_recursive(src, &target)?;
-                    if src.is_dir() { fs::remove_dir_all(src) } else { fs::remove_file(src) }
-                })
-            } else {
-                copy_recursive(src, &target)
+            let direct = dest.join(&name);
+            let exists = fs::symlink_metadata(&direct).is_ok() && src.parent() != Some(dest);
+            let (target, merge) = match (exists, conflict) {
+                (true, Conflict::Skip) => return fail("SKIPPED".into()),
+                (true, Conflict::Replace) => (direct, true),
+                _ => (unique_path(dest, &name), false),
             };
+            let res = (|| {
+                if op == "move" {
+                    if merge && fs::symlink_metadata(&target)?.is_dir() != src.is_dir() {
+                        remove_any(&target)?;
+                    }
+                    // A plain rename works within a volume unless a folder has to be merged.
+                    let renamed = !(merge && target.is_dir()) && fs::rename(src, &target).is_ok();
+                    if !renamed {
+                        copy_tree(src, &target, merge, progress)?;
+                        remove_any(src)?;
+                    }
+                    Ok(())
+                } else {
+                    if merge && fs::symlink_metadata(&target)?.is_dir() != src.is_dir() {
+                        remove_any(&target)?;
+                    }
+                    copy_tree(src, &target, merge, progress)
+                }
+            })();
             match res {
                 Ok(()) => TransferResult { src: src_s.clone(), path: Some(target.to_string_lossy().into_owned()), error: None },
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => fail("CANCELLED".into()),
                 Err(e) => fail(code(&e)),
             }
         })
         .collect()
+}
+
+/// Puts items back from the Recycle Bin to where they were deleted from.
+/// Returns the paths that could not be restored.
+#[cfg(any(windows, all(unix, not(target_os = "macos"))))]
+pub fn restore_trash(paths: &[String]) -> Vec<String> {
+    let Ok(items) = trash::os_limited::list() else { return paths.to_vec() };
+    let same = |a: &Path, b: &Path| a.to_string_lossy().to_lowercase() == b.to_string_lossy().to_lowercase();
+    let mut picked = Vec::new();
+    let mut missing = Vec::new();
+    for p in paths {
+        let path = Path::new(p);
+        let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
+            missing.push(p.clone());
+            continue;
+        };
+        // The most recent deletion of that name from that folder.
+        let hit = items
+            .iter()
+            .filter(|t| same(&t.original_parent, parent) && t.name.to_string_lossy().eq_ignore_ascii_case(&name.to_string_lossy()))
+            .max_by_key(|t| t.time_deleted);
+        match hit {
+            Some(t) => picked.push(t.clone()),
+            None => missing.push(p.clone()),
+        }
+    }
+    if trash::os_limited::restore_all(picked.clone()).is_err() {
+        // restore_all stops at the first conflict; report everything not back in place.
+        missing.extend(picked.iter().map(|t| t.original_parent.join(&t.name)).filter(|p| !p.exists()).map(|p| p.to_string_lossy().into_owned()));
+    }
+    missing
+}
+
+#[cfg(not(any(windows, all(unix, not(target_os = "macos")))))]
+pub fn restore_trash(paths: &[String]) -> Vec<String> {
+    paths.to_vec()
 }
 
 #[cfg(test)]
@@ -286,6 +481,58 @@ mod tests {
         assert!(!a.is_dir && !a.hidden && a.mtime.is_some());
         assert!(v.iter().find(|e| e.name == "子資料夾").unwrap().is_dir);
         assert!(v.iter().find(|e| e.name == ".hidden").unwrap().hidden);
+    }
+
+    #[test]
+    fn conflicts_and_progress() {
+        use std::sync::atomic::AtomicBool;
+        let d = tmp("conflict");
+        let (a, b) = (d.join("a"), d.join("b"));
+        fs::create_dir_all(a.join("f")).unwrap();
+        fs::create_dir_all(b.join("f")).unwrap();
+        fs::write(a.join("x.txt"), "new").unwrap();
+        fs::write(b.join("x.txt"), "old").unwrap();
+        fs::write(a.join("f").join("1.txt"), "1").unwrap();
+        fs::write(b.join("f").join("2.txt"), "2").unwrap();
+        let srcs: Vec<String> = ["x.txt", "f"].iter().map(|n| a.join(n).to_string_lossy().into_owned()).collect();
+        let bs = b.to_str().unwrap();
+
+        let r = transfer_with("copy", &srcs, bs, Conflict::Skip, None);
+        assert!(r.iter().all(|r| r.error.as_deref() == Some("SKIPPED")));
+        assert_eq!(fs::read_to_string(b.join("x.txt")).unwrap(), "old");
+
+        let r = transfer_with("copy", &srcs, bs, Conflict::KeepBoth, None);
+        assert!(r[0].path.as_ref().unwrap().ends_with("x 2.txt"));
+
+        let seen = std::sync::Mutex::new(0u64);
+        let report = |done: u64, _total: u64, _name: &str| *seen.lock().unwrap() = done;
+        let cancel = AtomicBool::new(false);
+        let p = Progress::new(&report, &cancel, total_size(&srcs));
+        let r = transfer_with("move", &srcs, bs, Conflict::Replace, Some(&p));
+        assert!(r.iter().all(|r| r.error.is_none()));
+        assert_eq!(fs::read_to_string(b.join("x.txt")).unwrap(), "new");
+        // Folders merge: both files are there.
+        assert!(b.join("f").join("1.txt").exists() && b.join("f").join("2.txt").exists());
+        assert!(!a.join("x.txt").exists() && !a.join("f").exists());
+
+        cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+        fs::write(a.join("y.txt"), "y").unwrap();
+        let p = Progress::new(&report, &cancel, 1);
+        let r = transfer_with("copy", &[a.join("y.txt").to_string_lossy().into_owned()], bs, Conflict::KeepBoth, Some(&p));
+        assert_eq!(r[0].error.as_deref(), Some("CANCELLED"));
+        assert!(!b.join("y.txt").exists());
+    }
+
+    #[test]
+    fn new_file_and_dir_size() {
+        let d = tmp("size");
+        let a = new_file(d.to_str().unwrap()).unwrap();
+        let b = new_file(d.to_str().unwrap()).unwrap();
+        assert!(a.ends_with("新文字文件.txt") && b.ends_with("新文字文件 2.txt"));
+        fs::create_dir(d.join("sub")).unwrap();
+        fs::write(d.join("sub").join("x.bin"), [0u8; 1000]).unwrap();
+        let s = dir_size(d.to_str().unwrap());
+        assert_eq!((s.size, s.files, s.dirs), (1000, 3, 1));
     }
 
     #[test]

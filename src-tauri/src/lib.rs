@@ -1,3 +1,4 @@
+mod archive;
 #[doc(hidden)]
 pub mod fsops;
 mod places;
@@ -5,6 +6,8 @@ mod preview;
 mod recent;
 mod search;
 mod thumb;
+#[cfg(windows)]
+mod winshell;
 
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
@@ -88,9 +91,164 @@ fn mkdir(dir: String) -> Result<String, String> {
     fsops::mkdir(&dir)
 }
 
+static CANCEL_TRANSFER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Copies or moves files, reporting byte progress as "transfer-progress"
+/// events (done, total, name) when data actually has to be copied.
 #[tauri::command]
-async fn transfer(op: String, files: Vec<String>, dest: String) -> Result<Vec<fsops::TransferResult>, String> {
-    blocking(move || fsops::transfer(&op, &files, &dest)).await
+async fn transfer(app: AppHandle, op: String, files: Vec<String>, dest: String, conflict: Option<String>) -> Result<Vec<fsops::TransferResult>, String> {
+    use std::sync::atomic::Ordering;
+    CANCEL_TRANSFER.store(false, Ordering::Relaxed);
+    blocking(move || {
+        let conflict = fsops::Conflict::parse(conflict.as_deref().unwrap_or(""));
+        let total = fsops::total_size(&files);
+        let report = |done: u64, total: u64, name: &str| {
+            let _ = app.emit("transfer-progress", (done, total, name));
+        };
+        let progress = fsops::Progress::new(&report, &CANCEL_TRANSFER, total);
+        let r = fsops::transfer_with(&op, &files, &dest, conflict, Some(&progress));
+        let _ = app.emit("transfer-progress", (total, total, ""));
+        r
+    })
+    .await
+}
+
+#[tauri::command]
+fn cancel_transfer() {
+    CANCEL_TRANSFER.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+#[tauri::command]
+async fn restore_trash(paths: Vec<String>) -> Result<Vec<String>, String> {
+    blocking(move || fsops::restore_trash(&paths)).await
+}
+
+#[tauri::command]
+fn new_file(dir: String) -> Result<String, String> {
+    fsops::new_file(&dir)
+}
+
+#[tauri::command]
+async fn dir_size(path: String) -> Result<fsops::DirSize, String> {
+    blocking(move || fsops::dir_size(&path)).await
+}
+
+#[tauri::command]
+async fn compress(paths: Vec<String>) -> Result<String, String> {
+    blocking(move || archive::compress(&paths)).await?
+}
+
+#[tauri::command]
+async fn extract(path: String) -> Result<String, String> {
+    blocking(move || archive::extract(&path)).await?
+}
+
+/// Opens Windows Terminal in `dir`, or PowerShell when it isn't installed.
+#[tauri::command]
+fn open_terminal(dir: String) -> Result<(), String> {
+    use std::process::Command;
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NEW_CONSOLE: u32 = 0x10;
+        if Command::new("wt.exe").arg("-d").arg(&dir).spawn().is_ok() {
+            return Ok(());
+        }
+        Command::new("powershell.exe")
+            .arg("-NoExit")
+            .current_dir(&dir)
+            .creation_flags(CREATE_NEW_CONSOLE)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+    #[cfg(not(windows))]
+    {
+        ["x-terminal-emulator", "gnome-terminal", "konsole", "xterm"]
+            .iter()
+            .find_map(|t| Command::new(t).current_dir(&dir).spawn().ok())
+            .map(|_| ())
+            .ok_or_else(|| "找不到終端機".to_string())
+    }
+}
+
+// ---------- Windows shell (UI thread) ----------
+// Menus, property sheets and the clipboard belong to the window's thread.
+#[cfg(windows)]
+async fn on_ui<T: Send + 'static>(
+    window: tauri::WebviewWindow,
+    f: impl FnOnce(windows::Win32::Foundation::HWND) -> T + Send + 'static,
+) -> Result<T, String> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let hwnd = window.hwnd().map_err(|e| e.to_string())?.0 as isize;
+    window
+        .run_on_main_thread(move || {
+            let _ = tx.send(f(windows::Win32::Foundation::HWND(hwnd as _)));
+        })
+        .map_err(|e| e.to_string())?;
+    blocking(move || rx.recv().map_err(|e| e.to_string())).await?
+}
+
+/// Shows Explorer's context menu; returns a verb the UI handles itself.
+#[tauri::command]
+async fn native_menu(window: tauri::WebviewWindow, paths: Vec<String>, background: bool, shift: bool) -> Result<String, String> {
+    #[cfg(windows)]
+    return on_ui(window, move |h| winshell::show_menu(h, &paths, background, shift)).await?;
+    #[cfg(not(windows))]
+    {
+        let _ = (window, paths, background, shift);
+        Err("unsupported".into())
+    }
+}
+
+#[tauri::command]
+async fn properties(window: tauri::WebviewWindow, paths: Vec<String>) -> Result<(), String> {
+    #[cfg(windows)]
+    return on_ui(window, move |h| winshell::properties(h, &paths)).await?;
+    #[cfg(not(windows))]
+    {
+        let _ = (window, paths);
+        Err("unsupported".into())
+    }
+}
+
+#[cfg(windows)]
+type ClipFiles = winshell::ClipFiles;
+#[cfg(not(windows))]
+#[derive(Serialize)]
+struct ClipFiles {
+    paths: Vec<String>,
+    cut: bool,
+}
+
+#[tauri::command]
+async fn clipboard_write(window: tauri::WebviewWindow, paths: Vec<String>, cut: bool) -> Result<(), String> {
+    #[cfg(windows)]
+    return on_ui(window, move |h| winshell::clipboard_write(h, &paths, cut)).await?;
+    #[cfg(not(windows))]
+    {
+        let _ = (window, paths, cut);
+        Err("unsupported".into())
+    }
+}
+
+#[tauri::command]
+async fn clipboard_read(window: tauri::WebviewWindow) -> Option<ClipFiles> {
+    #[cfg(windows)]
+    return on_ui(window, |_| winshell::clipboard_read()).await.ok().flatten();
+    #[cfg(not(windows))]
+    {
+        let _ = window;
+        None
+    }
+}
+
+#[tauri::command]
+async fn clipboard_clear(window: tauri::WebviewWindow) {
+    #[cfg(windows)]
+    let _ = on_ui(window, winshell::clipboard_clear).await;
+    #[cfg(not(windows))]
+    let _ = window;
 }
 
 #[derive(Serialize)]
@@ -113,6 +271,16 @@ async fn read_text(path: String) -> TextResult {
 #[tauri::command]
 async fn rich_preview(path: String) -> Result<preview::Preview, String> {
     blocking(move || preview::preview(&path)).await?
+}
+
+#[tauri::command]
+fn everything_available() -> bool {
+    search::everything_available()
+}
+
+#[tauri::command]
+async fn everything(query: String) -> Option<search::SearchResult> {
+    blocking(move || search::everything(&query)).await.ok().flatten()
 }
 
 #[tauri::command]
@@ -271,7 +439,9 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            places, pin_home, list_dir, disk_free, disk_space, recent_files, folder_count, thumbnail, open_path, reveal, trash, rename, mkdir,
+            places, pin_home, list_dir, new_file, dir_size, compress, extract, open_terminal, native_menu, properties,
+            clipboard_write, clipboard_read, clipboard_clear, cancel_transfer, restore_trash,
+            everything_available, everything, disk_free, disk_space, recent_files, folder_count, thumbnail, open_path, reveal, trash, rename, mkdir,
             transfer, read_text, rich_preview, search, watch, check_update, install_update
         ])
         .run(tauri::generate_context!())

@@ -57,6 +57,21 @@
         <span>搜尋：</span>
         <button data-scope="folder" class="chip active"></button>
         <button data-scope="deep" class="chip">包含子資料夾</button>
+        <button data-scope="pc" class="chip" hidden title="用 Everything 的索引搜尋所有磁碟">整台電腦</button>
+        <span class="sf-sep"></span>
+        <select id="sf-kind" class="sf" title="類型">
+          <option value="">所有類型</option><option value="dir">資料夾</option><option value="image">圖片</option>
+          <option value="video">影片</option><option value="audio">音樂</option><option value="docs">文件</option>
+          <option value="archive">壓縮檔</option><option value="code">程式碼</option><option value="app">應用程式</option>
+        </select>
+        <select id="sf-size" class="sf" title="大小">
+          <option value="">任何大小</option><option value="lt100k">小於 100 KB</option><option value="gt1m">大於 1 MB</option>
+          <option value="gt100m">大於 100 MB</option><option value="gt1g">大於 1 GB</option>
+        </select>
+        <select id="sf-date" class="sf" title="修改日期">
+          <option value="">任何時間</option><option value="1">今天</option><option value="7">最近 7 天</option>
+          <option value="30">最近 30 天</option><option value="365">最近一年</option>
+        </select>
         <span id="search-status"></span>
       </div>
 
@@ -97,6 +112,15 @@
     <div class="up-icon"><svg viewBox="0 0 20 20"><path d="M10 3v9M6 8.5l4 4 4-4M4 15.5h12"/></svg></div>
     <div class="up-text"><b id="up-title"></b><small id="up-sub"></small><div class="up-bar" hidden><i></i></div></div>
     <div class="up-actions"><button id="up-later">稍後</button><button id="up-go" class="primary">更新並重新啟動</button></div>
+  </div>
+  <div id="progress" class="glass" hidden>
+    <div class="up-icon"><svg viewBox="0 0 20 20"><rect x="3" y="5" width="9" height="11" rx="1.5"/><path d="M8 3h7.5A1.5 1.5 0 0 1 17 4.5V13"/></svg></div>
+    <div class="up-text"><b id="prog-title"></b><small id="prog-sub"></small><div class="up-bar"><i></i></div></div>
+    <div class="up-actions"><button id="prog-cancel">取消</button></div>
+  </div>
+  <div id="dlg" hidden>
+    <div id="dlg-backdrop"></div>
+    <div id="dlg-window" class="glass"></div>
   </div>
   <div id="menu" hidden></div>
   <div id="toast" hidden></div>
