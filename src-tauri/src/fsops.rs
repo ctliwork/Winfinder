@@ -18,6 +18,10 @@ pub struct Entry {
     pub birth: Option<f64>,
     pub ext: String,
     pub hidden: bool,
+    /// Hidden + system: Explorer's "protected operating system files" (e.g.
+    /// the legacy "Application Data" / "My Documents" junctions, which can't
+    /// be opened). Shown only when that is asked for separately.
+    pub system: bool,
     pub link: bool,
 }
 
@@ -49,17 +53,18 @@ pub fn hidden_by_name(name: &str) -> bool {
     name.starts_with('.') || lower.starts_with("ntuser.") || SYSTEM_NAMES.contains(&lower.as_str())
 }
 
+const HIDDEN: u32 = 0x2;
+const SYSTEM: u32 = 0x4;
+
 #[cfg(windows)]
-fn hidden_by_attr(meta: &fs::Metadata) -> bool {
+fn attrs(meta: &fs::Metadata) -> u32 {
     use std::os::windows::fs::MetadataExt;
-    const HIDDEN: u32 = 0x2;
-    const SYSTEM: u32 = 0x4;
-    meta.file_attributes() & (HIDDEN | SYSTEM) != 0
+    meta.file_attributes()
 }
 
 #[cfg(not(windows))]
-fn hidden_by_attr(_meta: &fs::Metadata) -> bool {
-    false
+fn attrs(_meta: &fs::Metadata) -> u32 {
+    0
 }
 
 fn ext_of(name: &str, is_dir: bool) -> String {
@@ -81,9 +86,13 @@ pub fn entry_from(path: &Path, lmeta: Option<fs::Metadata>) -> Entry {
         .unwrap_or_else(|| path.to_string_lossy().into_owned());
     let link = lmeta.as_ref().map(|m| m.file_type().is_symlink()).unwrap_or(false);
     // Follow links so a link to a folder behaves like a folder.
-    let meta = if link || lmeta.is_none() { fs::metadata(path).ok().or(lmeta) } else { lmeta };
+    let meta = if link || lmeta.is_none() { fs::metadata(path).ok().or_else(|| lmeta.clone()) } else { lmeta.clone() };
     let is_dir = meta.as_ref().map(|m| m.is_dir()).unwrap_or(false);
-    let hidden = hidden_by_name(&name) || meta.as_ref().map(hidden_by_attr).unwrap_or(false);
+    // A link's own attributes count: Windows marks its compatibility junctions
+    // hidden + system while their targets are ordinary folders.
+    let a = lmeta.as_ref().map(attrs).unwrap_or(0) | meta.as_ref().map(attrs).unwrap_or(0);
+    let hidden = hidden_by_name(&name) || a & (HIDDEN | SYSTEM) != 0;
+    let system = a & (HIDDEN | SYSTEM) == HIDDEN | SYSTEM;
     Entry {
         ext: ext_of(&name, is_dir),
         size: meta.as_ref().filter(|m| !m.is_dir()).map(|m| m.len()),
@@ -93,6 +102,7 @@ pub fn entry_from(path: &Path, lmeta: Option<fs::Metadata>) -> Entry {
         path: path.to_string_lossy().into_owned(),
         is_dir,
         hidden,
+        system,
         link,
     }
 }
@@ -481,6 +491,18 @@ mod tests {
         assert!(!a.is_dir && !a.hidden && a.mtime.is_some());
         assert!(v.iter().find(|e| e.name == "子資料夾").unwrap().is_dir);
         assert!(v.iter().find(|e| e.name == ".hidden").unwrap().hidden);
+    }
+
+    // Windows CI: the profile's legacy junctions count as protected system items.
+    #[cfg(windows)]
+    #[test]
+    fn compatibility_junctions_are_system() {
+        let home = std::env::var("USERPROFILE").unwrap();
+        let v = list(&home).unwrap();
+        let ad = v.iter().find(|e| e.name == "Application Data").expect("Application Data junction");
+        assert!(ad.link && ad.hidden && ad.system);
+        let desktop = v.iter().find(|e| e.name == "Desktop").expect("Desktop");
+        assert!(!desktop.system);
     }
 
     #[test]

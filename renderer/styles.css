@@ -21,6 +21,7 @@
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.08), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
   --page: url(#g-page);
   --solid: #ffffff;
+  --side-solid: #eef0f5;
   color-scheme: light;
 }
 
@@ -42,6 +43,7 @@
     --shadow-lg: 0 24px 80px rgba(0, 0, 0, 0.6), 0 0 0 0.5px rgba(255, 255, 255, 0.12);
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4), 0 0 0 0.5px rgba(255, 255, 255, 0.08);
     --solid: #2c2c2e;
+    --side-solid: #26272b;
     color-scheme: dark;
   }
   :root:not([data-theme="light"]) .ico.file .page { fill: url(#g-page-dark); }
@@ -64,6 +66,7 @@
   --shadow-lg: 0 24px 80px rgba(0, 0, 0, 0.6), 0 0 0 0.5px rgba(255, 255, 255, 0.12);
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4), 0 0 0 0.5px rgba(255, 255, 255, 0.08);
   --solid: #2c2c2e;
+    --side-solid: #26272b;
     color-scheme: dark;
 }
 :root[data-theme="dark"] .ico.file .page { fill: url(#g-page-dark); }
@@ -780,3 +783,8 @@ img.panning, video.panning { cursor: grabbing; transition: none; }
 .col-preview .cp-media[data-kind="doc"] { background: rgba(0, 0, 0, 0.025); }
 .col-preview { padding: 18px 20px 24px; }
 .cp-media .ql-info > .pv-name, .cp-media .ql-info > .pv-kind { display: none; } /* shown below the preview */
+
+/* Startup: the sidebar stays opaque until Mica is drawn (see early.js), then
+   fades to its translucent glass. */
+:root.booting #sidebar { background: var(--side-solid); backdrop-filter: none; transition: none; }
+#sidebar.settle { transition: background-color 0.35s ease, width 0.25s cubic-bezier(.2, .8, .2, 1), margin 0.25s, opacity 0.2s; }
