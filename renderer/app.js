@@ -2695,10 +2695,11 @@
     if (prefs.startup === 'custom' && prefs.startDir) return prefs.startDir;
     return HOME;
   }
-  function applyTheme() {
+  function applyTheme(initial = false) {
     if (prefs.theme === 'system') delete document.documentElement.dataset.theme;
     else document.documentElement.dataset.theme = prefs.theme;
-    W.setTheme?.(prefs.theme);
+    // The window already follows the system at startup; don't poke it then.
+    if (!(initial && prefs.theme === 'system')) W.setTheme?.(prefs.theme);
   }
   function applyDensity() {
     document.body.classList.toggle('density-compact', prefs.density === 'compact');
@@ -2856,7 +2857,7 @@
   // ---------- boot ----------
   (async function boot() {
     applyAccent();
-    applyTheme();
+    applyTheme(true);
     applyDensity();
     document.documentElement.style.setProperty('--icon', `${prefs.icon}px`);
     document.documentElement.style.setProperty('--sidebar-w', `${prefs.sidebarW}px`);
@@ -2871,6 +2872,14 @@
       content.focus();
     } finally {
       window.__finderReady?.();
+      // Give the window a moment to draw its Mica backdrop, then let the
+      // sidebar fade from opaque to glass (early.js set 'booting').
+      setTimeout(() => {
+        const sb = $('#sidebar');
+        sb.classList.add('settle');
+        document.documentElement.classList.remove('booting');
+        setTimeout(() => sb.classList.remove('settle'), 500);
+      }, 350);
     }
     // Quietly look for a new version once the window is up.
     if (prefs.autoUpdate) setTimeout(() => checkUpdates(false), 4000);
