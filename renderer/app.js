@@ -1227,7 +1227,14 @@
       startMarquee(ev);
       return;
     }
-    if (it.col != null) { columnClick(it.entry, it.col); return; }
+    if (it.col != null) {
+      // A double-click's second press must not hit whatever slid under the
+      // pointer after the first one opened a column: only the first counts.
+      if (ev.detail > 1) return;
+      G.colDown = it.entry;
+      columnClick(it.entry, it.col);
+      return;
+    }
     // Keep a multi-selection intact until mouseup so it can be dragged.
     if (state.sel.has(it.entry.path) && !ev.ctrlKey && !ev.shiftKey && !ev.metaKey) {
       pendingSingle = it.entry.path;
@@ -1241,6 +1248,13 @@
   });
   content.addEventListener('dblclick', (ev) => {
     const it = itemFromEl(ev.target);
+    if (it?.col != null || (inColumnsMode() && ev.target.closest('.colw'))) {
+      // Column view (like Finder): a folder already opened on the first click;
+      // a file opens in its app. Use what the first click hit.
+      const e = G.colDown;
+      if (e && !e.isDir) openEntry(e);
+      return;
+    }
     if (it?.entry) openEntry(it.entry);
   });
   content.addEventListener('click', (ev) => {
