@@ -193,8 +193,33 @@
   function setSort(sort) {
     if (folderPref() !== null && !state.search.results) rememberFolder({ sort }); else prefs.sort = sort;
     savePrefs();
-    computeEntries();
-    render();
+    flipIcons(async () => { computeEntries(); await render(); });
+  }
+
+  // Icon view (Finder): when the order or the icon size changes, items glide
+  // from where they were to where they go instead of jumping.
+  const calm = matchMedia('(prefers-reduced-motion: reduce)');
+  async function flipIcons(change) {
+    if (viewMode() !== 'icons' || calm.matches) { await change(); return; }
+    const before = new Map();
+    for (const el of $$('.gi[data-i]', view)) {
+      const e = state.entries[Number(el.dataset.i)];
+      if (e) before.set(e.path, el.getBoundingClientRect());
+    }
+    await change();
+    if (viewMode() !== 'icons' || before.size > 600) return;
+    for (const el of $$('.gi[data-i]', view)) {
+      const e = state.entries[Number(el.dataset.i)];
+      const b = e && before.get(e.path);
+      if (!b) continue;
+      const a = el.getBoundingClientRect();
+      const dx = b.left - a.left; const dy = b.top - a.top; const k = b.width / a.width;
+      if (Math.abs(dx) < 1 && Math.abs(dy) < 1 && Math.abs(k - 1) < 0.01) continue;
+      el.animate([
+        { transform: `translate(${dx}px, ${dy}px) scale(${k})`, transformOrigin: 'top left' },
+        { transform: 'none', transformOrigin: 'top left' },
+      ], { duration: 320, easing: 'cubic-bezier(.2,.8,.2,1)' });
+    }
   }
 
   function sortEntries(list) {
@@ -275,8 +300,7 @@
   function setGroup(group) {
     if (folderPref() !== null && !state.search.results) rememberFolder({ group }); else prefs.groupBy = group;
     savePrefs();
-    computeEntries();
-    render();
+    flipIcons(async () => { computeEntries(); await render(); });
   }
   const DAY = 86400000;
   function groupOf(e) {
@@ -1402,15 +1426,46 @@
     clearTimeout(tabHover.timer);
     tabHover = { el, timer: el && setTimeout(() => switchTab(tabs.find((t) => t.id === Number(el.dataset.tab))), 700) };
   }
-  document.addEventListener('dragover', (ev) => hoverTab(ev.target));
+  // Spring-loaded folders (Finder): hold a drag over a folder and it blinks
+  // and opens, so files can be carried down several levels in one drag.
+  const spring = { el: null, timer: null };
+  function springOver(target) {
+    const t = target ? dropTargetFor(target) : null;
+    const el = t && t.el !== content && !t.el.classList.contains('col') && !t.el.closest('.tab') ? t.el : null;
+    if (el === spring.el) return;
+    clearTimeout(spring.timer);
+    spring.el?.classList.remove('springing');
+    spring.el = el;
+    // Not into a folder that is itself being dragged, nor the one already open.
+    if (!el || (G.dragging || []).some((p) => isUnder(t.dir, p)) || norm(t.dir) === norm(state.cwd || '')) return;
+    el.classList.add('springing');
+    spring.timer = setTimeout(async () => {
+      el.classList.remove('springing');
+      el.classList.add('sprung');
+      await new Promise((r) => setTimeout(r, 320)); // the double blink
+      el.classList.remove('sprung');
+      spring.el = null;
+      const it = itemFromEl(el);
+      if (it?.col != null) await columnClick(it.entry, it.col);
+      else if (el.closest('#places')) await navigate(t.dir, { root: t.dir });
+      else await navigate(t.dir);
+    }, 700);
+  }
+  document.addEventListener('dragover', (ev) => { hoverTab(ev.target); springOver(ev.target); });
+  document.addEventListener('drop', () => springOver(null), true);
+  document.addEventListener('dragend', () => springOver(null));
   window.__finderDnd = {
     over: (x, y) => {
       const target = document.elementFromPoint(x, y);
       hoverTab(target);
+      springOver(target);
       setDropEl(dropTargetFor(target)?.el || null);
     },
-    drop: (x, y, paths) => dropInto(document.elementFromPoint(x, y), paths.length ? paths : (G.dragging || []), ctrlHeld),
-    leave: () => setDropEl(null),
+    drop: (x, y, paths) => {
+      springOver(null);
+      dropInto(document.elementFromPoint(x, y), paths.length ? paths : (G.dragging || []), ctrlHeld);
+    },
+    leave: () => { springOver(null); setDropEl(null); },
   };
 
   function conflictDialog(op, clash, dest) {
@@ -2112,7 +2167,7 @@
   function setIconSize(v) {
     prefs.icon = Math.max(48, Math.min(160, v));
     savePrefs();
-    document.documentElement.style.setProperty('--icon', `${prefs.icon}px`);
+    flipIcons(() => document.documentElement.style.setProperty('--icon', `${prefs.icon}px`));
     $('#zoom').value = prefs.icon;
     clearTimeout(setIconSize.t);
     setIconSize.t = setTimeout(() => { if (viewMode() === 'icons') renderView(false); }, 250);
@@ -2479,6 +2534,16 @@
   });
 
   // ---------- quick look ----------
+  // Where an item's icon is on screen: Quick Look grows out of it and shrinks
+  // back into it, like Finder (the whole row would be far too wide).
+  function iconRect(path) {
+    const el = elForPath(path);
+    if (!el) return null;
+    const icon = $('.thumb, .tw, img, svg', el) || el;
+    const r = icon.getBoundingClientRect();
+    return r.width && r.height ? r : null;
+  }
+
   const ql = {
     isOpen: false,
     current: null,
@@ -2492,7 +2557,7 @@
       root.classList.remove('closing');
       await this.show(e);
       const win = $('#ql-window');
-      const from = elForPath(e.path)?.getBoundingClientRect();
+      const from = iconRect(e.path);
       const to = win.getBoundingClientRect();
       const kf = from
         ? [{ transform: `translate(${from.left + from.width / 2 - (to.left + to.width / 2)}px, ${from.top + from.height / 2 - (to.top + to.height / 2)}px) scale(${Math.max(0.05, from.width / to.width)})`, opacity: 0.2 }, { transform: 'none', opacity: 1 }]
@@ -2514,7 +2579,7 @@
       const root = $('#ql');
       const win = $('#ql-window');
       root.classList.add('closing');
-      const from = this.current && elForPath(this.current.path)?.getBoundingClientRect();
+      const from = this.current && iconRect(this.current.path);
       const to = win.getBoundingClientRect();
       const end = from
         ? { transform: `translate(${from.left + from.width / 2 - (to.left + to.width / 2)}px, ${from.top + from.height / 2 - (to.top + to.height / 2)}px) scale(${Math.max(0.05, from.width / to.width)})`, opacity: 0 }
