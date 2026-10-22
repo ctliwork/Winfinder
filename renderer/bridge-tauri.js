@@ -81,6 +81,11 @@
     trash: (paths) => invoke('trash', { paths }),
     rename: (path, newName) => invoke('rename', { path, newName }).then(ok('path'), fail),
     mkdir: (dir) => invoke('mkdir', { dir }).then(ok('path'), fail),
+    newFile: (dir) => invoke('new_file', { dir }).then(ok('path'), fail),
+    dirSize: (path) => invoke('dir_size', { path }).catch(() => null),
+    compress: (paths) => invoke('compress', { paths }).then(ok('path'), fail),
+    extract: (path) => invoke('extract', { path }).then(ok('path'), fail),
+    openTerminal: (dir) => invoke('open_terminal', { dir }).then(() => '', (e) => String(e)),
     transfer: (op, files, dest) => invoke('transfer', { op, files, dest }),
     readText: (path) => invoke('read_text', { path }),
     richPreview: (path) => invoke('rich_preview', { path }),
@@ -105,6 +110,7 @@
     minimize: () => win.minimize(),
     toggleMaximize: () => win.toggleMaximize(),
     close: () => win.close(),
+    setTheme: (theme) => win.setTheme(theme === 'system' ? null : theme).catch(() => {}),
     onState: (cb) => {
       const update = async () => cb({ maximized: await win.isMaximized() });
       win.onResized(update);

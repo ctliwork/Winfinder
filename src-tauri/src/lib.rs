@@ -1,3 +1,4 @@
+mod archive;
 #[doc(hidden)]
 pub mod fsops;
 mod places;
@@ -91,6 +92,55 @@ fn mkdir(dir: String) -> Result<String, String> {
 #[tauri::command]
 async fn transfer(op: String, files: Vec<String>, dest: String) -> Result<Vec<fsops::TransferResult>, String> {
     blocking(move || fsops::transfer(&op, &files, &dest)).await
+}
+
+#[tauri::command]
+fn new_file(dir: String) -> Result<String, String> {
+    fsops::new_file(&dir)
+}
+
+#[tauri::command]
+async fn dir_size(path: String) -> Result<fsops::DirSize, String> {
+    blocking(move || fsops::dir_size(&path)).await
+}
+
+#[tauri::command]
+async fn compress(paths: Vec<String>) -> Result<String, String> {
+    blocking(move || archive::compress(&paths)).await?
+}
+
+#[tauri::command]
+async fn extract(path: String) -> Result<String, String> {
+    blocking(move || archive::extract(&path)).await?
+}
+
+/// Opens Windows Terminal in `dir`, or PowerShell when it isn't installed.
+#[tauri::command]
+fn open_terminal(dir: String) -> Result<(), String> {
+    use std::process::Command;
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NEW_CONSOLE: u32 = 0x10;
+        if Command::new("wt.exe").arg("-d").arg(&dir).spawn().is_ok() {
+            return Ok(());
+        }
+        Command::new("powershell.exe")
+            .arg("-NoExit")
+            .current_dir(&dir)
+            .creation_flags(CREATE_NEW_CONSOLE)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+    #[cfg(not(windows))]
+    {
+        ["x-terminal-emulator", "gnome-terminal", "konsole", "xterm"]
+            .iter()
+            .find_map(|t| Command::new(t).current_dir(&dir).spawn().ok())
+            .map(|_| ())
+            .ok_or_else(|| "找不到終端機".to_string())
+    }
 }
 
 #[derive(Serialize)]
@@ -271,7 +321,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            places, pin_home, list_dir, disk_free, disk_space, recent_files, folder_count, thumbnail, open_path, reveal, trash, rename, mkdir,
+            places, pin_home, list_dir, new_file, dir_size, compress, extract, open_terminal, disk_free, disk_space, recent_files, folder_count, thumbnail, open_path, reveal, trash, rename, mkdir,
             transfer, read_text, rich_preview, search, watch, check_update, install_update
         ])
         .run(tauri::generate_context!())

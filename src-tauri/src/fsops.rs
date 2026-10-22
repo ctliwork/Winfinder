@@ -201,6 +201,35 @@ pub fn mkdir(dir: &str) -> Result<String, String> {
     Ok(target.to_string_lossy().into_owned())
 }
 
+/// Creates an empty text file ("新文字文件.txt", "新文字文件 2.txt"…).
+pub fn new_file(dir: &str) -> Result<String, String> {
+    let target = unique_path(Path::new(dir), "新文字文件.txt");
+    fs::OpenOptions::new().write(true).create_new(true).open(&target).map_err(|e| code(&e))?;
+    Ok(target.to_string_lossy().into_owned())
+}
+
+#[derive(Serialize, Default)]
+pub struct DirSize {
+    pub size: u64,
+    pub files: u64,
+    pub dirs: u64,
+}
+
+/// Total size of everything under `dir` (links are not followed; unreadable
+/// entries are skipped).
+pub fn dir_size(dir: &str) -> DirSize {
+    let mut out = DirSize::default();
+    for e in jwalk::WalkDir::new(dir).skip_hidden(false).follow_links(false).into_iter().skip(1).flatten() {
+        if e.file_type().is_dir() {
+            out.dirs += 1;
+        } else if let Ok(m) = e.metadata() {
+            out.files += 1;
+            out.size += m.len();
+        }
+    }
+    out
+}
+
 fn copy_recursive(src: &Path, dst: &Path) -> io::Result<()> {
     let meta = fs::symlink_metadata(src)?;
     if meta.is_dir() {
@@ -286,6 +315,18 @@ mod tests {
         assert!(!a.is_dir && !a.hidden && a.mtime.is_some());
         assert!(v.iter().find(|e| e.name == "子資料夾").unwrap().is_dir);
         assert!(v.iter().find(|e| e.name == ".hidden").unwrap().hidden);
+    }
+
+    #[test]
+    fn new_file_and_dir_size() {
+        let d = tmp("size");
+        let a = new_file(d.to_str().unwrap()).unwrap();
+        let b = new_file(d.to_str().unwrap()).unwrap();
+        assert!(a.ends_with("新文字文件.txt") && b.ends_with("新文字文件 2.txt"));
+        fs::create_dir(d.join("sub")).unwrap();
+        fs::write(d.join("sub").join("x.bin"), [0u8; 1000]).unwrap();
+        let s = dir_size(d.to_str().unwrap());
+        assert_eq!((s.size, s.files, s.dirs), (1000, 3, 1));
     }
 
     #[test]

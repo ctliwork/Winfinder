@@ -21,6 +21,9 @@
   const prefs = Object.assign({
     view: 'columns', icon: 72, sidebarW: 220, showHidden: false,
     sort: { key: 'name', dir: 1 }, accent: '#0a84ff', favorites: [], sidebarHidden: false,
+    // Settings page
+    startup: 'home', startDir: '', newTab: 'home', theme: 'system', density: 'normal',
+    showExt: true, foldersFirst: true, sizeBase: 1000, confirmTrash: false, autoUpdate: true,
   }, readPrefs());
   function readPrefs() { try { return JSON.parse(localStorage.getItem(PREF_KEY)) || {}; } catch { return {}; } }
   function savePrefs() { try { localStorage.setItem(PREF_KEY, JSON.stringify(prefs)); } catch { /* storage unavailable */ } }
@@ -105,12 +108,20 @@
     return fav ? fav.icon : null;
   }
 
+  // Name as shown in the views: without the extension when that's turned off.
+  function shownName(e) {
+    if (prefs.showExt || e.isDir || !e.ext) return e.name;
+    const i = e.name.lastIndexOf('.');
+    return i > 0 ? e.name.slice(0, i) : e.name;
+  }
+
   function fmtSize(bytes) {
     if (bytes == null) return '--';
-    if (bytes < 1000) return `${bytes} 位元組`;
+    const base = prefs.sizeBase === 1024 ? 1024 : 1000; // 1024 matches Explorer
+    if (bytes < base) return `${bytes} 位元組`;
     const units = ['KB', 'MB', 'GB', 'TB'];
     let v = bytes; let u = -1;
-    do { v /= 1000; u++; } while (v >= 1000 && u < units.length - 1);
+    do { v /= base; u++; } while (v >= base && u < units.length - 1);
     return `${v < 10 ? v.toFixed(1) : Math.round(v)} ${units[u]}`;
   }
   const timeFmt = new Intl.DateTimeFormat('zh-TW', { hour: 'numeric', minute: '2-digit' });
@@ -155,14 +166,18 @@
     const cmp = {
       name: (a, b) => collator.compare(a.name, b.name),
       date: (a, b) => (a.mtime || 0) - (b.mtime || 0),
-      size: (a, b) => (a.size || 0) - (b.size || 0),
+      size: (a, b) => sizeOf(a) - sizeOf(b),
       kind: (a, b) => collator.compare(I.kindLabel(a), I.kindLabel(b)),
     }[key];
     return list.slice().sort((a, b) => {
-      if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+      if (prefs.foldersFirst && a.isDir !== b.isDir) return a.isDir ? -1 : 1;
       return (cmp(a, b) || collator.compare(a.name, b.name)) * dir;
     });
   }
+
+  // Folder sizes computed on request (menu or preview pane), by path.
+  const dirSizes = new Map();
+  function sizeOf(e) { return e.isDir ? dirSizes.get(norm(e.path))?.size ?? -1 : e.size || 0; }
 
   function visibleOf(entries) {
     let list = prefs.showHidden ? entries : entries.filter((e) => !e.hidden);
@@ -262,6 +277,7 @@
     else { state.anchor = null; state.focus = null; }
 
     computeEntries();
+    if (dir !== HOME && prefs.lastDir !== dir) { prefs.lastDir = dir; savePrefs(); }
     if (silent) return true;
     await render({ animate: animate && changed });
     watchCurrent();
@@ -551,7 +567,7 @@
       renderRows(view, items, (e, i) => `
         <div class="gi item${state.sel.has(e.path) ? ' sel' : ''}${cut.has(e.path) ? ' cut' : ''}" data-i="${i}" style="--i:${Math.min(i, 40)}" draggable="true">
           <div class="thumb">${iconHtml(e, prefs.icon)}</div>
-          <div class="label">${esc(e.name)}</div>
+          <div class="label">${esc(shownName(e))}</div>
         </div>`);
     } else if (mode === 'list') {
       view.className = 'list';
@@ -560,9 +576,9 @@
       const header = `<div class="lhead">${head('name', '名稱')}${head('date', '修改日期')}${head('size', '大小')}${head('kind', '類型')}</div>`;
       renderRows(view, items, (e, i) => `
         <div class="lrow item${state.sel.has(e.path) ? ' sel' : ''}${cut.has(e.path) ? ' cut' : ''}" data-i="${i}" draggable="true">
-          <div class="name">${iconHtml(e, 40)}<span class="nm">${esc(e.name)}</span></div>
+          <div class="name">${iconHtml(e, 40)}<span class="nm">${esc(shownName(e))}</span></div>
           <div>${fmtDate(e.mtime)}</div>
-          <div>${e.isDir ? '--' : fmtSize(e.size)}</div>
+          <div>${e.isDir ? (dirSizes.has(norm(e.path)) ? fmtSize(dirSizes.get(norm(e.path)).size) : '--') : fmtSize(e.size)}</div>
           <div>${esc(I.kindLabel(e))}</div>
         </div>`, header);
     } else if (mode === 'gallery') {
@@ -623,7 +639,7 @@
       if (col._rows !== rowsKey) {
         const top = col.scrollTop;
         col.innerHTML = list.map((e, i) => `<div class="${classes[i]}" data-col="${j}" data-i="${i}" draggable="true">
-          ${iconHtml(e, 36)}<span class="nm">${esc(e.name)}</span>
+          ${iconHtml(e, 36)}<span class="nm">${esc(shownName(e))}</span>
           ${e.isDir ? '<svg class="chev" viewBox="0 0 10 10"><path d="M3.5 2l3 3-3 3"/></svg>' : ''}
         </div>`).join('');
         col._rows = rowsKey;
@@ -753,7 +769,7 @@
     view.className = 'gallery';
     view.innerHTML = `
       <div class="g-stage"><div class="hero" data-art="${esc(cur.path)}">${fileIco(cur, 128)}</div></div>
-      <div class="g-caption"><b>${esc(cur.name)}</b><small>${esc(I.kindLabel(cur))}${cur.isDir ? '' : ` · ${fmtSize(cur.size)}`} · ${fmtDate(cur.mtime)}</small></div>
+      <div class="g-caption"><b>${esc(shownName(cur))}</b><small>${esc(I.kindLabel(cur))}${cur.isDir ? '' : ` · ${fmtSize(cur.size)}`} · ${fmtDate(cur.mtime)}</small></div>
       <div class="g-strip">${items.map((e, i) => `
         <div class="g-item item${state.sel.has(e.path) ? ' sel' : ''}" data-i="${i}" draggable="true" title="${esc(e.name)}">${iconHtml(e, 64)}</div>`).join('')}
       </div>`;
@@ -785,7 +801,7 @@
         <div class="bar"><i style="width:0%"></i></div><small class="space">&nbsp;</small></div></div>`).join('');
     const rec = recent.map((e) => `
       <div class="lrow item${sel(e)}${cut.has(e.path) ? ' cut' : ''}" data-i="${at(e)}" draggable="true">
-        <div class="name">${iconHtml(e, 40)}<span class="nm">${esc(e.name)}</span></div>
+        <div class="name">${iconHtml(e, 40)}<span class="nm">${esc(shownName(e))}</span></div>
         <div>${fmtDate(e.mtime)}</div><div>${esc(P.dirname(e.path))}</div></div>`).join('');
     view.innerHTML =
       sec('pinned', '快速存取', pinned.length ? `<div class="qa-grid">${qa}</div>` : '<div class="h-empty">沒有釘選的資料夾</div>') +
@@ -1178,9 +1194,67 @@
     startRename(entryOf(res.path));
   }
 
+  async function newFile() {
+    if (state.search.results || state.cwd === HOME || !api.newFile) return;
+    const res = await api.newFile(state.cwd);
+    if (!res.ok) { toast(`無法新增檔案：${errText(res.error)}`); return; }
+    await listDir(state.cwd, true);
+    state.sel = new Set([res.path]); state.focus = res.path; state.anchor = res.path;
+    if (inColumnsMode()) state.colActive = ancestors(state.cwd, state.colRoot).length - 1;
+    computeEntries();
+    await render();
+    startRename(entryOf(res.path));
+  }
+
+  async function openTerminal(dir) {
+    const err = await api.openTerminal(dir);
+    if (err) toast(`無法開啟終端機：${err}`);
+  }
+
+  async function calcSize(e) {
+    toast(`正在計算「${e.name}」的大小…`);
+    const r = await api.dirSize(e.path);
+    if (!r) { toast('無法計算大小'); return null; }
+    dirSizes.set(norm(e.path), r);
+    toast(`「${e.name}」：${fmtSize(r.size)}，${r.files.toLocaleString()} 個檔案、${r.dirs.toLocaleString()} 個資料夾`);
+    if (viewMode() === 'list') renderView(false);
+    updatePane();
+    return r;
+  }
+
+  async function compressSelected(entries) {
+    const items = entries.filter((e) => !isVirtual(e));
+    if (!items.length) return;
+    toast('正在壓縮…');
+    const res = await api.compress(items.map((e) => e.path));
+    if (!res.ok) { toast(`無法壓縮：${errText(res.error)}`); return; }
+    await afterCreate(res.path, `已建立「${P.basename(res.path)}」`);
+  }
+
+  async function extractZip(e) {
+    toast('正在解壓縮…');
+    const res = await api.extract(e.path);
+    if (!res.ok) { toast(`無法解壓縮：${errText(res.error)}`); return; }
+    await afterCreate(res.path, `已解壓縮到「${P.basename(res.path)}」`);
+  }
+
+  // Refreshes the folder a new item landed in and selects it.
+  async function afterCreate(path, msg) {
+    toast(msg);
+    const dir = P.dirname(path);
+    await listDir(dir, true);
+    if (norm(dir) === norm(state.cwd)) {
+      state.sel = new Set([path]); state.focus = path; state.anchor = path;
+      if (inColumnsMode()) state.colActive = ancestors(state.cwd, state.colRoot).length - 1;
+    }
+    await refresh(false);
+  }
+
   async function trashSelected() {
     const items = selectedEntries().filter((e) => !isVirtual(e));
     if (!items.length) return;
+    if (prefs.confirmTrash && !(await confirmDialog(
+      items.length === 1 ? `要將「${items[0].name}」丟到資源回收筒嗎？` : `要將 ${items.length} 個項目丟到資源回收筒嗎？`, '丟到資源回收筒'))) return;
     const failed = await api.trash(items.map((e) => e.path));
     const ok = items.length - failed.length;
     if (ok) toast(`已將 ${ok} 個項目丟到資源回收筒`);
@@ -1333,11 +1407,18 @@
       ...(one?.isDir ? [{ label: '在新分頁中打開', kbd: '滑鼠中鍵', action: () => openTab(one.path, { activate: false }) }] : []),
       { label: one ? `快速查看「${one.name}」` : `快速查看 ${entries.length} 個項目`, kbd: 'Space', action: () => ql.open() },
       '-',
-      { label: '重新命名', kbd: 'F2', disabled: !one || virt, action: () => startRename(one) },
+      one
+        ? { label: '重新命名', kbd: 'F2', disabled: virt, action: () => startRename(one) }
+        : { label: `批次重新命名 ${entries.length} 個項目…`, kbd: 'F2', disabled: virt, action: () => batchRename(entries) },
       { label: '製作副本', kbd: 'Ctrl+D', disabled: virt, action: duplicateSelected },
       { label: '拷貝', kbd: 'Ctrl+C', action: () => copySelected('copy') },
       { label: '剪下', kbd: 'Ctrl+X', disabled: virt, action: () => copySelected('move') },
       { label: '拷貝路徑', kbd: 'Ctrl+Alt+C', action: copyPath },
+      '-',
+      ...(api.compress && !virt ? [{ label: '壓縮成 ZIP 檔', action: () => compressSelected(entries) }] : []),
+      ...(one?.ext === 'zip' && api.extract ? [{ label: `解壓縮到「${P.basename(one.path).replace(/\.zip$/i, '')}」`, action: () => extractZip(one) }] : []),
+      ...(one?.isDir && !isVirtual(one) && api.dirSize ? [{ label: '計算大小', action: () => calcSize(one) }] : []),
+      ...(one?.isDir && !isVirtual(one) && api.openTerminal ? [{ label: '在終端機中開啟', action: () => openTerminal(one.path) }] : []),
       '-',
       ...(one?.isDir && one.kind !== 'drive' ? [{ label: isFav ? '從快速存取取消釘選' : '釘選到快速存取', action: () => toggleFavorite(one.path) }] : []),
       { label: isWin ? '在檔案總管中顯示' : '在系統檔案管理員中顯示', action: () => api.reveal(entries[0].path) },
@@ -1349,13 +1430,14 @@
   function backgroundMenu(x, y) {
     if (state.cwd === HOME) {
       openMenu([
-        { label: '新分頁', kbd: 'Ctrl+T', action: () => openTab(HOME) },
+        { label: '新分頁', kbd: 'Ctrl+T', action: () => openTab(newTabDir()) },
         { label: '重新整理', kbd: 'F5', action: () => refresh(true) },
       ], x, y);
       return;
     }
     openMenu([
       { label: '新增資料夾', kbd: 'Ctrl+Shift+N', disabled: !!state.search.results, action: newFolder },
+      ...(api.newFile ? [{ label: '新增文字文件', kbd: 'Ctrl+Alt+N', disabled: !!state.search.results, action: newFile }] : []),
       { label: G.clip ? `貼上 ${G.clip.paths.length} 個項目` : '貼上', kbd: 'Ctrl+V', disabled: !G.clip || !!state.search.results, action: paste },
       '-',
       ...viewItems(),
@@ -1363,6 +1445,7 @@
       ...sortItems(),
       '-',
       { label: '顯示隱藏的項目', kbd: 'Ctrl+Shift+.', check: prefs.showHidden, action: toggleHidden },
+      ...(api.openTerminal ? [{ label: '在終端機中開啟', action: () => openTerminal(state.cwd) }] : []),
       { label: isWin ? '在檔案總管中打開' : '在系統檔案管理員中打開', action: () => api.open(state.cwd) },
     ], x, y);
   }
@@ -1389,12 +1472,9 @@
       { label: '顯示隱藏的項目', kbd: 'Ctrl+Shift+.', check: prefs.showHidden, action: toggleHidden },
       { label: prefs.sidebarHidden ? '顯示側邊欄' : '隱藏側邊欄', kbd: 'Ctrl+Alt+S', action: toggleSidebar },
       { label: '預覽窗格', kbd: 'Alt+P', check: !!prefs.previewPane, action: togglePane },
-      ...(isWin && api.shellIcon ? [{ label: '使用 Windows 圖示', check: winIcons(), action: toggleFolderIcons }] : []),
       { label: '重新整理', kbd: 'F5', action: () => refresh(true) },
-      ...(api.checkUpdate ? [{ label: '檢查更新…', action: () => checkUpdates(true) }] : []),
       '-',
-      { html: '<div class="mlabel">強調色</div>' },
-      { html: `<div class="mrow">${ACCENTS.map(([c, n]) => `<button class="swatch${prefs.accent === c ? ' on' : ''}" style="background:${c};color:${c}" data-accent="${c}" title="${n}"></button>`).join('')}</div>` },
+      { label: '設定…', kbd: 'Ctrl+,', action: () => openSettings() },
     ], r.right - 230, r.bottom + 6);
   });
 
@@ -1461,19 +1541,63 @@
     if (!el) return;
     const t = tabs.find((x) => x.id === Number(el.dataset.tab));
     openMenu([
-      { label: '新分頁', kbd: 'Ctrl+T', action: () => openTab(HOME) },
+      { label: '新分頁', kbd: 'Ctrl+T', action: () => openTab(newTabDir()) },
       { label: '複製分頁', action: () => openTab(t.cwd || HOME) },
       '-',
       { label: '關閉分頁', kbd: '滑鼠中鍵', action: () => closeTab(t) },
       { label: '關閉其他分頁', disabled: tabs.length < 2, action: async () => { tabs.splice(0, tabs.length, t); await switchTab(t); renderTabs(); } },
     ], ev.clientX, ev.clientY);
   });
-  $('#tab-new').addEventListener('click', () => openTab(HOME));
+  $('#tab-new').addEventListener('click', () => openTab(newTabDir()));
   $('#tabbar').addEventListener('dblclick', (ev) => {
     if (ev.target.closest('.tab, button')) return;
     if (!isTauri) W.toggleMaximize(); // Tauri drag regions maximize on their own
   });
+  // Address bar: click the empty part of the path bar (or Ctrl+L / Alt+D / F4)
+  // to type a path, like Explorer and OneCommander.
+  function editPath() {
+    if (state.search.results) return;
+    const bar = $('#pathbar');
+    bar.classList.add('editing');
+    bar.innerHTML = `<input id="path-input" spellcheck="false" placeholder="輸入路徑，按 Enter 前往" value="${esc(state.cwd === HOME ? '' : state.cwd)}">`;
+    const input = $('#path-input');
+    input.focus();
+    input.select();
+    let done = false;
+    const finish = (go) => {
+      if (done) return;
+      done = true;
+      bar.classList.remove('editing');
+      renderPathbar();
+      if (go) goToPath(input.value); else content.focus();
+    };
+    input.addEventListener('keydown', (ev) => {
+      ev.stopPropagation();
+      if (ev.key === 'Enter') finish(true);
+      else if (ev.key === 'Escape') finish(false);
+    });
+    input.addEventListener('blur', () => finish(false));
+  }
+
+  async function goToPath(raw) {
+    let p = raw.trim().replace(/^"(.*)"$/, '$1');
+    if (!p) return;
+    if (p === '~' || p.startsWith('~/') || p.startsWith('~\\')) p = G.places.home + p.slice(1);
+    if (isWin) {
+      p = p.replace(/\//g, '\\');
+      if (/^[a-z]:$/i.test(p)) p += '\\';
+    }
+    if ((await api.list(p)).ok) { await navigate(p, { root: guessRoot(p) }); content.focus(); return; }
+    // A file: open its folder with the file selected.
+    const parent = P.dirname(p);
+    const res = parent && parent !== p ? await api.list(parent) : null;
+    const hit = res?.ok && res.entries.find((e) => norm(e.path) === norm(p));
+    if (hit) { await navigate(parent, { root: guessRoot(parent), select: hit.path }); content.focus(); return; }
+    toast(`找不到「${p}」`);
+  }
+
   $('#pathbar').addEventListener('click', (ev) => {
+    if (ev.target === ev.currentTarget) { editPath(); return; }
     const c = ev.target.closest('.crumb');
     if (c?.dataset.path) navigate(c.dataset.path);
   });
@@ -1663,9 +1787,10 @@
 
   document.addEventListener('keydown', async (ev) => {
     if (G.renaming) return;
-    const inInput = ev.target.matches?.('input, textarea');
+    const inInput = ev.target.matches?.('input, textarea, select');
     const ctrl = ev.ctrlKey || ev.metaKey;
     const k = ev.key;
+    if (!dlg.el.hidden) { if (k === 'Escape') closeDialog(); return; } // dialogs handle their own keys
 
     if (k === 'Escape') {
       if (!menuEl.hidden) { closeMenu(); return; }
@@ -1674,10 +1799,12 @@
       return;
     }
     if (ctrl && k.toLowerCase() === 'f') { ev.preventDefault(); searchInput.focus(); searchInput.select(); return; }
+    if (ctrl && k === ',') { ev.preventDefault(); openSettings(); return; }
     if (inInput) return;
-
+    if ((ctrl && k.toLowerCase() === 'l') || (ev.altKey && k.toLowerCase() === 'd') || k === 'F4') { ev.preventDefault(); editPath(); return; }
+    if (ctrl && ev.altKey && k.toLowerCase() === 'n') { ev.preventDefault(); newFile(); return; }
     if (ev.altKey && !ctrl && k.toLowerCase() === 'p') { ev.preventDefault(); togglePane(); return; }
-    if (ctrl && k.toLowerCase() === 't') { ev.preventDefault(); openTab(HOME); return; }
+    if (ctrl && k.toLowerCase() === 't') { ev.preventDefault(); openTab(newTabDir()); return; }
     if (ctrl && k.toLowerCase() === 'w') { ev.preventDefault(); closeTab(state); return; }
     if (ctrl && k === 'Tab') { ev.preventDefault(); cycleTab(ev.shiftKey ? -1 : 1); return; }
     if (ctrl && ['1', '2', '3', '4'].includes(k)) { ev.preventDefault(); setView(['icons', 'list', 'columns', 'gallery'][Number(k) - 1]); return; }
@@ -1697,7 +1824,12 @@
     if (ctrl && (k === '=' || k === '+')) { ev.preventDefault(); setIconSize(prefs.icon + 8); return; }
     if (ctrl && k === '-') { ev.preventDefault(); setIconSize(prefs.icon - 8); return; }
     if (k === 'F5' || (ctrl && k.toLowerCase() === 'r')) { ev.preventDefault(); refresh(true); return; }
-    if (k === 'F2') { ev.preventDefault(); const s = selectedEntries(); if (s.length === 1) startRename(s[0]); return; }
+    if (k === 'F2') {
+      ev.preventDefault();
+      const s = selectedEntries().filter((e) => !isVirtual(e));
+      if (s.length === 1) startRename(s[0]); else if (s.length > 1) batchRename(s);
+      return;
+    }
     if (k === 'Delete' || (ctrl && k === 'Backspace')) { ev.preventDefault(); trashSelected(); return; }
     if (k === ' ') { ev.preventDefault(); ql.isOpen ? ql.close() : ql.open(); return; }
     if (k === 'Enter' || (ctrl && k === 'ArrowDown')) {
@@ -1777,13 +1909,18 @@
         <div class="pv-name">${esc(e.name)}</div>
         <div class="pv-kind">${esc(I.kindLabel(e))}</div>
         ${infoRows([
-          ['大小', e.isDir || e.size == null ? null : e.size < 1000 ? fmtSize(e.size) : `${fmtSize(e.size)}（${e.size.toLocaleString()} 位元組）`],
+          ['大小', e.isDir ? null : e.size == null ? null : e.size < 1000 ? fmtSize(e.size) : `${fmtSize(e.size)}（${e.size.toLocaleString()} 位元組）`],
           ['建立日期', e.birth ? fmtDate(e.birth) : null],
           ['修改日期', e.mtime ? fmtDate(e.mtime) : null],
           ['位置', isVirtual(e) ? null : P.dirname(e.path)],
         ])}
+        ${e.isDir && !isVirtual(e) && api.dirSize ? `<div class="pv-table"><div><span>大小</span><span>${dirSizes.has(norm(e.path))
+          ? esc(`${fmtSize(dirSizes.get(norm(e.path)).size)}，${dirSizes.get(norm(e.path)).files.toLocaleString()} 個檔案`)
+          : '<button class="pv-calc">計算</button>'}</span></div></div>` : ''}
         <button class="pv-open">${e.isDir ? '打開' : '以預設 App 打開'}</button>`;
       $('.pv-open', info).onclick = () => openEntry(e);
+      const calc = $('.pv-calc', info);
+      if (calc) calc.onclick = () => { calc.disabled = true; calc.textContent = '計算中…'; calcSize(e); };
       return;
     }
     paneShown = null;
@@ -1806,13 +1943,6 @@
       fillShellIcons(media);
     info.innerHTML = `<div class="pv-name">${esc(displayName(state.cwd))}</div><div class="pv-kind">${state.entries.length} 個項目</div>
       <div class="pv-hint">選取檔案即可預覽</div>`;
-  }
-
-  function toggleFolderIcons() {
-    prefs.folderIcons = winIcons() ? 'finder' : 'windows';
-    savePrefs();
-    view._colsTab = null; // rebuild the columns with the other icon set
-    render();
   }
 
   function togglePane() {
@@ -1940,6 +2070,260 @@
   });
   function checkUpdates(isManual) { manual = isManual; updater.check(isManual); }
 
+  // ---------- dialogs ----------
+  const dlg = { el: $('#dlg'), win: $('#dlg-window'), onClose: null };
+  function openDialog(html, { cls = '', onClose = null } = {}) {
+    // A fresh element per dialog, so listeners from the previous one go away.
+    const fresh = dlg.win.cloneNode(false);
+    dlg.win.replaceWith(fresh);
+    dlg.win = fresh;
+    dlg.win.className = `glass ${cls}`;
+    dlg.win.innerHTML = html;
+    dlg.el.hidden = false;
+    closeMenu();
+    dlg.onClose = onClose;
+    return dlg.win;
+  }
+  function closeDialog() {
+    if (dlg.el.hidden) return;
+    dlg.el.hidden = true;
+    dlg.win.innerHTML = '';
+    const f = dlg.onClose;
+    dlg.onClose = null;
+    f?.();
+    content.focus();
+  }
+  $('#dlg-backdrop').addEventListener('mousedown', closeDialog);
+
+  function confirmDialog(message, okLabel) {
+    return new Promise((resolve) => {
+      let answer = false;
+      const w = openDialog(`
+        <div class="dlg-msg">${esc(message)}</div>
+        <div class="dlg-actions"><button data-act="cancel">取消</button><button class="primary" data-act="ok">${esc(okLabel)}</button></div>`,
+      { cls: 'small', onClose: () => resolve(answer) });
+      $('[data-act="ok"]', w).focus();
+      w.onclick = (ev) => {
+        const a = ev.target.closest('[data-act]')?.dataset.act;
+        if (a === 'ok') answer = true;
+        if (a) closeDialog();
+      };
+      w.onkeydown = (ev) => { if (ev.key === 'Enter') { answer = true; closeDialog(); } };
+    });
+  }
+
+  // ---------- batch rename ----------
+  function batchRename(entries) {
+    const items = entries.filter((e) => !isVirtual(e));
+    if (items.length < 2) { if (items[0]) startRename(items[0]); return; }
+    const opt = { mode: 'replace', find: '', repl: '', cs: false, re: false, base: '', start: 1, digits: 2, keepExt: true };
+    const w = openDialog(`
+      <div class="dlg-title">批次重新命名 ${items.length} 個項目</div>
+      <div class="br-modes">
+        <label><input type="radio" name="br-mode" value="replace" checked> 尋找與取代</label>
+        <label><input type="radio" name="br-mode" value="number"> 名稱加上編號</label>
+      </div>
+      <div class="br-fields" data-for="replace">
+        <input data-k="find" placeholder="尋找" spellcheck="false">
+        <input data-k="repl" placeholder="取代為" spellcheck="false">
+        <label><input type="checkbox" data-k="cs"> 區分大小寫</label>
+        <label><input type="checkbox" data-k="re"> 正規表示式</label>
+      </div>
+      <div class="br-fields" data-for="number" hidden>
+        <input data-k="base" placeholder="名稱，例如：照片" spellcheck="false">
+        <label>起始 <input data-k="start" type="number" value="1" min="0"></label>
+        <label>位數 <input data-k="digits" type="number" value="2" min="1" max="6"></label>
+        <label><input type="checkbox" data-k="keepExt" checked> 保留副檔名</label>
+      </div>
+      <div class="br-preview"></div>
+      <div class="dlg-actions"><span class="br-note"></span><button data-act="cancel">取消</button><button class="primary" data-act="ok">重新命名</button></div>`, { cls: 'wide' });
+    const names = () => items.map((e, i) => {
+      if (opt.mode === 'number') {
+        const dot = e.isDir ? -1 : e.name.lastIndexOf('.');
+        const ext = opt.keepExt && dot > 0 ? e.name.slice(dot) : '';
+        const n = String(Number(opt.start || 0) + i).padStart(Number(opt.digits) || 1, '0');
+        return `${opt.base || '未命名'} ${n}${ext}`;
+      }
+      if (!opt.find) return e.name;
+      try {
+        const pat = opt.re ? opt.find : opt.find.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        return e.name.replace(new RegExp(pat, opt.cs ? 'g' : 'gi'), opt.repl);
+      } catch { return null; }
+    });
+    const bad = /[\\/:*?"<>|]/;
+    const update = () => {
+      const next = names();
+      const seen = new Map();
+      next.forEach((n, i) => { const k = `${P.dirname(items[i].path)}|${(n || '').toLowerCase()}`; seen.set(k, (seen.get(k) || 0) + 1); });
+      let changes = 0; let errors = 0;
+      const rows = items.slice(0, 300).map((e, i) => {
+        const n = next[i];
+        const dup = n != null && seen.get(`${P.dirname(e.path)}|${n.toLowerCase()}`) > 1;
+        const err = n == null ? '規則錯誤' : !n.trim() || bad.test(n) ? '名稱無效' : dup ? '名稱重複' : '';
+        if (err) errors++; else if (n !== e.name) changes++;
+        return `<div class="br-row${err ? ' err' : n !== e.name ? ' chg' : ''}"><span>${esc(e.name)}</span><span>→</span><span>${esc(n ?? '')}${err ? ` <em>${err}</em>` : ''}</span></div>`;
+      });
+      $('.br-preview', w).innerHTML = rows.join('');
+      $('.br-note', w).textContent = errors ? `${errors} 個名稱有問題` : `${changes} 個項目會改名`;
+      $('[data-act="ok"]', w).disabled = !!errors || !changes;
+    };
+    w.addEventListener('input', (ev) => {
+      const t = ev.target;
+      if (t.name === 'br-mode') {
+        opt.mode = t.value;
+        $$('.br-fields', w).forEach((f) => { f.hidden = f.dataset.for !== opt.mode; });
+      } else if (t.dataset.k) opt[t.dataset.k] = t.type === 'checkbox' ? t.checked : t.value;
+      update();
+    });
+    w.addEventListener('click', async (ev) => {
+      const a = ev.target.closest('[data-act]')?.dataset.act;
+      if (a === 'cancel') closeDialog();
+      if (a !== 'ok') return;
+      const next = names();
+      closeDialog();
+      const done = []; let failed = 0;
+      for (const [i, e] of items.entries()) {
+        if (next[i] === e.name) { done.push(e.path); continue; }
+        const res = await api.rename(e.path, next[i]);
+        if (res.ok) done.push(res.path); else failed++;
+      }
+      await Promise.all([...new Set(items.map((e) => P.dirname(e.path)))].map((d) => listDir(d, true)));
+      state.sel = new Set(done);
+      await refresh(false);
+      toast(failed ? `${failed} 個項目無法重新命名` : `已重新命名 ${items.length} 個項目`);
+    });
+    update();
+    $('[data-k="find"]', w).focus();
+  }
+
+  // ---------- settings ----------
+  function newTabDir() { return prefs.newTab === 'current' && state.cwd ? state.cwd : HOME; }
+  function startupDir() {
+    if (prefs.startup === 'last' && prefs.lastDir) return prefs.lastDir;
+    if (prefs.startup === 'custom' && prefs.startDir) return prefs.startDir;
+    return HOME;
+  }
+  function applyTheme() {
+    if (prefs.theme === 'system') delete document.documentElement.dataset.theme;
+    else document.documentElement.dataset.theme = prefs.theme;
+    W.setTheme?.(prefs.theme);
+  }
+  function applyDensity() {
+    document.body.classList.toggle('density-compact', prefs.density === 'compact');
+    document.body.classList.toggle('density-roomy', prefs.density === 'roomy');
+  }
+  // Re-renders everything that depends on how items are listed.
+  function rerenderItems() {
+    view._colsTab = null;
+    computeEntries();
+    render();
+  }
+
+  let settingsSec = 'general';
+  const SHORTCUTS = [
+    ['Ctrl+T／Ctrl+W', '新分頁／關閉分頁'], ['Ctrl+1～4', '圖像／列表／直欄／圖庫'], ['Ctrl+L、Alt+D、F4', '輸入路徑'],
+    ['Ctrl+Shift+N', '新增資料夾'], ['Ctrl+Alt+N', '新增文字文件'], ['F2', '重新命名（多選時批次重新命名）'],
+    ['空白鍵', '快速查看'], ['Alt+P', '預覽窗格'], ['Ctrl+Shift+.', '顯示隱藏的項目'], ['Ctrl+F', '搜尋'],
+    ['Ctrl+Alt+C', '拷貝路徑'], ['Alt+←／→／↑', '上一頁／下一頁／上層'], ['Ctrl+,', '設定'],
+  ];
+  function settingsSections() {
+    const sel = (key, options) => `<select data-pref="${key}">${options.map(([v, l]) => `<option value="${v}"${String(prefs[key]) === String(v) ? ' selected' : ''}>${l}</option>`).join('')}</select>`;
+    const sw = (key, invert = false) => `<label class="sw"><input type="checkbox" data-pref="${key}"${invert ? ' data-invert="1"' : ''}${!prefs[key] !== !invert ? ' checked' : ''}><i></i></label>`;
+    const swatches = `<div class="mrow">${ACCENTS.map(([c, n]) => `<button class="swatch${prefs.accent === c ? ' on' : ''}" style="background:${c};color:${c}" data-accent="${c}" title="${n}"></button>`).join('')}</div>`;
+    return [
+      { id: 'general', title: '一般', rows: [
+        ['啟動時打開', null, sel('startup', [['home', '常用'], ['last', '上次的位置'], ['custom', '指定的資料夾']])],
+        prefs.startup === 'custom' && ['指定的資料夾', null, `<div class="set-path"><input data-pref="startDir" value="${esc(prefs.startDir)}" placeholder="例如 D:\\Projects" spellcheck="false"><button data-act="use-cwd"${state.cwd === HOME ? ' disabled' : ''}>使用目前的資料夾</button></div>`],
+        ['新分頁打開', null, sel('newTab', [['home', '常用'], ['current', '目前的資料夾']])],
+        ['預設檢視', null, sel('view', [['icons', '圖像'], ['list', '列表'], ['columns', '直欄'], ['gallery', '圖庫']])],
+        ['丟到資源回收筒前先確認', null, sw('confirmTrash')],
+        api.checkUpdate && ['自動檢查更新', '啟動後在背景檢查一次', sw('autoUpdate')],
+      ] },
+      { id: 'look', title: '外觀', rows: [
+        ['主題', null, sel('theme', [['system', '跟隨系統'], ['light', '淺色'], ['dark', '深色']])],
+        ['強調色', null, swatches],
+        isWin && api.shellIcon && ['使用 Windows 圖示', '應用程式、檔案類型、資料夾與磁碟機都用檔案總管的圖示', sw('folderIcons')],
+        ['列表密度', '列表與直欄的行高', sel('density', [['compact', '精簡'], ['normal', '標準'], ['roomy', '寬鬆']])],
+        ['顯示側邊欄', null, sw('sidebarHidden', true)],
+        ['預覽窗格', '在圖像、列表與常用頁的右側顯示', sw('previewPane')],
+      ] },
+      { id: 'files', title: '檔案與資料夾', rows: [
+        ['顯示隱藏的項目', null, sw('showHidden')],
+        ['顯示副檔名', null, sw('showExt')],
+        ['資料夾排在檔案前面', null, sw('foldersFirst')],
+        ['檔案大小單位', null, sel('sizeBase', [[1000, '1 KB = 1000 位元組（macOS）'], [1024, '1 KB = 1024 位元組（Windows）']])],
+        ['直欄寬度', '目前記住了 ' + Object.keys(prefs.colWidths || {}).length + ' 個資料夾的欄寬', '<button data-act="reset-cols">全部還原為預設寬度</button>'],
+      ] },
+      { id: 'about', title: '關於', rows: [
+        ['版本', null, '<span class="set-version">…</span>'],
+        api.checkUpdate && ['更新', null, '<button data-act="check-update">檢查更新</button>'],
+        ['重設', '把所有設定還原為預設值', '<button data-act="reset-all">重設所有設定…</button>'],
+      ], extra: `<h3>快捷鍵</h3><div class="set-keys">${SHORTCUTS.map(([k, d]) => `<kbd>${k}</kbd><span>${d}</span>`).join('')}</div>` },
+    ];
+  }
+  // prefs.folderIcons is stored as 'finder' / 'windows'; the switch shows it as on/off.
+  const PREF_GET = { folderIcons: () => winIcons() };
+  function renderSettings(w) {
+    const saved = { ...prefs };
+    Object.entries(PREF_GET).forEach(([k, f]) => { prefs[k] = f(); });
+    const secs = settingsSections();
+    const sec = secs.find((x) => x.id === settingsSec) || secs[0];
+    w.innerHTML = `
+      <nav class="set-nav"><div class="set-head">設定</div>${secs.map((x) => `<button data-sec="${x.id}" class="${x === sec ? 'on' : ''}">${x.title}</button>`).join('')}</nav>
+      <div class="set-main">
+        <h2>${sec.title}</h2>
+        ${sec.rows.filter(Boolean).map(([label, hint, ctl]) => `
+          <div class="set-row"><div class="set-text"><div>${label}</div>${hint ? `<small>${esc(hint)}</small>` : ''}</div><div class="set-ctl">${ctl}</div></div>`).join('')}
+        ${sec.extra || ''}
+      </div>
+      <button class="set-close" data-act="close" title="關閉 (Esc)"><svg viewBox="0 0 10 10"><path d="M.5.5l9 9M9.5.5l-9 9"/></svg></button>`;
+    Object.keys(PREF_GET).forEach((k) => { prefs[k] = saved[k]; });
+    const v = $('.set-version', w);
+    if (v) (api.appVersion ? api.appVersion() : Promise.resolve('開發版')).then((x) => { v.textContent = x; });
+  }
+  function setPref(key, value) {
+    if (key === 'view') { setView(value); return; }
+    if (key === 'folderIcons') value = value ? 'windows' : 'finder';
+    prefs[key] = value;
+    savePrefs();
+    if (key === 'theme') applyTheme();
+    else if (key === 'density') applyDensity();
+    else if (key === 'sidebarHidden') document.body.classList.toggle('sidebar-hidden', !!value);
+    else if (key === 'previewPane') updatePane();
+    else if (['folderIcons', 'showHidden', 'showExt', 'foldersFirst', 'sizeBase'].includes(key)) rerenderItems();
+  }
+  function openSettings(section) {
+    if (section) settingsSec = section;
+    const w = openDialog('', { cls: 'settings' });
+    renderSettings(w);
+    w.addEventListener('change', (ev) => {
+      const t = ev.target;
+      const key = t.dataset.pref;
+      if (!key) return;
+      let value = t.type === 'checkbox' ? t.checked !== !!t.dataset.invert : t.value;
+      if (key === 'sizeBase') value = Number(value);
+      setPref(key, value);
+      if (t.tagName === 'SELECT') renderSettings(w); // rows can depend on a choice
+    });
+    w.addEventListener('click', async (ev) => {
+      const sec = ev.target.closest('[data-sec]');
+      if (sec) { settingsSec = sec.dataset.sec; renderSettings(w); return; }
+      const sw = ev.target.closest('[data-accent]');
+      if (sw) { setAccent(sw.dataset.accent); renderSettings(w); return; }
+      const a = ev.target.closest('[data-act]')?.dataset.act;
+      if (a === 'close') closeDialog();
+      else if (a === 'use-cwd') { setPref('startDir', state.cwd); renderSettings(w); }
+      else if (a === 'reset-cols') { prefs.colWidths = {}; prefs.colW = 220; savePrefs(); rerenderItems(); renderSettings(w); toast('已還原所有直欄寬度'); }
+      else if (a === 'check-update') checkUpdates(true);
+      else if (a === 'reset-all') {
+        if (!(await confirmDialog('要把所有設定還原為預設值嗎？釘選的資料夾不受影響。', '重設'))) return;
+        const keep = { favorites: prefs.favorites, treeOpen: prefs.treeOpen };
+        try { localStorage.setItem(PREF_KEY, JSON.stringify(keep)); } catch { /* storage unavailable */ }
+        location.reload();
+      }
+    });
+  }
+
   // ---------- window chrome ----------
   $('#caption').addEventListener('click', (ev) => {
     const b = ev.target.closest('[data-act]');
@@ -1974,6 +2358,8 @@
   // ---------- boot ----------
   (async function boot() {
     applyAccent();
+    applyTheme();
+    applyDensity();
     document.documentElement.style.setProperty('--icon', `${prefs.icon}px`);
     document.documentElement.style.setProperty('--sidebar-w', `${prefs.sidebarW}px`);
     document.documentElement.style.setProperty('--pane-w', `${prefs.paneW || 320}px`);
@@ -1982,13 +2368,13 @@
     try {
       G.places = await api.places();
       // Like Explorer: open on Home unless a folder was passed in.
-      const start = env.dir || HOME;
+      const start = env.dir || startupDir();
       if (!(await navigate(start, { root: start }))) await navigate(HOME);
       content.focus();
     } finally {
       window.__finderReady?.();
     }
     // Quietly look for a new version once the window is up.
-    setTimeout(() => checkUpdates(false), 4000);
+    if (prefs.autoUpdate) setTimeout(() => checkUpdates(false), 4000);
   })();
 })();
