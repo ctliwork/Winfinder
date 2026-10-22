@@ -100,6 +100,7 @@
     readText: (path) => invoke('read_text', { path }),
     richPreview: (path) => invoke('rich_preview', { path }),
     appVersion: () => T.app.getVersion(),
+    saveTheme: (theme) => invoke('save_theme', { theme }).catch(() => {}),
     checkUpdate: () => invoke('check_update'),
     installUpdate: () => invoke('install_update'),
     onUpdateProgress: (cb) => T.event.listen('update-progress', (e) => cb(e.payload)),

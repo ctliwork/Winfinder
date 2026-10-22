@@ -14,7 +14,7 @@ use serde::Serialize;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Mutex;
-use tauri::{AppHandle, Emitter, State, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_updater::UpdaterExt;
 
 // Blocking work runs off the async runtime so the UI thread never waits on disk.
@@ -381,6 +381,31 @@ fn watch(app: AppHandle, state: State<WatchState>, dirs: Vec<String>) {
 }
 
 // ---------- window ----------
+// The theme chosen in Settings lives in the page's storage, which the window
+// can't read before it exists. A copy on disk lets the window open in that
+// theme, so Mica and the sidebar never start in the other one and flash.
+fn theme_file(app: &AppHandle) -> Option<PathBuf> {
+    app.path().app_config_dir().ok().map(|d| d.join("theme"))
+}
+
+#[tauri::command]
+fn save_theme(app: AppHandle, theme: String) {
+    if let Some(f) = theme_file(&app) {
+        if let Some(dir) = f.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(f, theme);
+    }
+}
+
+fn saved_theme(app: &AppHandle) -> Option<tauri::Theme> {
+    match std::fs::read_to_string(theme_file(app)?).ok()?.trim() {
+        "dark" => Some(tauri::Theme::Dark),
+        "light" => Some(tauri::Theme::Light),
+        _ => None,
+    }
+}
+
 fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
     let start_dir = std::env::args()
         .find_map(|a| a.strip_prefix("--dir=").map(str::to_owned))
@@ -410,7 +435,8 @@ fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
         .min_inner_size(680.0, 420.0)
         .decorations(false)
         .visible(false)
-        .initialization_script(&format!("window.__finderEnv = {env};"));
+        .initialization_script(&format!("window.__finderEnv = {env};"))
+        .theme(saved_theme(app));
 
     #[cfg(windows)]
     {
@@ -449,7 +475,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             places, pin_home, list_dir, new_file, dir_size, compress, extract, open_terminal, native_menu, properties,
-            clipboard_write, clipboard_read, clipboard_clear, cancel_transfer, restore_trash,
+            clipboard_write, clipboard_read, clipboard_clear, save_theme, cancel_transfer, restore_trash,
             everything_available, everything, disk_free, disk_space, recent_files, folder_count, thumbnail, open_path, reveal, trash, rename, mkdir,
             transfer, read_text, rich_preview, search, watch, check_update, install_update
         ])
