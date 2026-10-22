@@ -325,7 +325,7 @@
     renderPathbar();
     renderStatus();
     updatePane();
-    fillFolderIcons();
+    fillShellIcons();
   }
 
   function renderToolbar() {
@@ -356,8 +356,6 @@
   // Laid out like Explorer's navigation pane: Home, OneDrive, the Quick Access
   // pins, then This PC with its drives.
   const PC = '::pc';
-  // Rows whose glyph is replaced by the Windows icon when that option is on.
-  const SHELL_ICON_ROWS = new Set(['desktop', 'doc', 'download', 'photo', 'music', 'video', 'cloud']);
   function renderSidebar() {
     if (!G.places) return;
     const nav = $('#places');
@@ -373,7 +371,7 @@
       const leaf = kids && kids.length === 0;
       let html = `<div class="place${norm(p) === active ? ' active' : ''}" data-path="${esc(p)}" style="--lvl:${lvl}" ${extra}>
         <span class="twisty${open && !leaf ? ' open' : ''}${leaf ? ' none' : ''}" data-twisty="${esc(p)}">${chev}</span>
-        ${winFolderIcons() && (icon === 'folder' || SHELL_ICON_ROWS.has(icon)) ? folderIco(p, 16) : I.sidebar(icon)}<span>${esc(label)}</span>${tail}</div>`;
+        ${winIcons() ? shellIco(p, 16, I.sidebar(icon)) : I.sidebar(icon)}<span>${esc(label)}</span>${tail}</div>`;
       if (open && kids) html += kids.map((k) => row(k.path, k.name, 'folder', lvl + 1)).join('');
       return html;
     };
@@ -383,14 +381,14 @@
     const drives = pcOpen ? G.places.locations.map((l) => row(l.path, l.label, 'drive', 1)).join('') : '';
     nav.innerHTML = `
       <div class="place home-row${state.cwd === HOME ? ' active' : ''}" data-path="${HOME}">
-        <span class="twisty none"></span>${I.sidebar('home')}<span>常用</span></div>
+        <span class="twisty none"></span>${folderIco(HOME, 16)}<span>常用</span></div>
       ${cloud}
       ${pinned ? `<div class="nav-sep"></div>${pinned}` : ''}
       <div class="nav-sep"></div>
-      <div class="place" data-path="${PC}"><span class="twisty${pcOpen ? ' open' : ''}" data-twisty="${PC}">${chev}</span>${I.sidebar('pc')}<span>本機</span></div>
+      <div class="place" data-path="${PC}"><span class="twisty${pcOpen ? ' open' : ''}" data-twisty="${PC}">${chev}</span>${shellIco(SHELL_PC, 16, I.sidebar('pc'))}<span>本機</span></div>
       ${drives}`;
     nav.scrollTop = scroll;
-    fillFolderIcons(nav);
+    fillShellIcons(nav);
     if (missing.length) Promise.all(missing.map((p) => listDir(p))).then(renderSidebar);
   }
 
@@ -402,40 +400,64 @@
     renderSidebar();
   }
 
-  // Folders show the icon Windows gives them (special folders, custom
-  // desktop.ini icons) unless the Finder look is picked in the ⋯ menu.
-  function winFolderIcons() { return isWin && !!api.folderIcon && prefs.folderIcons !== 'finder'; }
-  const folderIconCache = new Map(); // `${path}|${px}` -> data URL, or null when Windows has none
-  const fkey = (p, px) => `${norm(p)}|${px}`;
-  function folderIco(p, px, badge = specialBadge(p)) {
-    if (!winFolderIcons() || !p || p === HOME) return I.folder(badge);
-    const hit = folderIconCache.get(fkey(p, px));
+  // Windows look: files, folders and drives show the icon Explorer shows (an
+  // app's own icon, file-type icons, special or custom folder icons). Small
+  // sizes always use the icon, like Explorer's details view; large views keep
+  // thumbnails for photos, videos and documents. The ⋯ menu switches back to
+  // the Finder look.
+  function winIcons() { return isWin && !!api.shellIcon && prefs.folderIcons !== 'finder'; }
+  // Most types share one icon per extension; these carry their own.
+  const OWN_ICON = new Set(['exe', 'lnk', 'ico', 'url', 'cur', 'ani', 'scr', 'cpl', 'msc', 'appref-ms', 'website']);
+  const shellCache = new Map(); // key -> data URL, or null when Windows has none
+  const shellPending = new Map();
+  function shellKey(p, px, ext) { return ext && !OWN_ICON.has(ext) ? `.${ext}|${px}` : `${norm(p)}|${px}`; }
+  // `ext` is set for files; folders, drives and shell places pass none.
+  function shellIco(p, px, fallback, ext = '') {
+    if (!winIcons() || !p) return fallback;
+    const hit = shellCache.get(shellKey(p, px, ext));
     if (hit) return `<img class="fico" src="${hit}" draggable="false">`;
-    if (hit === null) return I.folder(badge);
-    return `<span class="fpend" data-ficon="${esc(p)}" data-px="${px}">${I.folder(badge)}</span>`;
+    if (hit === null) return fallback;
+    return `<span class="fpend" data-ficon="${esc(p)}" data-px="${px}" data-ext="${esc(ext)}">${fallback}</span>`;
   }
-  async function folderIconUrl(p, px) {
-    const k = fkey(p, px);
-    if (!folderIconCache.has(k)) folderIconCache.set(k, (await api.folderIcon(p, Math.min(256, px * 2))) || null);
-    return folderIconCache.get(k);
+  function folderIco(p, px, badge = specialBadge(p)) {
+    return shellIco(p === HOME ? SHELL_HOME : p, px, p === HOME ? I.sidebar('home') : I.folder(badge));
   }
-  // Swaps placeholders left by folderIco() for the real icons.
-  function fillFolderIcons(root = document) {
+  function fileIco(e, px) { return e.isDir ? folderIco(e.path, px) : shellIco(e.path, px, I.file(e.ext), e.ext || '.'); }
+  const SHELL_HOME = 'shell:::{F874310E-B6B7-47DC-BC84-B9E6B38F5903}';
+  const SHELL_PC = 'shell:::{20D04FE0-3AEA-1069-A2D8-08002B30309D}';
+  async function shellIconUrl(p, px, ext = '') {
+    const k = shellKey(p, px, ext);
+    if (shellCache.has(k)) return shellCache.get(k);
+    // Files of one type share a single request.
+    if (!shellPending.has(k)) {
+      shellPending.set(k, api.shellIcon(p, Math.min(256, px * 2)).then((u) => {
+        shellCache.set(k, u || null);
+        shellPending.delete(k);
+        return u || null;
+      }));
+    }
+    return shellPending.get(k);
+  }
+  // Swaps placeholders left by shellIco() for the real icons.
+  function fillShellIcons(root = document) {
     for (const el of $$('[data-ficon]', root)) {
       const p = el.dataset.ficon;
       el.removeAttribute('data-ficon');
-      folderIconUrl(p, Number(el.dataset.px)).then((url) => {
+      shellIconUrl(p, Number(el.dataset.px), el.dataset.ext).then((url) => {
         if (url && el.isConnected) el.outerHTML = `<img class="fico" src="${url}" draggable="false">`;
       });
     }
   }
 
   function iconHtml(e, px) {
-    if (e.isDir) {
-      if (!winFolderIcons()) return `<span class="tw">${I.folder(specialBadge(e.path))}</span>`;
-      const hit = folderIconCache.get(fkey(e.path, px));
-      if (hit) return `<span class="tw"><img class="fico" src="${hit}" draggable="false"></span>`;
-      return `<span class="tw"${hit === null ? '' : ` data-thumb="${esc(e.path)}" data-px="${px}" data-folder="1"`}>${I.folder(specialBadge(e.path))}</span>`;
+    if (!winIcons()) {
+      if (e.isDir) return `<span class="tw">${I.folder(specialBadge(e.path))}</span>`;
+    } else if (e.isDir || px <= 48 || !canThumb(e)) {
+      const ext = e.isDir ? '' : e.ext || '.';
+      const hit = shellCache.get(shellKey(e.path, px, ext));
+      if (typeof hit === 'string') return `<span class="tw"><img class="fico" src="${hit}" draggable="false"></span>`;
+      const fallback = e.isDir ? I.folder(specialBadge(e.path)) : I.file(e.ext);
+      return `<span class="tw"${hit === null ? '' : ` data-thumb="${esc(e.path)}" data-px="${px}" data-icon="${esc(ext)}"`}>${fallback}</span>`;
     }
     const key = thumbKey(e, px);
     const cached = thumbCache.get(key);
@@ -457,8 +479,8 @@
   async function loadThumb(el) {
     const p = el.dataset.thumb;
     const px = Number(el.dataset.px);
-    if (el.dataset.folder) {
-      const url = await folderIconUrl(p, px);
+    if (el.dataset.icon != null) {
+      const url = await shellIconUrl(p, px, el.dataset.icon);
       if (url && el.isConnected) el.innerHTML = `<img class="fico" src="${url}" draggable="false">`;
       return;
     }
@@ -470,6 +492,11 @@
       url = await api.thumb(p, Math.min(512, px * 2));
       if (!url && WEB_IMAGES.has(e.ext) && (e.size || 0) < 40e6) url = P.fileUrl(p);
       thumbCache.set(key, url || null);
+    }
+    if (!url && winIcons()) {
+      const icon = await shellIconUrl(p, px, e.ext || '.');
+      if (icon && el.isConnected) el.innerHTML = `<img class="fico" src="${icon}" draggable="false">`;
+      return;
     }
     if (url && el.isConnected) el.innerHTML = `<img src="${url}" decoding="async" draggable="false">`;
   }
@@ -616,7 +643,7 @@
       preview._key = key;
       preview.innerHTML = shown ? previewCard(shown) : '';
       preview.classList.toggle('empty', !shown);
-      fillFolderIcons(preview);
+      fillShellIcons(preview);
       if (shown) { preview.classList.remove('swap'); void preview.offsetWidth; preview.classList.add('swap'); }
       fillPreviewArt();
     }
@@ -687,7 +714,7 @@
 
   function previewCard(e) {
     return `
-      <div class="pv-art" data-art="${esc(e.path)}">${e.isDir ? folderIco(e.path, 128) : I.file(e.ext)}</div>
+      <div class="pv-art" data-art="${esc(e.path)}">${fileIco(e, 128)}</div>
       <div class="pv-name">${esc(e.name)}</div>
       <div class="pv-kind">${esc(I.kindLabel(e))}${e.isDir ? '' : ` — ${fmtSize(e.size)}`}</div>
       <div class="pv-table">
@@ -708,6 +735,7 @@
 
   // Returns <img>/<video> markup for a rich preview, or null.
   async function mediaHtml(e, px, controls) {
+    if (winIcons() && !canThumb(e)) return null; // keep the Windows icon
     const cat = I.category(e.ext);
     const url = P.fileUrl(e.path);
     if (cat === 'video' && ['mp4', 'webm', 'm4v', 'mov', 'mkv'].includes(e.ext)) {
@@ -724,13 +752,13 @@
     if (!cur) { cur = items[0]; state.sel = new Set([cur.path]); state.focus = cur.path; state.anchor = cur.path; }
     view.className = 'gallery';
     view.innerHTML = `
-      <div class="g-stage"><div class="hero" data-art="${esc(cur.path)}">${cur.isDir ? folderIco(cur.path, 128) : I.file(cur.ext)}</div></div>
+      <div class="g-stage"><div class="hero" data-art="${esc(cur.path)}">${fileIco(cur, 128)}</div></div>
       <div class="g-caption"><b>${esc(cur.name)}</b><small>${esc(I.kindLabel(cur))}${cur.isDir ? '' : ` · ${fmtSize(cur.size)}`} · ${fmtDate(cur.mtime)}</small></div>
       <div class="g-strip">${items.map((e, i) => `
         <div class="g-item item${state.sel.has(e.path) ? ' sel' : ''}" data-i="${i}" draggable="true" title="${esc(e.name)}">${iconHtml(e, 64)}</div>`).join('')}
       </div>`;
     fillPreviewArt();
-    fillFolderIcons(view);
+    fillShellIcons(view);
     $('.g-item.sel', view)?.scrollIntoView({ block: 'nearest', inline: 'center' });
   }
 
@@ -753,7 +781,7 @@
     const qa = pinned.map((e) => `
       <div class="qa item${sel(e)}" data-i="${at(e)}">${folderIco(e.path, 48, e.badge)}<div><b>${esc(e.name)}</b><small>${esc(where(e.path))}</small></div></div>`).join('');
     const drv = drives.map((e) => `
-      <div class="drv item${sel(e)}" data-i="${at(e)}" data-drive="${esc(e.path)}">${I.drive()}<div><b>${esc(e.name)}</b>
+      <div class="drv item${sel(e)}" data-i="${at(e)}" data-drive="${esc(e.path)}">${shellIco(e.path, 48, I.drive())}<div><b>${esc(e.name)}</b>
         <div class="bar"><i style="width:0%"></i></div><small class="space">&nbsp;</small></div></div>`).join('');
     const rec = recent.map((e) => `
       <div class="lrow item${sel(e)}${cut.has(e.path) ? ' cut' : ''}" data-i="${at(e)}" draggable="true">
@@ -791,11 +819,11 @@
   function renderTabs() {
     $('#tabs').innerHTML = tabs.map((t) => `
       <div class="tab${t === state ? ' active' : ''}${shownTabs.has(t.id) ? '' : ' new'}" data-tab="${t.id}" title="${esc(t.cwd === HOME ? '常用' : t.cwd || '')}">
-        ${t.cwd === HOME || !t.cwd ? I.sidebar('home') : folderIco(t.cwd, 16)}<span>${esc(tabTitle(t))}</span>
+        ${!t.cwd ? I.sidebar('home') : folderIco(t.cwd, 16)}<span>${esc(tabTitle(t))}</span>
       </div>`).join('');
     shownTabs.clear();
     tabs.forEach((t) => shownTabs.add(t.id));
-    fillFolderIcons($('#tabs'));
+    fillShellIcons($('#tabs'));
   }
 
   async function switchTab(t) {
@@ -870,11 +898,11 @@
   function renderPathbar() {
     const bar = $('#pathbar');
     if (state.search.results) { bar.innerHTML = `<span class="crumb">${I.sidebar('recent')}<span>搜尋結果：${state.entries.length} 個項目</span></span>`; return; }
-    if (state.cwd === HOME) { bar.innerHTML = `<span class="crumb">${I.sidebar('home')}<span>常用</span></span>`; return; }
+    if (state.cwd === HOME) { bar.innerHTML = `<span class="crumb">${folderIco(HOME, 16)}<span>常用</span></span>`; return; }
     const chain = ancestors(state.cwd, P.root(state.cwd));
     const sep = '<svg class="crumb-sep" viewBox="0 0 10 10"><path d="M3.5 2l3 3-3 3"/></svg>';
     bar.innerHTML = chain.map((p, i) => `
-      <button class="crumb" data-path="${esc(p)}">${i === 0 ? I.drive() : folderIco(p, 16)}<span>${esc(displayName(p))}</span></button>`).join(sep);
+      <button class="crumb" data-path="${esc(p)}">${i === 0 ? shellIco(p, 16, I.drive()) : folderIco(p, 16)}<span>${esc(displayName(p))}</span></button>`).join(sep);
     bar.scrollLeft = bar.scrollWidth;
   }
 
@@ -1361,7 +1389,7 @@
       { label: '顯示隱藏的項目', kbd: 'Ctrl+Shift+.', check: prefs.showHidden, action: toggleHidden },
       { label: prefs.sidebarHidden ? '顯示側邊欄' : '隱藏側邊欄', kbd: 'Ctrl+Alt+S', action: toggleSidebar },
       { label: '預覽窗格', kbd: 'Alt+P', check: !!prefs.previewPane, action: togglePane },
-      ...(isWin && api.folderIcon ? [{ label: '使用 Windows 資料夾圖示', check: winFolderIcons(), action: toggleFolderIcons }] : []),
+      ...(isWin && api.shellIcon ? [{ label: '使用 Windows 圖示', check: winIcons(), action: toggleFolderIcons }] : []),
       { label: '重新整理', kbd: 'F5', action: () => refresh(true) },
       ...(api.checkUpdate ? [{ label: '檢查更新…', action: () => checkUpdates(true) }] : []),
       '-',
@@ -1705,7 +1733,12 @@
   });
 
   // ---------- preview pane ----------
-  const previewHelpers = { fileUrl: (p) => P.fileUrl(p), fmtSize, fmtDate, badge: specialBadge };
+  const previewHelpers = {
+    fileUrl: (p) => P.fileUrl(p), fmtSize, fmtDate, badge: specialBadge,
+    icon: (e) => (winIcons() ? fileIco(e, 128) : null),
+    canThumb,
+    after: (el) => fillShellIcons(el),
+  };
   const pane = $('#preview-pane');
   let paneTimer = null;
   let paneShown = null;
@@ -1757,7 +1790,8 @@
     if (sel.length > 1) {
       const files = sel.filter((e) => !e.isDir);
       const total = files.reduce((n, e) => n + (e.size || 0), 0);
-      media.innerHTML = `<div class="pv-stack">${sel.slice(0, 3).map((e, i) => `<span style="--k:${i}">${e.isDir ? I.folder() : I.file(e.ext)}</span>`).join('')}</div>`;
+      setTimeout(() => fillShellIcons(media));
+      media.innerHTML = `<div class="pv-stack">${sel.slice(0, 3).map((e, i) => `<span style="--k:${i}">${fileIco(e, 128)}</span>`).join('')}</div>`;
       media.dataset.kind = 'info';
       info.innerHTML = `<div class="pv-name">已選取 ${sel.length} 個項目</div>${infoRows([['檔案大小合計', files.length ? fmtSize(total) : null]])}`;
       return;
@@ -1769,13 +1803,13 @@
       return;
     }
     media.innerHTML = `<div class="ql-info">${folderIco(state.cwd, 128)}</div>`;
-      fillFolderIcons(media);
+      fillShellIcons(media);
     info.innerHTML = `<div class="pv-name">${esc(displayName(state.cwd))}</div><div class="pv-kind">${state.entries.length} 個項目</div>
       <div class="pv-hint">選取檔案即可預覽</div>`;
   }
 
   function toggleFolderIcons() {
-    prefs.folderIcons = winFolderIcons() ? 'finder' : 'windows';
+    prefs.folderIcons = winIcons() ? 'finder' : 'windows';
     savePrefs();
     view._colsTab = null; // rebuild the columns with the other icon set
     render();

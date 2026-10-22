@@ -597,7 +597,7 @@ body.view-icons #zoom { display: block; }
 .up-actions button.primary { background: var(--accent); color: #fff; }
 .up-actions button:disabled { opacity: 0.5; }
 
-/* Windows folder icons (shell images): no photo frame, sized per context */
+/* Windows icons (shell images): no photo frame, sized per context */
 img.fico { object-fit: contain; border-radius: 0 !important; box-shadow: none !important; background: none !important; flex: none; }
 .gi .thumb img.fico { width: var(--icon); height: var(--icon); max-width: none; max-height: none; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.12)); }
 .lrow .name img.fico { width: 20px; height: 20px; }
@@ -606,6 +606,7 @@ img.fico { object-fit: contain; border-radius: 0 !important; box-shadow: none !i
 .tab img.fico, .crumb img.fico { width: 16px; height: 16px; }
 .place img.fico { width: 18px; height: 18px; }
 .place .ico.folder { width: 18px; height: 15px; flex: none; }
-.qa img.fico { width: 40px; height: 40px; }
+.qa img.fico, .drv img.fico { width: 40px; height: 40px; }
 .pv-art img.fico, .g-stage img.fico, .ql-info img.fico { width: 150px; height: 150px; max-width: none; max-height: none; filter: drop-shadow(0 8px 16px rgba(0, 0, 0, 0.18)); }
+.pv-stack img.fico { width: 90px; height: 90px; }
 .fpend { display: contents; }

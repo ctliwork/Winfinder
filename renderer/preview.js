@@ -122,7 +122,7 @@
   }
 
   function infoCard(e, h, extra = '') {
-    return `<div class="ql-info">${e.isDir ? I.folder(h.badge(e.path)) : I.file(e.ext)}
+    return `<div class="ql-info">${h.icon?.(e) || (e.isDir ? I.folder(h.badge(e.path)) : I.file(e.ext))}
       <div class="pv-name">${esc(e.name)}</div>
       <div class="pv-kind">${esc(I.kindLabel(e))}${e.isDir ? '' : ` — ${h.fmtSize(e.size)}`}</div>${extra}</div>`;
   }
@@ -132,7 +132,7 @@
     const alive = () => el._tok === token;
     el.innerHTML = '';
     el.dataset.kind = '';
-    const set = (html, kind) => { if (alive()) { el.innerHTML = html; el.dataset.kind = kind; } };
+    const set = (html, kind) => { if (alive()) { el.innerHTML = html; el.dataset.kind = kind; h.after?.(el); } };
     const cat = I.category(e.ext);
 
     if (e.isDir) {
@@ -169,6 +169,8 @@
     }
 
     // Windows renders thumbnails for Office, PSD, HEIC and other formats.
+    // With Windows icons on, other files (apps, shortcuts...) show their icon.
+    if (h.icon?.(e) && !h.canThumb(e)) return set(infoCard(e, h), 'info');
     const thumb = await api.thumb(e.path, 1024);
     if (!alive()) return;
     set(thumb ? `<img src="${thumb}" draggable="false">` : infoCard(e, h), thumb ? 'media' : 'info');

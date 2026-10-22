@@ -75,7 +75,7 @@
     folderCount: (dir) => invoke('folder_count', { dir }),
     thumb: (path, size) => invoke('thumbnail', { path, size: Math.round(size) }).catch(() => null),
     nativeIcon: (path) => invoke('thumbnail', { path, size: 96 }).catch(() => null),
-    folderIcon: (path, size) => invoke('thumbnail', { path, size: Math.round(size), icon: true }).catch(() => null),
+    shellIcon: (path, size) => invoke('thumbnail', { path, size: Math.round(size), icon: true }).catch(() => null),
     open: (path) => invoke('open_path', { path }).then(() => '', (e) => String(e)),
     reveal: (path) => invoke('reveal', { path }),
     trash: (paths) => invoke('trash', { paths }),

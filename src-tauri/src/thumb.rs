@@ -131,4 +131,15 @@ mod tests {
         let icon = super::platform_thumbnail(dir.to_str().unwrap(), 64, true);
         assert!(icon.is_some_and(|t| t.starts_with("data:image/png;base64,")));
     }
+
+    // An app's own icon, and a shell place (This PC) addressed by CLSID.
+    #[cfg(windows)]
+    #[test]
+    fn shell_icon_for_app_and_this_pc() {
+        let windir = std::env::var("WINDIR").unwrap_or_else(|_| r"C:\Windows".into());
+        let app = super::platform_thumbnail(&format!(r"{windir}\explorer.exe"), 32, true);
+        assert!(app.is_some_and(|t| t.starts_with("data:image/png;base64,")));
+        let pc = super::platform_thumbnail("shell:::{20D04FE0-3AEA-1069-A2D8-08002B30309D}", 32, true);
+        assert!(pc.is_some_and(|t| t.starts_with("data:image/png;base64,")));
+    }
 }
