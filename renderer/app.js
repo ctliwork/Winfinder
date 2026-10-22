@@ -75,7 +75,19 @@
     if (a === b) return true;
     return a.startsWith(b.endsWith(P.sep) ? b : b + P.sep);
   }
+  // One spelling per folder: "C:\Users\me\" and "C:/Users/me" are both
+  // "C:\Users\me" (a drive root keeps its separator). Mixed spellings made the
+  // column view lose its first column and restart at the drive.
+  function canon(p) {
+    if (!p || p === HOME) return p;
+    let q = isWin ? p.replace(/\//g, '\\') : p;
+    const r = P.root(q);
+    while (q.length > r.length && q.endsWith(P.sep)) q = q.slice(0, -1);
+    return q;
+  }
   function ancestors(dir, root) {
+    dir = canon(dir);
+    root = canon(root);
     const chain = [dir];
     let cur = dir;
     while (norm(cur) !== norm(root)) {
@@ -383,7 +395,9 @@
   }
 
   async function navigate(dir, opts = {}) {
-    const { push = true, select = null, root = null, colActive = null, animate = true, silent = false } = opts;
+    const { push = true, select = null, colActive = null, animate = true, silent = false } = opts;
+    dir = canon(dir);
+    const root = canon(opts.root || null);
     if (dir === HOME) {
       await loadHome();
     } else {
@@ -405,6 +419,7 @@
     if (dir === HOME) state.colRoot = null;
     else if (root) state.colRoot = root;
     else if (!state.colRoot || !isUnder(dir, state.colRoot)) state.colRoot = guessRoot(dir);
+    state.colRoot = canon(state.colRoot);
 
     // Clicking through columns keeps the column view; other navigation shows
     // the folder the way it was last left.
