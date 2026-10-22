@@ -205,8 +205,15 @@
   const dirSizes = new Map();
   function sizeOf(e) { return e.isDir ? dirSizes.get(norm(e.path))?.size ?? -1 : e.size || 0; }
 
+  // Like Explorer: hidden items follow "show hidden"; protected operating
+  // system items (hidden + system) have their own, separate switch.
+  function isShown(e) {
+    if (e.system && !prefs.showSystem) return false;
+    return prefs.showHidden || !e.hidden;
+  }
+
   function visibleOf(entries) {
-    let list = prefs.showHidden ? entries : entries.filter((e) => !e.hidden);
+    const list = entries.filter(isShown);
     return sortEntries(list);
   }
 
@@ -215,7 +222,7 @@
     if (state.cwd === HOME && !state.search.results) {
       state.entries = q ? state.homeItems.filter((e) => e.name.toLowerCase().includes(q)) : state.homeItems.slice();
     } else if (state.search.results) {
-      state.entries = sortEntries(state.search.results.filter(passesFilters));
+      state.entries = sortEntries(state.search.results.filter((e) => isShown(e) && passesFilters(e)));
     } else {
       let list = visibleOf(dirCache.get(state.cwd)?.entries || []);
       if (q) list = list.filter((e) => e.name.toLowerCase().includes(q));
@@ -501,7 +508,7 @@
   function subdirs(p) {
     const c = dirCache.get(p);
     if (!c || c.error) return null;
-    return sortEntries(c.entries.filter((e) => e.isDir && (prefs.showHidden || !e.hidden)));
+    return sortEntries(c.entries.filter((e) => e.isDir && isShown(e)));
   }
 
   // Explorer-style navigation tree: Home, pinned folders, drives; folders expand in place.
@@ -2738,6 +2745,7 @@
       ] },
       { id: 'files', title: '檔案與資料夾', rows: [
         ['顯示隱藏的項目', null, sw('showHidden')],
+        ['顯示受保護的作業系統檔案', '例如「Application Data」「My Documents」這類無法打開的相容性捷徑（檔案總管預設也隱藏）', sw('showSystem')],
         ['顯示副檔名', null, sw('showExt')],
         ['資料夾排在檔案前面', null, sw('foldersFirst')],
         ['檔案大小單位', null, sel('sizeBase', [[1000, '1 KB = 1000 位元組（macOS）'], [1024, '1 KB = 1024 位元組（Windows）']])],
@@ -2779,7 +2787,7 @@
     else if (key === 'density') applyDensity();
     else if (key === 'sidebarHidden') document.body.classList.toggle('sidebar-hidden', !!value);
     else if (key === 'previewPane') updatePane();
-    else if (['folderIcons', 'showHidden', 'showExt', 'foldersFirst', 'sizeBase'].includes(key)) rerenderItems();
+    else if (['folderIcons', 'showHidden', 'showSystem', 'showExt', 'foldersFirst', 'sizeBase'].includes(key)) rerenderItems();
   }
   function openSettings(section) {
     if (section) settingsSec = section;
