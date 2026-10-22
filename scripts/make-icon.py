@@ -52,7 +52,15 @@ def icon():
         d.ellipse([x - U(w / 2), y - U(w / 2), x + U(w / 2), y + U(w / 2)], fill=face)
     return img.resize((512, 512), Image.LANCZOS)
 
-big = icon()
+def fill(img):
+    # Same footprint as Explorer's own folder icon: nearly the full width and
+    # about 90% of the height, so both read the same size on the taskbar.
+    art = img.crop(img.getbbox())
+    out = Image.new('RGBA', (512, 512), (0, 0, 0, 0))
+    out.alpha_composite(art.resize((500, 452), Image.LANCZOS), (6, 34))
+    return out
+
+big = fill(icon())
 out = sys.argv[1]
 big.save(f'{out}/icon.png')
 def sz(n): return big.resize((n, n), Image.LANCZOS)

@@ -20,6 +20,7 @@
   --shadow-lg: 0 24px 70px rgba(0, 0, 0, 0.28), 0 0 0 0.5px rgba(0, 0, 0, 0.12);
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.08), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
   --page: url(#g-page);
+  --solid: #ffffff;
   color-scheme: light;
 }
 
@@ -40,6 +41,7 @@
     --stripe: rgba(255, 255, 255, 0.025);
     --shadow-lg: 0 24px 80px rgba(0, 0, 0, 0.6), 0 0 0 0.5px rgba(255, 255, 255, 0.12);
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4), 0 0 0 0.5px rgba(255, 255, 255, 0.08);
+    --solid: #2c2c2e;
     color-scheme: dark;
   }
   :root:not([data-theme="light"]) .ico.file .page { fill: url(#g-page-dark); }
@@ -61,7 +63,8 @@
   --stripe: rgba(255, 255, 255, 0.025);
   --shadow-lg: 0 24px 80px rgba(0, 0, 0, 0.6), 0 0 0 0.5px rgba(255, 255, 255, 0.12);
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4), 0 0 0 0.5px rgba(255, 255, 255, 0.08);
-  color-scheme: dark;
+  --solid: #2c2c2e;
+    color-scheme: dark;
 }
 :root[data-theme="dark"] .ico.file .page { fill: url(#g-page-dark); }
 :root[data-theme="light"] { color-scheme: light; }
@@ -748,3 +751,9 @@ body.density-roomy .lrow { height: 34px; }
   color: var(--text); background: var(--hover);
 }
 .sf.on { background: var(--accent); color: #fff; }
+
+/* Native dropdown lists: solid colours that follow the theme */
+select option { background: var(--solid); color: var(--text); }
+/* Accent swatches in Settings stay round (not padded like buttons) */
+.set-ctl .swatch { padding: 0; width: 18px; height: 18px; border-radius: 50%; }
+.set-ctl .swatch:not(.on) { box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.25); }
