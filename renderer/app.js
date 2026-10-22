@@ -2635,6 +2635,7 @@
     ['Ctrl+Shift+N', '新增資料夾'], ['Ctrl+Alt+N', '新增文字文件'], ['F2', '重新命名（多選時批次重新命名）'],
     ['空白鍵', '快速查看'], ['Alt+P', '預覽窗格'], ['Ctrl+Shift+.', '顯示隱藏的項目'], ['Ctrl+F', '搜尋'],
     ['Ctrl+Alt+C', '拷貝路徑'], ['Alt+←／→／↑', '上一頁／下一頁／上層'], ['Ctrl+,', '設定'],
+    ['Ctrl+Z', '復原'], ['Alt+Enter', '內容'], ['Shift+F10、Shift+右鍵', 'Windows 原生右鍵選單'],
   ];
   function settingsSections() {
     const sel = (key, options) => `<select data-pref="${key}">${options.map(([v, l]) => `<option value="${v}"${String(prefs[key]) === String(v) ? ' selected' : ''}>${l}</option>`).join('')}</select>`;
