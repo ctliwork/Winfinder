@@ -19,7 +19,8 @@ use windows::Win32::UI::Shell::{
     CMIC_MASK_SHIFT_DOWN, CMINVOKECOMMANDINFO, CMINVOKECOMMANDINFOEX, DROPFILES, GCS_VERBW, HDROP,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreatePopupMenu, DestroyMenu, GetCursorPos, TrackPopupMenuEx, SW_SHOWNORMAL, TPM_RETURNCMD, TPM_RIGHTBUTTON, WM_DRAWITEM,
+    AppendMenuW, CreatePopupMenu, DestroyMenu, GetCursorPos, InsertMenuW, TrackPopupMenuEx, HMENU, MENU_ITEM_FLAGS, MF_BYPOSITION,
+    MF_CHECKED, MF_GRAYED, MF_POPUP, MF_SEPARATOR, MF_STRING, SW_SHOWNORMAL, TPM_RETURNCMD, TPM_RIGHTBUTTON, WM_DRAWITEM,
     WM_INITMENUPOPUP, WM_MEASUREITEM, WM_MENUCHAR,
 };
 
@@ -116,10 +117,66 @@ fn invoke(cm: &IContextMenu, hwnd: HWND, verb: PCSTR, verb_w: PCWSTR, pt: POINT,
     unsafe { cm.InvokeCommand(&info as *const _ as *const CMINVOKECOMMANDINFO) }.map_err(|e| e.message())
 }
 
-/// Shows Explorer's context menu at the cursor and runs the chosen command.
-/// Returns the chosen verb when the app should handle it itself ("rename"),
-/// otherwise an empty string.
-pub fn show_menu(hwnd: HWND, paths: &[String], background: bool, shift: bool) -> Result<String, String> {
+/// An item the app adds to Explorer's menu. `label` "-" is a separator;
+/// `children` makes a submenu.
+#[derive(serde::Deserialize)]
+pub struct Extra {
+    #[serde(default)]
+    pub id: u32,
+    pub label: String,
+    #[serde(default)]
+    pub checked: bool,
+    #[serde(default)]
+    pub disabled: bool,
+    #[serde(default)]
+    pub children: Vec<Extra>,
+}
+
+// App items get command ids above the shell's range (1..0x7FFF).
+const APP_BASE: u32 = 0x8000;
+
+fn extra_flags(e: &Extra) -> MENU_ITEM_FLAGS {
+    let mut f = MF_STRING;
+    if e.checked {
+        f |= MF_CHECKED;
+    }
+    if e.disabled {
+        f |= MF_GRAYED;
+    }
+    f
+}
+
+/// Inserts `extras` into `menu` starting at `pos` (or appends when `pos` is
+/// None). Returns how many top-level entries were added.
+unsafe fn add_extras(menu: HMENU, extras: &[Extra], pos: Option<u32>) -> u32 {
+    let mut n = 0;
+    for e in extras {
+        let label = wide(&e.label);
+        let (flags, id) = if e.label == "-" {
+            (MF_SEPARATOR, 0usize)
+        } else if !e.children.is_empty() {
+            let Ok(sub) = (unsafe { CreatePopupMenu() }) else { continue };
+            unsafe { add_extras(sub, &e.children, None) };
+            (extra_flags(e) | MF_POPUP, sub.0 as usize)
+        } else {
+            (extra_flags(e), (APP_BASE + e.id) as usize)
+        };
+        let text = PCWSTR(label.as_ptr());
+        let ok = match pos {
+            Some(p) => unsafe { InsertMenuW(menu, p + n, flags | MF_BYPOSITION, id, text) },
+            None => unsafe { AppendMenuW(menu, flags, id, text) },
+        };
+        if ok.is_ok() {
+            n += 1;
+        }
+    }
+    n
+}
+
+/// Shows Explorer's context menu at the cursor, with the app's own items at
+/// the top, and runs the chosen shell command. Returns "app:<id>" for an app
+/// item, "rename" when the app should rename inline, otherwise "".
+pub fn show_menu(hwnd: HWND, paths: &[String], background: bool, shift: bool, extras: &[Extra]) -> Result<String, String> {
     let cm = context_menu(hwnd, paths, background)?;
     unsafe {
         let menu = CreatePopupMenu().map_err(|e| e.message())?;
@@ -130,6 +187,10 @@ pub fn show_menu(hwnd: HWND, paths: &[String], background: bool, shift: bool) ->
             let _ = DestroyMenu(menu);
             return Err(hr.message());
         }
+        if !extras.is_empty() {
+            let n = add_extras(menu, extras, Some(0));
+            let _ = InsertMenuW(menu, n, MF_BYPOSITION | MF_SEPARATOR, 0, PCWSTR::null());
+        }
         let mut pt = POINT::default();
         let _ = GetCursorPos(&mut pt);
         ACTIVE.with(|a| *a.borrow_mut() = Some(cm.clone()));
@@ -137,7 +198,9 @@ pub fn show_menu(hwnd: HWND, paths: &[String], background: bool, shift: bool) ->
         let cmd = TrackPopupMenuEx(menu, (TPM_RETURNCMD | TPM_RIGHTBUTTON).0, pt.x, pt.y, hwnd, None).0 as u32;
         let _ = RemoveWindowSubclass(hwnd, Some(subclass), 0xF1D3);
         ACTIVE.with(|a| *a.borrow_mut() = None);
-        let result = if cmd >= FIRST {
+        let result = if cmd >= APP_BASE {
+            Ok(format!("app:{}", cmd - APP_BASE))
+        } else if cmd >= FIRST {
             let id = cmd - FIRST;
             let verb = verb_of(&cm, id);
             if verb.eq_ignore_ascii_case("rename") {
