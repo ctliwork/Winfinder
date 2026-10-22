@@ -682,7 +682,7 @@
 
   async function renderView(animate) {
     const mode = viewMode();
-    if (mode !== 'columns') view.className = '';
+    if (mode !== 'columns') { view.className = ''; view.style.minWidth = ''; cancelAnimationFrame(glide); }
     $('#empty').hidden = true;
     const cut = new Set(G.clip?.op === 'move' ? G.clip.paths : []);
 
@@ -747,10 +747,12 @@
     const n = chain.length - 1;
     const fresh = view._colsTab !== state.id || !view.classList.contains('columns') || !$('.col-preview', view);
     if (fresh) { view.innerHTML = '<div class="col-preview"></div>'; view._colsTab = state.id; }
+    // Hold the current width while columns change, so removing columns
+    // doesn't snap the view; glideTo() lets go once it has moved.
+    else view.style.minWidth = `${content.scrollWidth}px`;
     view.className = 'columns';
     const wraps = $$('.colw', view);
     const preview = $('.col-preview', view);
-    let added = false;
     chain.forEach((dir, j) => {
       const next = chain[j + 1];
       const list = state.colLists[j];
@@ -765,12 +767,11 @@
       if (w && norm(w.dataset.dir) !== norm(dir)) { wraps.slice(j).forEach((x) => x.remove()); wraps.length = j; w = null; }
       if (!w) {
         w = document.createElement('div');
-        w.className = `colw${fresh && j < n ? '' : ' enter'}`;
+        w.className = 'colw';
         w.dataset.dir = dir;
         w.innerHTML = `<div class="col" data-dir="${esc(dir)}"></div><div class="col-grip" title="拖曳調整欄寬（Alt：全部欄），按兩下自動調整"></div>`;
         view.insertBefore(w, preview);
         wraps[j] = w;
-        added = true;
       }
       w.style.width = `${colWidth(dir)}px`;
       const col = w.firstElementChild;
@@ -799,7 +800,6 @@
       if (shown) window.Preview.fill($('.cp-media', preview), shown, { helpers: previewHelpers });
       preview.classList.toggle('empty', !shown);
       fillShellIcons(preview);
-      if (shown) { preview.classList.remove('swap'); void preview.offsetWidth; preview.classList.add('swap'); }
       fillPreviewArt();
     }
     for (const el of $$('.crow.sel, .crow.path', view)) {
@@ -807,13 +807,38 @@
       if (el.offsetTop < col.scrollTop) col.scrollTop = el.offsetTop - 6;
       else if (el.offsetTop + el.offsetHeight > col.scrollTop + col.clientHeight) col.scrollTop = el.offsetTop + el.offsetHeight - col.clientHeight + 6;
     }
-    // Only jump to the right edge when columns were added; keep the
-    // horizontal position steady otherwise.
-    if (fresh || added) content.scrollLeft = content.scrollWidth;
-    else {
-      const active = wraps[state.colActive];
-      if (active && active.offsetLeft < content.scrollLeft) content.scrollLeft = active.offsetLeft;
-    }
+    // Like Finder: columns appear in place and the whole view glides sideways
+    // to show the newest one (or the preview); when columns go away it glides
+    // back. Otherwise it only moves to keep the active column in sight.
+    // It moves only when something new doesn't fit, and only as far as
+    // needed; when columns go away it stays put (leaving blank space, as
+    // Finder does), so what you just clicked stays under the pointer.
+    const last = wraps[chain.length - 1];
+    const right = last ? last.offsetLeft + last.offsetWidth + (shown ? PREVIEW_MIN : 0) : 0;
+    const vw = content.clientWidth;
+    let target = fresh ? Math.max(0, right - vw) : content.scrollLeft;
+    if (right > target + vw) target = right - vw; // the new column (or preview) is cut off: reveal it
+    const active = wraps[state.colActive];
+    if (active && active.offsetLeft < target) target = active.offsetLeft; // keyboard moved left out of view
+    glideTo(target, Math.max(right, target + vw));
+  }
+
+  const PREVIEW_MIN = 260; // .col-preview min-width when it shows a file
+  let glide = 0;
+  // Scrolls the column view to `target` with an ease-out; `width` is the
+  // room to keep afterwards so the position never snaps.
+  function glideTo(target, width) {
+    cancelAnimationFrame(glide);
+    const from = content.scrollLeft;
+    const settle = () => { view.style.minWidth = width > content.clientWidth ? `${width}px` : ''; };
+    if (Math.abs(target - from) < 1) { settle(); return; }
+    const t0 = performance.now();
+    const step = (now) => {
+      const p = Math.min(1, (now - t0) / 300);
+      content.scrollLeft = from + (target - from) * (1 - (1 - p) ** 3); // ease-out
+      if (p < 1) glide = requestAnimationFrame(step); else settle();
+    };
+    glide = requestAnimationFrame(step);
   }
 
   // Width that fits the longest name in a column.

@@ -451,7 +451,6 @@ body.pane-open #preview-pane {
 /* ---------- column view ---------- */
 .columns { display: flex; height: 100%; min-height: 100%; }
 .colw { position: relative; flex: none; width: 220px; height: 100%; border-right: 0.5px solid var(--hairline); }
-.colw.enter { animation: colIn 0.25s cubic-bezier(.2, .8, .2, 1); }
 .col { height: 100%; overflow-y: auto; padding: 6px; }
 .col-grip { position: absolute; top: 0; bottom: 0; right: -4px; width: 8px; cursor: col-resize; z-index: 2; }
 .col-grip::after { content: ""; position: absolute; left: 3px; top: 0; bottom: 0; width: 2px; background: var(--accent); opacity: 0; transition: opacity 0.12s; }
@@ -467,8 +466,7 @@ body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-sel
 .crow.path { background: var(--sel-muted); }
 .crow.sel { background: var(--accent); color: #fff; }
 .col-preview { flex: 1; min-width: 260px; padding: 30px 26px; display: flex; flex-direction: column; align-items: center; overflow-y: auto; }
-.col-preview.empty { visibility: hidden; }
-.col-preview.swap { animation: fadeIn 0.15s; }
+.col-preview.empty { visibility: hidden; min-width: 0; padding: 0; } /* takes no room until a file is selected */
 
 /* ---------- gallery ---------- */
 .gallery { display: flex; flex-direction: column; height: 100%; }
