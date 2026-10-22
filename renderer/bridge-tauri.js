@@ -109,11 +109,13 @@
     everything: (query) => invoke('everything', { query }).catch(() => null),
     watch: (dirs) => { invoke('watch', { dirs }).catch(() => {}); },
     onChanged: (cb) => T.event.listen('fs-changed', (e) => cb(e.payload)),
+    // Resolves when the drag is over (dropped anywhere or cancelled).
     startDrag: (files) => {
       dragImage ||= makeDragImage();
-      invoke('plugin:drag|start_drag', { item: files, image: dragImage, options: { mode: 'copy' }, onEvent: new Channel() })
+      return invoke('plugin:drag|start_drag', { item: files, image: dragImage, options: { mode: 'copy' }, onEvent: new Channel() })
         .catch((e) => console.warn('drag failed', e));
     },
+    listMany: (dirs, depth) => invoke('list_many', { dirs, depth }).catch(() => []),
     pathForFile: () => '',
   };
 

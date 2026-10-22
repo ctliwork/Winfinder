@@ -39,6 +39,12 @@ async fn list_dir(dir: String) -> Result<Vec<fsops::Entry>, String> {
     blocking(move || fsops::list(&dir)).await?
 }
 
+/// Folder listings read ahead before a drag (see fsops::list_many).
+#[tauri::command]
+async fn list_many(dirs: Vec<String>, depth: usize) -> Vec<(String, Vec<fsops::Entry>)> {
+    blocking(move || fsops::list_many(&dirs, depth.min(3), 1500, std::time::Duration::from_millis(250))).await.unwrap_or_default()
+}
+
 #[tauri::command]
 async fn disk_free(path: String) -> Option<u64> {
     blocking(move || places::disk_free(&path)).await.ok().flatten()
@@ -503,7 +509,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            places, pin_home, list_dir, new_file, dir_size, compress, extract, open_terminal, native_menu, properties,
+            places, pin_home, list_dir, list_many, new_file, dir_size, compress, extract, open_terminal, native_menu, properties,
             clipboard_write, clipboard_read, clipboard_clear, save_theme, cancel_transfer, restore_trash,
             everything_available, everything, disk_free, disk_space, recent_files, folder_count, thumbnail, open_path, reveal, trash, rename, mkdir,
             transfer, read_text, rich_preview, search, watch, check_update, install_update
