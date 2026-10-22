@@ -788,3 +788,8 @@ img.panning, video.panning { cursor: grabbing; transition: none; }
    fades to its translucent glass. */
 :root.booting #sidebar { background: var(--side-solid); backdrop-filter: none; transition: none; }
 #sidebar.settle { transition: background-color 0.35s ease, width 0.25s cubic-bezier(.2, .8, .2, 1), margin 0.25s, opacity 0.2s; }
+/* On Windows 11 the window's own Mica already blurs the desktop behind the
+   sidebar. A CSS backdrop-filter there has nothing to sample (the window is
+   transparent) and WebView2 paints it white while it sets the layer up, so
+   it is left off. */
+body.material-mica #sidebar { backdrop-filter: none; }
