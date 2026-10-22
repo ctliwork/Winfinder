@@ -596,3 +596,16 @@ body.view-icons #zoom { display: block; }
 .up-actions button { padding: 5px 12px; border-radius: 8px; font-size: 12px; background: var(--capsule); box-shadow: var(--shadow-sm); }
 .up-actions button.primary { background: var(--accent); color: #fff; }
 .up-actions button:disabled { opacity: 0.5; }
+
+/* Windows folder icons (shell images): no photo frame, sized per context */
+img.fico { object-fit: contain; border-radius: 0 !important; box-shadow: none !important; background: none !important; flex: none; }
+.gi .thumb img.fico { width: var(--icon); height: var(--icon); max-width: none; max-height: none; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.12)); }
+.lrow .name img.fico { width: 20px; height: 20px; }
+.crow img.fico { width: 18px; height: 18px; }
+.g-item img.fico { width: 52px; height: 52px; }
+.tab img.fico, .crumb img.fico { width: 16px; height: 16px; }
+.place img.fico { width: 18px; height: 18px; }
+.place .ico.folder { width: 18px; height: 15px; flex: none; }
+.qa img.fico { width: 40px; height: 40px; }
+.pv-art img.fico, .g-stage img.fico, .ql-info img.fico { width: 150px; height: 150px; max-width: none; max-height: none; filter: drop-shadow(0 8px 16px rgba(0, 0, 0, 0.18)); }
+.fpend { display: contents; }
