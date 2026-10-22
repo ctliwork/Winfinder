@@ -23,7 +23,7 @@
     sort: { key: 'name', dir: 1 }, accent: '#0a84ff', favorites: [], sidebarHidden: false,
     // Settings page
     startup: 'home', startDir: '', newTab: 'home', theme: 'system', density: 'normal',
-    showExt: true, foldersFirst: true, sizeBase: 1000, confirmTrash: false, autoUpdate: true,
+    showExt: true, foldersFirst: true, sizeBase: 1000, confirmTrash: false, autoUpdate: true, colPreview: true,
     rememberView: true, folderViews: {}, menuStyle: 'windows',
   }, readPrefs());
   function readPrefs() { try { return JSON.parse(localStorage.getItem(PREF_KEY)) || {}; } catch { return {}; } }
@@ -838,14 +838,18 @@
     });
     wraps.slice(chain.length).forEach((x) => x.remove());
 
+    // Preview column (Finder): one file → its preview; several items → a
+    // stack and a count. It can be hidden (Alt+P / ⋯ menu), as in Finder.
     const sel = selectedEntries();
-    const shown = sel.length === 1 && !sel[0].isDir && state.colActive === n ? sel[0] : null;
-    const key = shown ? `${shown.path}|${shown.mtime}|${shown.size}` : '';
+    const inLast = state.colActive === n && prefs.colPreview;
+    const shown = inLast && sel.length === 1 && !sel[0].isDir ? sel[0] : null;
+    const multi = inLast && sel.length > 1 ? sel : null;
+    const key = shown ? `${shown.path}|${shown.mtime}|${shown.size}` : multi ? `multi|${multi.map((e) => e.path).join('|')}` : '';
     if (preview._key !== key) {
       preview._key = key;
-      preview.innerHTML = shown ? previewCard(shown) : '';
+      preview.innerHTML = shown ? previewCard(shown) : multi ? multiCard(multi) : '';
       if (shown) window.Preview.fill($('.cp-media', preview), shown, { helpers: previewHelpers });
-      preview.classList.toggle('empty', !shown);
+      preview.classList.toggle('empty', !shown && !multi);
       fillShellIcons(preview);
       fillPreviewArt();
     }
@@ -861,7 +865,7 @@
     // needed; when columns go away it stays put (leaving blank space, as
     // Finder does), so what you just clicked stays under the pointer.
     const last = wraps[chain.length - 1];
-    const right = last ? last.offsetLeft + last.offsetWidth + (shown ? PREVIEW_MIN : 0) : 0;
+    const right = last ? last.offsetLeft + last.offsetWidth + (shown || multi ? PREVIEW_MIN : 0) : 0;
     const vw = content.clientWidth;
     let target = fresh ? Math.max(0, right - vw) : content.scrollLeft;
     if (right > target + vw) target = right - vw; // the new column (or preview) is cut off: reveal it
@@ -962,6 +966,15 @@
     }
     savePrefs();
   }, true);
+
+  function multiCard(items) {
+    const files = items.filter((e) => !e.isDir);
+    const total = files.reduce((n, e) => n + (e.size || 0), 0);
+    return `
+      <div class="cp-media" data-kind="info"><div class="pv-stack">${items.slice(0, 3).map((e, i) => `<span style="--k:${i}">${fileIco(e, 128)}</span>`).join('')}</div></div>
+      <div class="pv-name">已選取 ${items.length} 個項目</div>
+      <div class="pv-kind">${files.length ? `檔案大小合計 ${fmtSize(total)}` : ''}</div>`;
+  }
 
   // Column view's preview column: the same live preview as the pane (images,
   // video, Word/Excel/PowerPoint, PDF, text), zoomable, then the details.
@@ -1240,6 +1253,72 @@
     if (ql.isOpen) ql.update();
   }
 
+  // Selection inside one column (Finder): several items, the whole column, or
+  // nothing. Columns to the right of it close, as in Finder.
+  async function selectInColumn(j, paths, { focus = paths[paths.length - 1] ?? null, anchor = null } = {}) {
+    const chain = ancestors(state.cwd, state.colRoot);
+    const dir = chain[j];
+    if (!dir) return;
+    const list = state.colLists[j] || [];
+    if (paths.length === 1) {
+      const e = list.find((x) => x.path === paths[0]);
+      if (e?.isDir) { await columnClick(e, j); return; } // one folder: open it
+    }
+    if (norm(dir) !== norm(state.cwd)) await navigate(dir, { colActive: j, animate: false });
+    state.colActive = j;
+    state.sel = new Set(paths);
+    state.focus = focus;
+    state.anchor = anchor ?? focus;
+    paintSelection();
+    if (ql.isOpen) ql.update();
+  }
+  // What is selected in column j right now.
+  function columnSelection(j) {
+    const chain = ancestors(state.cwd, state.colRoot);
+    const n = chain.length - 1;
+    if (j === n) return [...state.sel];
+    return j < n ? [chain[j + 1]] : [];
+  }
+  // Ctrl+click toggles, Shift+click selects a range (Ctrl+Shift adds one).
+  function columnModifierClick(entry, j, ev) {
+    const list = (state.colLists[j] || []).map((e) => e.path);
+    const current = columnSelection(j);
+    if (ev.shiftKey) {
+      const n = ancestors(state.cwd, state.colRoot).length - 1;
+      const anchor = (j === n && state.anchor && list.includes(state.anchor)) ? state.anchor : current[0] || entry.path;
+      const a = list.indexOf(anchor); const b = list.indexOf(entry.path);
+      const range = a < 0 ? [entry.path] : list.slice(Math.min(a, b), Math.max(a, b) + 1);
+      const next = ev.ctrlKey || ev.metaKey ? [...new Set([...current, ...range])] : range;
+      return selectInColumn(j, next, { focus: entry.path, anchor });
+    }
+    const next = current.includes(entry.path) ? current.filter((p) => p !== entry.path) : [...current, entry.path];
+    return selectInColumn(j, next, { focus: entry.path, anchor: entry.path });
+  }
+
+  // Finder's slow click: click the name of the item that is already the only
+  // one selected, wait a moment, and it goes into rename. A double-click, a
+  // drag or any other click cancels it.
+  let slowRename = null;
+  function cancelSlowRename() { clearTimeout(slowRename?.timer); slowRename = null; }
+  function armSlowRename(entry, ev) {
+    cancelSlowRename();
+    const sel = selectedEntries();
+    const onName = ev.target.closest('.nm, .label');
+    if (!onName || ev.ctrlKey || ev.shiftKey || ev.metaKey || ev.detail > 1) return;
+    if (sel.length === 1 && sel[0].path === entry.path && !isVirtual(entry)) slowRename = { path: entry.path, timer: null };
+  }
+  document.addEventListener('mouseup', () => {
+    if (!slowRename || slowRename.timer) return;
+    const { path } = slowRename;
+    slowRename.timer = setTimeout(() => {
+      slowRename = null;
+      const e = selectedEntries();
+      if (!G.renaming && e.length === 1 && e[0].path === path) startRename(e[0]);
+    }, 600);
+  });
+  document.addEventListener('dblclick', cancelSlowRename, true);
+  document.addEventListener('keydown', cancelSlowRename, true);
+
   // ---------- opening ----------
   async function openEntry(e) {
     if (!e) return;
@@ -1255,26 +1334,41 @@
 
   // ---------- content events ----------
   let pendingSingle = null;
-  content.addEventListener('mousedown', (ev) => {
+  let pendingCol = null;
+  content.addEventListener('mousedown', async (ev) => {
     if (ev.button !== 0 || G.renaming) return;
     closeMenu();
     G.dragging = null;
     const it = itemFromEl(ev.target);
     if (ev.target.closest('.lhead')) return;
     if (!it?.entry) {
+      cancelSlowRename();
       if (ev.target.closest('.g-stage, .col-preview, .g-caption')) return;
-      if (ev.target.closest('.col')) return; // empty area inside a column
+      const colw = ev.target.closest('.colw');
+      if (colw && !ev.target.closest('.col-grip')) {
+        // Empty part of a column (Finder): clear its selection, close the
+        // columns after it, and allow a rubber-band selection in it.
+        const j = $$('.colw', view).indexOf(colw);
+        if (!ev.ctrlKey && !ev.shiftKey) await selectInColumn(j, []);
+        startMarquee(ev, $$('.colw', view)[j]);
+        return;
+      }
       startMarquee(ev);
       return;
     }
     if (it.col != null) {
       // A double-click's second press must not hit whatever slid under the
       // pointer after the first one opened a column: only the first counts.
-      if (ev.detail > 1) return;
+      if (ev.detail > 1) { cancelSlowRename(); return; }
       G.colDown = it.entry;
+      if (ev.ctrlKey || ev.metaKey || ev.shiftKey) { cancelSlowRename(); columnModifierClick(it.entry, it.col, ev); return; }
+      // Keep a multi-selection until mouseup so it can be dragged as a whole.
+      if (state.sel.size > 1 && state.sel.has(it.entry.path)) { pendingCol = { entry: it.entry, col: it.col }; return; }
+      armSlowRename(it.entry, ev);
       columnClick(it.entry, it.col);
       return;
     }
+    armSlowRename(it.entry, ev);
     // Keep a multi-selection intact until mouseup so it can be dragged.
     if (state.sel.has(it.entry.path) && !ev.ctrlKey && !ev.shiftKey && !ev.metaKey) {
       pendingSingle = it.entry.path;
@@ -1284,6 +1378,7 @@
     clickSelect(it.entry, ev);
   });
   content.addEventListener('mouseup', () => {
+    if (pendingCol) { const { entry, col } = pendingCol; pendingCol = null; columnClick(entry, col); }
     if (pendingSingle) { state.anchor = pendingSingle; setSelection([pendingSingle]); pendingSingle = null; }
   });
   content.addEventListener('dblclick', (ev) => {
@@ -1306,16 +1401,18 @@
   });
 
   // rubber-band selection
-  function startMarquee(ev) {
+  // `scope`: one column of the column view (its rows index state.entries,
+  // since selectInColumn made that column the current folder).
+  function startMarquee(ev, scope = null) {
     const mode = viewMode();
-    if (mode !== 'icons' && mode !== 'list') { if (!ev.ctrlKey) setSelection([]); return; }
+    if (!scope && mode !== 'icons' && mode !== 'list') { if (!ev.ctrlKey) setSelection([]); return; }
     const base = ev.ctrlKey || ev.shiftKey ? new Set(state.sel) : new Set();
-    if (!ev.ctrlKey && !ev.shiftKey) setSelection([]);
+    if (!scope && !ev.ctrlKey && !ev.shiftKey) setSelection([]);
     const box = $('#marquee');
     const origin = content.getBoundingClientRect();
     const sx = ev.clientX - origin.left + content.scrollLeft;
     const sy = ev.clientY - origin.top + content.scrollTop;
-    const rects = $$('.item', view).map((el) => {
+    const rects = $$('.item', scope || view).map((el) => {
       const r = el.getBoundingClientRect();
       return { el, l: r.left - origin.left + content.scrollLeft, t: r.top - origin.top + content.scrollTop, r: r.right - origin.left + content.scrollLeft, b: r.bottom - origin.top + content.scrollTop };
     });
@@ -1343,6 +1440,7 @@
       window.removeEventListener('mousemove', move);
       window.removeEventListener('mouseup', up);
       if (moved && state.sel.size) { const last = [...state.sel].pop(); state.focus = last; state.anchor = last; }
+      if (moved) cancelSlowRename();
     };
     window.addEventListener('mousemove', move);
     window.addEventListener('mouseup', up);
@@ -1355,7 +1453,10 @@
     if (!it?.entry || isVirtual(it.entry)) return;
     pendingSingle = null;
     if (it.col == null && !state.sel.has(it.entry.path)) setSelection([it.entry.path]);
-    const paths = it.col != null ? [it.entry.path] : selectedEntries().map((e) => e.path);
+    cancelSlowRename();
+    pendingCol = null;
+    const multiInColumn = it.col != null && state.sel.size > 1 && state.sel.has(it.entry.path);
+    const paths = it.col != null && !multiInColumn ? [it.entry.path] : selectedEntries().map((e) => e.path);
     G.dragging = paths;
     startNativeDrag(paths);
   });
@@ -1754,6 +1855,10 @@
       if (done) return;
       done = true;
       G.renaming = null;
+      // Put the name back now: the column view keeps unchanged rows as they
+      // are, so it wouldn't redraw this one and the box would stay behind.
+      if (input.isConnected) input.replaceWith(label);
+      el.draggable = true;
       const name = input.value.trim();
       if (commit && name && name !== e.name) {
         const res = await api.rename(e.path, name);
@@ -1981,7 +2086,7 @@
       '-',
       { label: '顯示隱藏的項目', kbd: 'Ctrl+Shift+.', check: prefs.showHidden, action: toggleHidden },
       { label: prefs.sidebarHidden ? '顯示側邊欄' : '隱藏側邊欄', kbd: 'Ctrl+Alt+S', action: toggleSidebar },
-      { label: '預覽窗格', kbd: 'Alt+P', check: !!prefs.previewPane, action: togglePane },
+      { label: inColumnsMode() ? '顯示預覽欄' : '預覽窗格', kbd: 'Alt+P', check: inColumnsMode() ? !!prefs.colPreview : !!prefs.previewPane, action: togglePane },
       { label: '重新整理', kbd: 'F5', action: () => refresh(true) },
       '-',
       { label: '設定…', kbd: 'Ctrl+,', action: () => openSettings() },
@@ -2379,7 +2484,8 @@
     if (ctrl && ev.altKey && k.toLowerCase() === 'c') { ev.preventDefault(); copyPath(); return; }
     if (ctrl && k.toLowerCase() === 'a') {
       ev.preventDefault();
-      if (!inColumnsMode()) { setSelection(state.entries.map((e) => e.path)); }
+      if (!inColumnsMode()) setSelection(state.entries.map((e) => e.path));
+      else selectInColumn(state.colActive, (state.colLists[state.colActive] || []).map((e) => e.path));
       return;
     }
     if (ctrl && k.toLowerCase() === 'c') { copySelected('copy'); return; }
@@ -2468,7 +2574,7 @@
   function updatePane() {
     const on = !!paneVisible();
     document.body.classList.toggle('pane-open', on);
-    $('#btn-preview').classList.toggle('on', !!prefs.previewPane);
+    $('#btn-preview').classList.toggle('on', inColumnsMode() ? !!prefs.colPreview : !!prefs.previewPane);
     if (!on) { if (paneShown) { $('#pv-media').innerHTML = ''; paneShown = null; } return; }
     clearTimeout(paneTimer);
     paneTimer = setTimeout(renderPane, 90);
@@ -2529,7 +2635,16 @@
       <div class="pv-hint">選取檔案即可預覽</div>`;
   }
 
+  // Alt+P: the preview column in the column view (Finder's Show Preview),
+  // the preview pane elsewhere.
   function togglePane() {
+    if (inColumnsMode()) {
+      prefs.colPreview = !prefs.colPreview;
+      savePrefs();
+      renderView(false);
+      updatePane();
+      return;
+    }
     prefs.previewPane = !prefs.previewPane;
     savePrefs();
     if (prefs.previewPane && !paneVisible()) toast('預覽窗格在圖像、列表與常用頁中顯示');
