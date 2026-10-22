@@ -571,3 +571,22 @@ body.view-icons #zoom { display: block; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* ---------- update prompt ---------- */
+#update {
+  position: fixed; right: 18px; bottom: 64px; z-index: 110; width: 360px;
+  display: flex; gap: 12px; align-items: flex-start; padding: 14px 14px 12px;
+  border-radius: 14px; background: var(--glass-strong); box-shadow: var(--shadow-lg);
+  animation: toastIn 0.35s cubic-bezier(.2, 1.2, .4, 1);
+}
+.up-icon { width: 34px; height: 34px; border-radius: 10px; flex: none; display: grid; place-items: center; background: var(--accent); color: #fff; }
+.up-icon svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.up-text { flex: 1; min-width: 0; }
+.up-text b { display: block; font-size: 13px; }
+.up-text small { display: block; color: var(--text2); font-size: 11.5px; margin-top: 2px; white-space: pre-line; max-height: 60px; overflow: hidden; }
+.up-bar { height: 5px; border-radius: 99px; background: var(--sel-muted); margin-top: 8px; overflow: hidden; }
+.up-bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width 0.2s; }
+.up-actions { display: flex; flex-direction: column; gap: 6px; flex: none; }
+.up-actions button { padding: 5px 12px; border-radius: 8px; font-size: 12px; background: var(--capsule); box-shadow: var(--shadow-sm); }
+.up-actions button.primary { background: var(--accent); color: #fff; }
+.up-actions button:disabled { opacity: 0.5; }

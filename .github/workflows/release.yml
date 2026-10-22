@@ -1,0 +1,66 @@
+name: Release
+
+# Manual only (Actions tab → Release → Run workflow), to save Actions minutes.
+# Each run publishes v0.3.<run number>; installed apps pick it up through the updater.
+on:
+  workflow_dispatch:
+    inputs:
+      notes:
+        description: "更新說明（顯示在 App 的更新提示裡）"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci
+
+      - name: Rust tests on Windows
+        working-directory: src-tauri
+        run: cargo test
+
+      - name: Set version
+        shell: bash
+        run: |
+          VERSION="0.3.${{ github.run_number }}"
+          node -e "const fs=require('fs');const f='src-tauri/tauri.conf.json';const j=JSON.parse(fs.readFileSync(f));j.version=process.argv[1];fs.writeFileSync(f,JSON.stringify(j,null,2))" "$VERSION"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Build, sign and publish
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        with:
+          tagName: v__VERSION__
+          releaseName: Finder for Windows v__VERSION__
+          releaseBody: ${{ inputs.notes || '下載 Finder-for-Windows_x64-setup.exe 安裝。已安裝的版本會自動提示更新。' }}
+          releaseDraft: false
+          prerelease: false
+          includeUpdaterJson: true
+          updaterJsonPreferNsis: true
+
+      # A fixed file name so /releases/latest/download/... always points at the newest installer.
+      - name: Add stable-name installer
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          cp src-tauri/target/release/bundle/nsis/*.exe Finder-for-Windows_x64-setup.exe
+          gh release upload "v$VERSION" Finder-for-Windows_x64-setup.exe --clobber

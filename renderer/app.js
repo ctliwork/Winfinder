@@ -1188,6 +1188,7 @@
       { label: prefs.sidebarHidden ? '顯示側邊欄' : '隱藏側邊欄', kbd: 'Ctrl+Alt+S', action: toggleSidebar },
       { label: '預覽窗格', kbd: 'Alt+P', check: !!prefs.previewPane, action: togglePane },
       { label: '重新整理', kbd: 'F5', action: () => refresh(true) },
+      ...(api.checkUpdate ? [{ label: '檢查更新…', action: () => checkUpdates(true) }] : []),
       '-',
       { html: '<div class="mlabel">強調色</div>' },
       { html: `<div class="mrow">${ACCENTS.map(([c, n]) => `<button class="swatch${prefs.accent === c ? ' on' : ''}" style="background:${c};color:${c}" data-accent="${c}" title="${n}"></button>`).join('')}</div>` },
@@ -1667,6 +1668,58 @@
   $('#ql-backdrop').addEventListener('mousedown', () => ql.close());
   $('#ql-open').addEventListener('click', () => { if (ql.current) { const e = ql.current; ql.close(); openEntry(e); } });
 
+  // ---------- updates ----------
+  const updater = {
+    busy: false,
+    async check(manual = false) {
+      if (!api.checkUpdate || this.busy) { if (manual && !api.checkUpdate) toast('這個版本不支援自動更新'); return; }
+      this.busy = true;
+      try {
+        const info = await api.checkUpdate();
+        if (info) this.offer(info);
+        else if (manual) toast(`已是最新版本（${await api.appVersion()}）`);
+      } catch (err) {
+        if (manual) toast(/release JSON|404/i.test(String(err)) ? '目前還沒有發布的新版本' : `無法檢查更新：${err}`);
+      } finally {
+        this.busy = false;
+      }
+    },
+    offer(info) {
+      if (!manual && prefs.skipVersion === info.version) return;
+      $('#up-title').textContent = `有新版本 ${info.version}`;
+      $('#up-sub').textContent = info.notes?.trim() || `目前版本 ${info.current}`;
+      $('#update .up-bar').hidden = true;
+      $('#up-go').disabled = false;
+      $('#up-later').disabled = false;
+      $('#update').hidden = false;
+      this.info = info;
+    },
+    async install() {
+      $('#up-go').disabled = true;
+      $('#up-later').disabled = true;
+      $('#up-title').textContent = `正在下載 ${this.info.version}…`;
+      $('#up-sub').textContent = '完成後會自動安裝並重新啟動';
+      $('#update .up-bar').hidden = false;
+      try {
+        await api.installUpdate();
+      } catch (err) {
+        $('#up-title').textContent = '更新失敗';
+        $('#up-sub').textContent = String(err);
+        $('#up-later').disabled = false;
+      }
+    },
+  };
+  let manual = false;
+  api.onUpdateProgress?.(([got, total]) => {
+    if (total) $('#update .up-bar i').style.width = `${Math.min(100, (got / total) * 100)}%`;
+  });
+  $('#up-go').addEventListener('click', () => updater.install());
+  $('#up-later').addEventListener('click', () => {
+    $('#update').hidden = true;
+    if (updater.info) { prefs.skipVersion = updater.info.version; savePrefs(); }
+  });
+  function checkUpdates(isManual) { manual = isManual; updater.check(isManual); }
+
   // ---------- window chrome ----------
   $('#caption').addEventListener('click', (ev) => {
     const b = ev.target.closest('[data-act]');
@@ -1715,5 +1768,7 @@
     } finally {
       window.__finderReady?.();
     }
+    // Quietly look for a new version once the window is up.
+    setTimeout(() => checkUpdates(false), 4000);
   })();
 })();

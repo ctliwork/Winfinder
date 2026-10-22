@@ -12,6 +12,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, State, WebviewUrl, WebviewWindowBuilder};
+use tauri_plugin_updater::UpdaterExt;
 
 // Blocking work runs off the async runtime so the UI thread never waits on disk.
 async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Result<T, String> {
@@ -110,6 +111,46 @@ async fn rich_preview(path: String) -> Result<preview::Preview, String> {
 #[tauri::command]
 async fn search(root: String, query: String, show_hidden: bool) -> Option<search::SearchResult> {
     blocking(move || search::search(&root, &query, show_hidden)).await.ok().flatten()
+}
+
+// ---------- updates ----------
+// The update found by check_update, kept until the user chooses to install it.
+#[derive(Default)]
+struct PendingUpdate(Mutex<Option<tauri_plugin_updater::Update>>);
+
+#[derive(Serialize)]
+struct UpdateInfo {
+    version: String,
+    current: String,
+    notes: Option<String>,
+}
+
+#[tauri::command]
+async fn check_update(app: AppHandle, pending: State<'_, PendingUpdate>) -> Result<Option<UpdateInfo>, String> {
+    let update = app.updater().map_err(|e| e.to_string())?.check().await.map_err(|e| e.to_string())?;
+    let Some(update) = update else { return Ok(None) };
+    let info = UpdateInfo { version: update.version.clone(), current: update.current_version.clone(), notes: update.body.clone() };
+    *pending.0.lock().unwrap() = Some(update);
+    Ok(Some(info))
+}
+
+#[tauri::command]
+async fn install_update(app: AppHandle, pending: State<'_, PendingUpdate>) -> Result<(), String> {
+    let update = pending.0.lock().unwrap().take().ok_or("NO_UPDATE")?;
+    let progress = app.clone();
+    let mut received = 0u64;
+    update
+        .download_and_install(
+            move |chunk, total| {
+                received += chunk as u64;
+                let _ = progress.emit("update-progress", (received, total));
+            },
+            || {},
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    // On Windows the installer usually closes the app itself; restart covers the rest.
+    app.restart();
 }
 
 // ---------- folder watching ----------
@@ -215,6 +256,8 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_drag::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(PendingUpdate::default())
         .manage(WatchState { watcher: Mutex::new(None), dirs: Mutex::new(HashSet::new()) })
         .setup(|app| {
             create_main_window(app.handle())?;
@@ -222,7 +265,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             places, list_dir, disk_free, disk_space, recent_files, folder_count, thumbnail, open_path, reveal, trash, rename, mkdir,
-            transfer, read_text, rich_preview, search, watch
+            transfer, read_text, rich_preview, search, watch, check_update, install_update
         ])
         .run(tauri::generate_context!())
         .expect("error while running Finder");

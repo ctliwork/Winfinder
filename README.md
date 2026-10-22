@@ -1,5 +1,8 @@
 # Finder for Windows
 
+**下載安裝：** [Finder-for-Windows_x64-setup.exe](https://github.com/ctliwork/finder-win/releases/latest/download/Finder-for-Windows_x64-setup.exe)（Windows 10／11，64 位元）
+裝好之後有新版本會自動提示，按「更新並重新啟動」即可。
+
 仿 macOS Finder 的 Windows 檔案管理器，重點是直欄檢視（column view）。
 後端用 Rust（Tauri 2），介面是 HTML／CSS／JS。
 
@@ -20,7 +23,7 @@ Rust 後端各模組：
 - `thumb.rs`：Windows 殼層縮圖（圖片、影片、PDF、Office 檔）
 - `preview.rs`：解析 Word／PowerPoint／Excel 內容與 ZIP 清單，給預覽用
 - `recent.rs`：讀取系統的「最近使用的檔案」
-- `lib.rs`：Tauri 指令、資料夾監看（notify）、視窗（Windows 11 Mica 效果）
+- `lib.rs`：Tauri 指令、資料夾監看（notify）、自動更新、視窗（Windows 11 Mica 效果）
 
 ## 效能實測
 
@@ -52,7 +55,18 @@ npm test         # Rust 單元測試
 
 指定起始資料夾：`finder-win.exe --dir=D:\Projects`
 
-打包 Windows 安裝檔改為手動：到 GitHub 的 Actions 頁籤，選 finder-win，按「Run workflow」。它會在 Windows 上跑 Rust 測試、打包，並更新 GitHub 上名為 `finder-win-latest` 的預先發行版本，安裝檔在那裡下載。推送程式碼不會自動打包。
+## 發布新版本與自動更新
+
+發布是手動的：到 GitHub 的 **Actions → Release → Run workflow**（可以填更新說明）。流程會：
+
+1. 在 Windows 上跑 Rust 測試
+2. 把版本設成 `0.3.<執行編號>`，每次自動遞增
+3. 打包安裝檔，用更新私鑰簽章，發布成 GitHub Release，附上 `latest.json`
+4. 另外上傳固定檔名的 `Finder-for-Windows_x64-setup.exe`，讓上面的下載連結永遠指向最新版
+
+已安裝的 App 啟動後幾秒會讀 `releases/latest/download/latest.json`，有新版就在右下角提示；也可以從「⋯」選單手動「檢查更新…」。下載的更新會用 `tauri.conf.json` 裡的公鑰驗證簽章，對不上就不會安裝。
+
+**一次性設定：** repo 的 Settings → Secrets and variables → Actions 要有 `TAURI_SIGNING_PRIVATE_KEY`（更新簽章私鑰，無密碼）。私鑰不在 repo 裡，請另外備份；遺失後已安裝的版本就收不到更新，只能手動重裝新版。推送程式碼不會自動打包。
 
 ## 功能
 
