@@ -3,7 +3,7 @@
 use serde::Serialize;
 use std::path::PathBuf;
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct Place {
     pub id: String,
     pub label: String,
@@ -13,7 +13,15 @@ pub struct Place {
 
 #[derive(Serialize)]
 pub struct Places {
+    /// Known folders (Desktop, Documents, ...): used for names and badges.
     pub favorites: Vec<Place>,
+    /// What the navigation pane lists as pinned. On Windows this is Explorer's
+    /// own Quick Access list, so both apps show the same folders.
+    pub pinned: Vec<Place>,
+    /// True when `pinned` came from Explorer and pinning goes through it too.
+    pub pinned_live: bool,
+    /// OneDrive roots, listed above the pinned folders like Explorer does.
+    pub cloud: Vec<Place>,
     pub locations: Vec<Place>,
     pub home: String,
     pub sep: String,
@@ -36,7 +44,7 @@ pub fn places() -> Places {
         place("home", &user, Some(home.clone()), "home"),
         place("desktop", "桌面", dirs::desktop_dir(), "desktop"),
         place("documents", "文件", dirs::document_dir(), "doc"),
-        place("downloads", "下載項目", dirs::download_dir(), "download"),
+        place("downloads", "下載", dirs::download_dir(), "download"),
         place("pictures", "圖片", dirs::picture_dir(), "photo"),
         place("music", "音樂", dirs::audio_dir(), "music"),
         place("videos", "影片", dirs::video_dir(), "video"),
@@ -50,11 +58,159 @@ pub fn places() -> Places {
         }
         acc
     });
+    #[cfg(windows)]
+    let favorites: Vec<Place> = favorites.into_iter().map(|p| Place { label: shell::display_name(&p.path).unwrap_or(p.label), ..p }).collect();
+    let live = quick_access(&favorites);
+    let pinned_live = live.is_some();
+    let pinned = live.unwrap_or_else(|| favorites.iter().filter(|p| p.id != "home").cloned().collect());
     Places {
+        cloud: cloud(),
+        pinned,
+        pinned_live,
         favorites,
         locations: drives(),
         home: home.to_string_lossy().into_owned(),
         sep: std::path::MAIN_SEPARATOR.to_string(),
+    }
+}
+
+#[cfg(windows)]
+fn quick_access(known: &[Place]) -> Option<Vec<Place>> {
+    let items = shell::quick_access()?;
+    Some(
+        items
+            .into_iter()
+            .map(|(path, label)| {
+                let icon = known.iter().find(|k| k.path.eq_ignore_ascii_case(&path)).map_or("folder", |k| k.icon.as_str());
+                Place { id: path.clone(), label, icon: icon.into(), path }
+            })
+            .collect(),
+    )
+}
+
+#[cfg(not(windows))]
+fn quick_access(_known: &[Place]) -> Option<Vec<Place>> {
+    None
+}
+
+#[cfg(windows)]
+fn cloud() -> Vec<Place> {
+    // Same variables the OneDrive client sets; consumer and business can coexist.
+    let mut out: Vec<Place> = Vec::new();
+    for (var, personal) in [("OneDriveConsumer", true), ("OneDriveCommercial", false), ("OneDrive", true)] {
+        let Some(dir) = std::env::var_os(var).map(PathBuf::from) else { continue };
+        let path = dir.to_string_lossy().into_owned();
+        if !dir.is_dir() || out.iter().any(|p| p.path.eq_ignore_ascii_case(&path)) {
+            continue;
+        }
+        let folder = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        // Business folders are already named "OneDrive - <org>".
+        let label = if personal && !folder.contains(" - ") { "OneDrive - 個人".to_string() } else { folder };
+        out.push(Place { id: format!("cloud:{path}"), label, path, icon: "cloud".into() });
+    }
+    out
+}
+
+#[cfg(not(windows))]
+fn cloud() -> Vec<Place> {
+    Vec::new()
+}
+
+/// Pins or unpins a folder in Explorer's Quick Access.
+#[cfg(windows)]
+pub fn pin_home(path: &str, pin: bool) -> Result<(), String> {
+    shell::invoke_verb(path, if pin { "pintohome" } else { "unpinfromhome" })
+}
+
+#[cfg(not(windows))]
+pub fn pin_home(_path: &str, _pin: bool) -> Result<(), String> {
+    Err("unsupported".into())
+}
+
+#[cfg(windows)]
+mod shell {
+    use windows::core::{Interface, PCWSTR};
+    use windows::Win32::System::Com::{CoInitializeEx, CoTaskMemFree, COINIT_APARTMENTTHREADED};
+    use windows::Win32::UI::Shell::PropertiesSystem::PSGetPropertyKeyFromName;
+    use windows::Win32::UI::Shell::{
+        BHID_EnumItems, IEnumShellItems, IShellItem, IShellItem2, SHCreateItemFromParsingName, ShellExecuteExW,
+        SEE_MASK_FLAG_NO_UI, SEE_MASK_INVOKEIDLIST, SHELLEXECUTEINFOW, SIGDN, SIGDN_FILESYSPATH, SIGDN_NORMALDISPLAY,
+    };
+
+    fn wide(s: &str) -> Vec<u16> {
+        s.encode_utf16().chain(Some(0)).collect()
+    }
+
+    fn name(item: &IShellItem, kind: SIGDN) -> Option<String> {
+        unsafe {
+            let p = item.GetDisplayName(kind).ok()?;
+            let s = p.to_string().ok();
+            CoTaskMemFree(Some(p.0 as _));
+            s
+        }
+    }
+
+    fn item(parsing: &str) -> Option<IShellItem> {
+        unsafe {
+            let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+            let w = wide(parsing);
+            SHCreateItemFromParsingName(PCWSTR(w.as_ptr()), None).ok()
+        }
+    }
+
+    /// The localized name Explorer shows (e.g. "下載" for Downloads).
+    pub fn display_name(path: &str) -> Option<String> {
+        name(&item(path)?, SIGDN_NORMALDISPLAY).filter(|s| !s.is_empty())
+    }
+
+    /// Folders pinned to Quick Access, in Explorer's order. Frequent (unpinned)
+    /// folders are skipped, as in Explorer's navigation pane.
+    pub fn quick_access() -> Option<Vec<(String, String)>> {
+        unsafe {
+            let root = item("shell:::{679f85cb-0220-4080-b29b-5540cc05aab6}")?;
+            let list: IEnumShellItems = root.BindToHandler(None, &BHID_EnumItems).ok()?;
+            let mut key = Default::default();
+            let pinned_key = PSGetPropertyKeyFromName(windows::core::w!("System.Home.IsPinned"), &mut key).ok().map(|_| key);
+            let mut out = Vec::new();
+            loop {
+                let mut got = [None];
+                if list.Next(&mut got, None).is_err() {
+                    break;
+                }
+                let Some(it) = got[0].take() else { break };
+                if let (Some(key), Ok(it2)) = (pinned_key.as_ref(), it.cast::<IShellItem2>()) {
+                    // Older builds lack the property; then everything listed counts.
+                    if let Ok(b) = it2.GetBool(key) {
+                        if !b.as_bool() {
+                            continue;
+                        }
+                    }
+                }
+                let Some(path) = name(&it, SIGDN_FILESYSPATH) else { continue }; // virtual items (Gallery, Network...)
+                if !std::path::Path::new(&path).is_dir() {
+                    continue;
+                }
+                let label = name(&it, SIGDN_NORMALDISPLAY).unwrap_or_else(|| path.clone());
+                out.push((path, label));
+            }
+            Some(out)
+        }
+    }
+
+    pub fn invoke_verb(path: &str, verb: &str) -> Result<(), String> {
+        unsafe {
+            let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+            let (p, v) = (wide(path), wide(verb));
+            let mut info = SHELLEXECUTEINFOW {
+                cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
+                fMask: SEE_MASK_INVOKEIDLIST | SEE_MASK_FLAG_NO_UI,
+                lpVerb: PCWSTR(v.as_ptr()),
+                lpFile: PCWSTR(p.as_ptr()),
+                nShow: 1,
+                ..Default::default()
+            };
+            ShellExecuteExW(&mut info).map_err(|e| e.message())
+        }
     }
 }
 

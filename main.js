@@ -75,7 +75,7 @@ ipcMain.handle('fs:places', async () => {
     { id: 'home', label: os.userInfo().username, path: os.homedir(), icon: 'home' },
     { id: 'desktop', label: '桌面', path: safe('desktop'), icon: 'desktop' },
     { id: 'documents', label: '文件', path: safe('documents'), icon: 'doc' },
-    { id: 'downloads', label: '下載項目', path: safe('downloads'), icon: 'download' },
+    { id: 'downloads', label: '下載', path: safe('downloads'), icon: 'download' },
     { id: 'pictures', label: '圖片', path: safe('pictures'), icon: 'photo' },
     { id: 'music', label: '音樂', path: safe('music'), icon: 'music' },
     { id: 'videos', label: '影片', path: safe('videos'), icon: 'video' },
@@ -97,7 +97,8 @@ ipcMain.handle('fs:places', async () => {
   } else {
     locations.push({ id: '/', label: os.hostname(), path: '/', icon: 'drive' });
   }
-  return { favorites, locations, home: os.homedir(), sep: path.sep };
+  const pinned = favorites.filter((f) => f.id !== 'home');
+  return { favorites, pinned, cloud: [], locations, home: os.homedir(), sep: path.sep };
 });
 
 function withTimeout(promise, ms) {

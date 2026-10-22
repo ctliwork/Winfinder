@@ -19,9 +19,16 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> 
     tauri::async_runtime::spawn_blocking(f).await.map_err(|e| e.to_string())
 }
 
+// Async: reading Explorer's Quick Access goes through the shell and must not
+// block the UI thread.
 #[tauri::command]
-fn places() -> places::Places {
-    places::places()
+async fn places() -> Result<places::Places, String> {
+    blocking(places::places).await
+}
+
+#[tauri::command]
+async fn pin_home(path: String, pin: bool) -> Result<(), String> {
+    blocking(move || places::pin_home(&path, pin)).await?
 }
 
 #[tauri::command]
@@ -264,7 +271,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            places, list_dir, disk_free, disk_space, recent_files, folder_count, thumbnail, open_path, reveal, trash, rename, mkdir,
+            places, pin_home, list_dir, disk_free, disk_space, recent_files, folder_count, thumbnail, open_path, reveal, trash, rename, mkdir,
             transfer, read_text, rich_preview, search, watch, check_update, install_update
         ])
         .run(tauri::generate_context!())
