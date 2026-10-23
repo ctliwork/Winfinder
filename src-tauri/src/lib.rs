@@ -417,6 +417,33 @@ fn saved_theme(app: &AppHandle) -> Option<tauri::Theme> {
     }
 }
 
+// Interface size (Settings > 外觀): the webview's zoom, which scales text and
+// layout together. Kept on disk too so the window opens at that size.
+fn scale_file(app: &AppHandle) -> Option<PathBuf> {
+    app.path().app_config_dir().ok().map(|d| d.join("ui-scale"))
+}
+
+fn saved_scale(app: &AppHandle) -> f64 {
+    scale_file(app)
+        .and_then(|f| std::fs::read_to_string(f).ok())
+        .and_then(|s| s.trim().parse::<f64>().ok())
+        .filter(|s| (0.5..=2.0).contains(s))
+        .unwrap_or(1.0)
+}
+
+#[tauri::command]
+fn set_ui_scale(app: AppHandle, window: tauri::WebviewWindow, scale: f64) -> Result<(), String> {
+    let scale = scale.clamp(0.5, 2.0);
+    window.set_zoom(scale).map_err(|e| e.to_string())?;
+    if let Some(f) = scale_file(&app) {
+        if let Some(dir) = f.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(f, scale.to_string());
+    }
+    Ok(())
+}
+
 /// Whether Windows apps use the dark theme (Settings > Personalization > Colors).
 #[cfg(windows)]
 fn system_dark() -> bool {
@@ -492,6 +519,10 @@ fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
     });
 
     let window = builder.build()?;
+    let scale = saved_scale(app);
+    if scale != 1.0 {
+        let _ = window.set_zoom(scale);
+    }
     // Show the window even if the page never signals readiness.
     let w = window.clone();
     std::thread::spawn(move || {
@@ -515,7 +546,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             places, pin_home, list_dir, list_many, new_file, dir_size, cancel_dir_sizes, compress, extract, open_terminal, native_menu, properties,
-            clipboard_write, clipboard_read, clipboard_clear, save_theme, cancel_transfer, restore_trash,
+            clipboard_write, clipboard_read, clipboard_clear, save_theme, set_ui_scale, cancel_transfer, restore_trash,
             everything_available, everything, disk_free, disk_space, recent_files, folder_count, thumbnail, open_path, reveal, trash, rename, mkdir,
             transfer, read_text, rich_preview, search, watch, check_update, install_update
         ])

@@ -24,7 +24,7 @@
     // Settings page
     startup: 'restore', startDir: '', newTab: 'home', theme: 'system', density: 'normal',
     showExt: true, foldersFirst: true, sizeBase: 1000, confirmTrash: false, autoUpdate: true, colPreview: true,
-    rememberView: true, folderViews: {}, menuStyle: 'windows', calcSizes: false, smart: [],
+    rememberView: true, folderViews: {}, menuStyle: 'windows', calcSizes: false, smart: [], uiScale: 1,
   }, readPrefs());
   // Like Finder, reopen the last tabs. Earlier versions saved 'home' as the
   // default, so move that over once.
@@ -3168,6 +3168,7 @@
         ['強調色', null, swatches],
         api.nativeMenu && ['右鍵選單', 'Windows：檔案總管的選單（含 7-Zip、VS Code 等加入的項目），上方加上本程式的功能', sel('menuStyle', [['windows', 'Windows'], ['finder', 'Finder 風格']])],
         isWin && api.shellIcon && ['使用 Windows 圖示', '應用程式、檔案類型、資料夾與磁碟機都用檔案總管的圖示', sw('folderIcons')],
+        api.setUiScale && ['介面與字體大小', '整個視窗的文字、按鈕與圖示一起放大或縮小', sel('uiScale', [[0.9, '90%'], [1, '100%（預設）'], [1.1, '110%'], [1.25, '125%'], [1.4, '140%'], [1.5, '150%'], [1.75, '175%']])],
         ['列表密度', '列表與直欄的行高', sel('density', [['compact', '精簡'], ['normal', '標準'], ['roomy', '寬鬆']])],
         ['顯示側邊欄', null, sw('sidebarHidden', true)],
         ['預覽窗格', '在圖像、列表與常用頁的右側顯示', sw('previewPane')],
@@ -3218,6 +3219,7 @@
     else if (key === 'sidebarHidden') document.body.classList.toggle('sidebar-hidden', !!value);
     else if (key === 'previewPane') updatePane();
     else if (key === 'calcSizes') queueFolderSizes();
+    else if (key === 'uiScale') api.setUiScale?.(value);
     else if (['folderIcons', 'showHidden', 'showSystem', 'showExt', 'foldersFirst', 'sizeBase'].includes(key)) rerenderItems();
   }
   function openSettings(section) {
@@ -3229,7 +3231,7 @@
       const key = t.dataset.pref;
       if (!key) return;
       let value = t.type === 'checkbox' ? t.checked !== !!t.dataset.invert : t.value;
-      if (key === 'sizeBase') value = Number(value);
+      if (key === 'sizeBase' || key === 'uiScale') value = Number(value);
       setPref(key, value);
       if (t.tagName === 'SELECT') renderSettings(w); // rows can depend on a choice
     });
@@ -3247,6 +3249,7 @@
       else if (a === 'reset-all') {
         if (!(await confirmDialog('要把所有設定還原為預設值嗎？釘選的資料夾不受影響。', '重設'))) return;
         const keep = { favorites: prefs.favorites, treeOpen: prefs.treeOpen };
+        await api.setUiScale?.(1);
         try { localStorage.setItem(PREF_KEY, JSON.stringify(keep)); } catch { /* storage unavailable */ }
         location.reload();
       }
@@ -3294,6 +3297,7 @@
     document.documentElement.style.setProperty('--pane-w', `${prefs.paneW || 320}px`);
     document.body.classList.toggle('sidebar-hidden', !!prefs.sidebarHidden);
     $('#zoom').value = prefs.icon;
+    api.setUiScale?.(prefs.uiScale); // the window opens at the saved size already (lib.rs); this keeps the two in step
     try {
       G.places = await api.places();
       // A folder passed in wins; otherwise the startup setting.
