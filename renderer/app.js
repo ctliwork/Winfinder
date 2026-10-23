@@ -902,7 +902,7 @@
       preview._key = key;
       nativeHide();
       preview.innerHTML = shown ? previewCard(shown) : multi ? multiCard(multi) : '';
-      if (shown) fillColumnPreview($('.cp-media', preview), shown);
+      if (shown) fillPreview($('.cp-media', preview), shown);
       preview.classList.toggle('empty', !shown && !multi);
       fillShellIcons(preview);
     }
@@ -1044,7 +1044,8 @@
   }
 
   // ---------- Explorer's preview handlers (Windows) ----------
-  // The column view's preview column shows what Explorer's preview pane shows:
+  // The column view's preview column and the preview pane show what Explorer's
+  // preview pane shows:
   // the file type's registered preview handler (Office, PDF, text, PowerToys…)
   // in a native window over the preview area. Images, video and audio keep the
   // built-in previews (zoom, playback); types without a handler fall back to
@@ -1058,8 +1059,9 @@
     if (!native.avail.has(ext)) native.avail.set(ext, api.previewAvailable(ext));
     return native.avail.get(ext);
   }
-  async function fillColumnPreview(media, e) {
+  async function fillPreview(media, e) {
     if (nativeWanted(e) && await nativeAvailable(e.ext) && media.isConnected) {
+      media._tok = (media._tok || 0) + 1; // a built-in preview still loading must not draw over this
       media.dataset.kind = 'native';
       media.innerHTML = '<div class="nv-wait">正在載入預覽…</div>';
       const gen = ++native.gen;
@@ -1088,10 +1090,10 @@
   // the preview area that's on screen, `inner` the whole area relative to it.
   function nativeRects(el) {
     const b = el.getBoundingClientRect();
-    const c = content.getBoundingClientRect();
-    const col = el.closest('.col-preview')?.getBoundingClientRect() || c;
-    const x0 = Math.max(b.left, c.left, col.left); const y0 = Math.max(b.top, c.top, col.top);
-    const x1 = Math.min(b.right, c.right, col.right); const y1 = Math.min(b.bottom, c.bottom, col.bottom);
+    const col = el.closest('.col-preview');
+    const clips = (col ? [content, col] : [el.closest('#preview-pane') || el]).map((x) => x.getBoundingClientRect());
+    const x0 = Math.max(b.left, ...clips.map((c) => c.left)); const y0 = Math.max(b.top, ...clips.map((c) => c.top));
+    const x1 = Math.min(b.right, ...clips.map((c) => c.right)); const y1 = Math.min(b.bottom, ...clips.map((c) => c.bottom));
     if (x1 - x0 < 8 || y1 - y0 < 8) return null;
     const d = devicePixelRatio;
     const px = (v) => Math.round(v * d);
@@ -2847,7 +2849,7 @@
     const on = !!paneVisible();
     document.body.classList.toggle('pane-open', on);
     $('#btn-preview').classList.toggle('on', inColumnsMode() ? !!prefs.colPreview : !!prefs.previewPane);
-    if (!on) { if (paneShown) { $('#pv-media').innerHTML = ''; paneShown = null; } return; }
+    if (!on) { if (paneShown) { if (native.el === $('#pv-media')) nativeHide(); $('#pv-media').innerHTML = ''; paneShown = null; } return; }
     clearTimeout(paneTimer);
     paneTimer = setTimeout(renderPane, 90);
   }
@@ -2865,7 +2867,8 @@
       const key = `${e.path}|${e.mtime}`;
       if (paneShown !== key) {
         paneShown = key;
-        window.Preview.fill(media, e, { helpers: previewHelpers });
+        nativeHide();
+        fillPreview(media, e);
       }
       info.innerHTML = `
         <div class="pv-name">${esc(e.name)}</div>
@@ -2886,6 +2889,7 @@
       return;
     }
     paneShown = null;
+    nativeHide();
     if (sel.length > 1) {
       const files = sel.filter((e) => !e.isDir);
       const total = files.reduce((n, e) => n + (e.size || 0), 0);
@@ -3259,7 +3263,7 @@
         ['列表密度', '列表與直欄的行高', sel('density', [['compact', '精簡'], ['normal', '標準'], ['roomy', '寬鬆']])],
         ['顯示側邊欄', null, sw('sidebarHidden', true)],
         ['預覽窗格', '在圖像、列表與常用頁的右側顯示', sw('previewPane')],
-        api.previewShow && ['直欄預覽使用檔案總管的預覽', 'Office、PDF 等用 Windows 註冊的預覽處理常式，跟檔案總管的預覽窗格一樣；沒有的類型用內建預覽', sw('nativePreview')],
+        api.previewShow && ['使用檔案總管的預覽', '直欄的預覽欄與預覽窗格：Office、PDF 等用 Windows 註冊的預覽處理常式，跟檔案總管一樣；沒有的類型用內建預覽', sw('nativePreview')],
       ] },
       { id: 'files', title: '檔案與資料夾', rows: [
         ['顯示隱藏的項目', null, sw('showHidden')],
@@ -3308,7 +3312,7 @@
     else if (key === 'previewPane') updatePane();
     else if (key === 'calcSizes') queueFolderSizes();
     else if (key === 'uiScale') api.setUiScale?.(value);
-    else if (key === 'nativePreview') { nativeHide(); rerenderItems(); }
+    else if (key === 'nativePreview') { nativeHide(); paneShown = null; rerenderItems(); }
     else if (['folderIcons', 'showHidden', 'showSystem', 'showExt', 'foldersFirst', 'sizeBase'].includes(key)) rerenderItems();
   }
   function openSettings(section) {
