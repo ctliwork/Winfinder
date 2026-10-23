@@ -2,8 +2,8 @@
 # Run: python3 scripts/make-icon.py src-tauri/icons  (needs Pillow)
 #
 # Dapo Pond in Chishang, Taitung, in the style of macOS app icons: blue sky,
-# white clouds and the mountains mirrored in the still pond, with lotus in
-# the near water. A squircle tile with a soft shadow, lit softly from above.
+# white clouds and the mountains mirrored in the still pond, with lotus pads
+# in the near water. A squircle tile with a soft shadow, lit softly from above.
 import math
 import sys
 
@@ -112,15 +112,12 @@ def icon():
         bd.ellipse([U(x - r), U(H - 4 - 2 * r), U(x + r), U(H - 4)], fill=255)
     paint(scene, (22, 104, 72), bank)
 
-    # lotus: two pads and a pink flower in the near water
+    # lotus pads in the near water
     lotus = Image.new('RGBA', (W, W), (0, 0, 0, 0))
     ld = ImageDraw.Draw(lotus)
     for cx, cy, rx, ry in ((132, 446, 54, 17), (238, 462, 40, 13)):
         ld.ellipse([U(cx - rx), U(cy - ry), U(cx + rx), U(cy + ry)], fill=(56, 164, 104, 255))
         ld.polygon([(U(cx), U(cy)), (U(cx + rx * 0.9), U(cy - ry * 0.5)), (U(cx + rx * 0.9), U(cy + ry * 0.1))], fill=(0, 0, 0, 0))
-    fx, fy = 150, 428
-    for dx, dy, w, h, c in ((-17, -2, 18, 30, (240, 150, 182)), (17, -2, 18, 30, (240, 150, 182)), (0, -10, 20, 40, (250, 176, 202)), (-8, 0, 16, 24, (255, 196, 214)), (8, 0, 16, 24, (255, 196, 214))):
-        ld.ellipse([U(fx + dx - w / 2), U(fy + dy - h / 2), U(fx + dx + w / 2), U(fy + dy + h / 2)], fill=c + (255,))
     scene.alpha_composite(lotus)
 
     tile = squircle(*T)
