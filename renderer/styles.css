@@ -202,9 +202,11 @@ body.material-none #main { border-radius: 0; }
 .caption { display: flex; align-self: flex-start; height: 42px; -webkit-app-region: no-drag; }
 .cap { width: 46px; height: 42px; display: grid; place-items: center; color: var(--text); transition: background 0.1s; }
 .cap svg { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 1; }
-.cap:hover { background: var(--hover); }
+/* caption-idle: the window was hidden or minimized from these buttons; the
+   page never saw the mouse leave, so hover waits for the mouse to move again. */
+body:not(.caption-idle) .cap:hover { background: var(--hover); }
 .cap:active { background: var(--sel-muted); }
-.cap.close:hover { background: #c42b1c; color: #fff; }
+body:not(.caption-idle) .cap.close:hover { background: #c42b1c; color: #fff; }
 .cap.close:active { background: #b3261a; color: #fff; }
 .cap .i-restore, body.maximized .cap .i-max { display: none; }
 body.maximized .cap .i-restore { display: block; }

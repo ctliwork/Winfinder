@@ -3623,8 +3623,10 @@
   $('#caption').addEventListener('click', (ev) => {
     const b = ev.target.closest('[data-act]');
     if (!b) return;
+    if (b.dataset.act !== 'max') document.body.classList.add('caption-idle');
     ({ close: W.close, min: W.minimize, max: W.toggleMaximize })[b.dataset.act]();
   });
+  window.addEventListener('pointermove', () => document.body.classList.remove('caption-idle'));
   W.onState((s) => document.body.classList.toggle('maximized', !!s.maximized));
   // Tauri drag regions already maximize on double-click.
   if (!isTauri) $('#toolbar').addEventListener('dblclick', (ev) => { if (!ev.target.closest('button, input')) W.toggleMaximize(); });
@@ -3665,7 +3667,7 @@
     if (prefs.runAtLogin) api.setRunAtLogin?.(true); // keeps the path right after the app moves or updates
     // Launching the app again shows this window; a folder it was given opens in a new tab.
     api.onOpenDir?.((dir) => openTab(dir || newTabDir()));
-    api.onHidden?.(() => { ql.close(); closeMenu(); });
+    api.onHidden?.(() => { ql.close(); closeMenu(); document.body.classList.add('caption-idle'); });
     try {
       G.places = await api.places();
       // A folder passed in wins; otherwise the startup setting.
