@@ -7,6 +7,8 @@ mod recent;
 mod search;
 mod thumb;
 #[cfg(windows)]
+mod prevhost;
+#[cfg(windows)]
 mod winshell;
 
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
@@ -229,6 +231,60 @@ async fn properties(window: tauri::WebviewWindow, paths: Vec<String>) -> Result<
     {
         let _ = (window, paths);
         Err("unsupported".into())
+    }
+}
+
+// ---------- Explorer preview handlers (column view) ----------
+#[cfg(windows)]
+type PreviewRect = prevhost::Rect;
+#[cfg(not(windows))]
+#[derive(serde::Deserialize)]
+struct PreviewRect {}
+
+#[tauri::command]
+async fn preview_available(ext: String) -> bool {
+    #[cfg(windows)]
+    return blocking(move || prevhost::available(&ext)).await.unwrap_or(false);
+    #[cfg(not(windows))]
+    {
+        let _ = ext;
+        false
+    }
+}
+
+#[tauri::command]
+async fn preview_show(window: tauri::WebviewWindow, path: String, gen: u64, host: PreviewRect, inner: PreviewRect, dark: bool) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let parent = window.hwnd().map_err(|e| e.to_string())?.0 as isize;
+        blocking(move || prevhost::show(parent, path, gen, host, inner, dark)).await?
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (window, path, gen, host, inner, dark);
+        Err("unsupported".into())
+    }
+}
+
+#[tauri::command]
+fn preview_move(host: Option<PreviewRect>, inner: Option<PreviewRect>) -> Result<(), String> {
+    #[cfg(windows)]
+    return prevhost::move_to(host.zip(inner));
+    #[cfg(not(windows))]
+    {
+        let _ = (host, inner);
+        Ok(())
+    }
+}
+
+#[tauri::command]
+fn preview_hide(gen: u64) -> Result<(), String> {
+    #[cfg(windows)]
+    return prevhost::hide(gen);
+    #[cfg(not(windows))]
+    {
+        let _ = gen;
+        Ok(())
     }
 }
 
@@ -546,7 +602,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             places, pin_home, list_dir, list_many, new_file, dir_size, cancel_dir_sizes, compress, extract, open_terminal, native_menu, properties,
-            clipboard_write, clipboard_read, clipboard_clear, save_theme, set_ui_scale, cancel_transfer, restore_trash,
+            clipboard_write, clipboard_read, clipboard_clear, save_theme, set_ui_scale, preview_available, preview_show, preview_move, preview_hide, cancel_transfer, restore_trash,
             everything_available, everything, disk_free, disk_space, recent_files, folder_count, thumbnail, open_path, reveal, trash, rename, mkdir,
             transfer, read_text, rich_preview, search, watch, check_update, install_update
         ])

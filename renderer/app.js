@@ -24,7 +24,7 @@
     // Settings page
     startup: 'restore', startDir: '', newTab: 'home', theme: 'system', density: 'normal',
     showExt: true, foldersFirst: true, sizeBase: 1000, confirmTrash: false, autoUpdate: true, colPreview: true,
-    rememberView: true, folderViews: {}, menuStyle: 'windows', calcSizes: false, smart: [], uiScale: 1,
+    rememberView: true, folderViews: {}, menuStyle: 'windows', calcSizes: false, smart: [], uiScale: 1, nativePreview: true,
   }, readPrefs());
   // Like Finder, reopen the last tabs. Earlier versions saved 'home' as the
   // default, so move that over once.
@@ -900,8 +900,9 @@
     const key = shown ? `${shown.path}|${shown.mtime}|${shown.size}` : multi ? `multi|${multi.map((e) => e.path).join('|')}` : '';
     if (preview._key !== key) {
       preview._key = key;
+      nativeHide();
       preview.innerHTML = shown ? previewCard(shown) : multi ? multiCard(multi) : '';
-      if (shown) window.Preview.fill($('.cp-media', preview), shown, { helpers: previewHelpers });
+      if (shown) fillColumnPreview($('.cp-media', preview), shown);
       preview.classList.toggle('empty', !shown && !multi);
       fillShellIcons(preview);
     }
@@ -1040,6 +1041,91 @@
         <div><span>修改日期</span><span>${fmtDate(e.mtime)}</span></div>
         ${e.isDir ? '' : `<div><span>大小</span><span>${e.size?.toLocaleString() ?? '--'} 位元組</span></div>`}
       </div>`;
+  }
+
+  // ---------- Explorer's preview handlers (Windows) ----------
+  // The column view's preview column shows what Explorer's preview pane shows:
+  // the file type's registered preview handler (Office, PDF, text, PowerToys…)
+  // in a native window over the preview area. Images, video and audio keep the
+  // built-in previews (zoom, playback); types without a handler fall back to
+  // them too. A native window draws over the page, so it steps aside while a
+  // menu, dialog or Quick Look is open and is clipped to the visible area.
+  const native = { el: null, gen: 0, rect: '', raf: 0, avail: new Map() };
+  function nativeWanted(e) {
+    return !!api.previewShow && prefs.nativePreview && !e.isDir && e.ext && !['image', 'video', 'audio'].includes(I.category(e.ext));
+  }
+  function nativeAvailable(ext) {
+    if (!native.avail.has(ext)) native.avail.set(ext, api.previewAvailable(ext));
+    return native.avail.get(ext);
+  }
+  async function fillColumnPreview(media, e) {
+    if (nativeWanted(e) && await nativeAvailable(e.ext) && media.isConnected) {
+      media.dataset.kind = 'native';
+      media.innerHTML = '<div class="nv-wait">正在載入預覽…</div>';
+      const gen = ++native.gen;
+      native.el = media;
+      native.rect = '';
+      const r = nativeRects(media);
+      const res = r ? await api.previewShow(e.path, gen, r.host, r.inner, isDark()) : 'HIDDEN';
+      if (gen !== native.gen) return; // another file took over
+      if (res === true) { native.rect = JSON.stringify(r); trackNative(); return; }
+      native.el = null;
+    }
+    if (media.isConnected) window.Preview.fill(media, e, { helpers: previewHelpers });
+  }
+  function nativeHide() {
+    if (!native.el) return;
+    native.el = null;
+    native.gen++;
+    cancelAnimationFrame(native.raf);
+    api.previewHide(native.gen);
+  }
+  function isDark() {
+    const t = document.documentElement.dataset.theme;
+    return t ? t === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  }
+  // Physical-pixel rectangles for the native window: `host` is the part of
+  // the preview area that's on screen, `inner` the whole area relative to it.
+  function nativeRects(el) {
+    const b = el.getBoundingClientRect();
+    const c = content.getBoundingClientRect();
+    const col = el.closest('.col-preview')?.getBoundingClientRect() || c;
+    const x0 = Math.max(b.left, c.left, col.left); const y0 = Math.max(b.top, c.top, col.top);
+    const x1 = Math.min(b.right, c.right, col.right); const y1 = Math.min(b.bottom, c.bottom, col.bottom);
+    if (x1 - x0 < 8 || y1 - y0 < 8) return null;
+    const d = devicePixelRatio;
+    const px = (v) => Math.round(v * d);
+    return {
+      host: { x: px(x0), y: px(y0), w: px(x1) - px(x0), h: px(y1) - px(y0) },
+      inner: { x: px(b.left) - px(x0), y: px(b.top) - px(y0), w: px(b.width), h: px(b.height) },
+      box: { left: x0, top: y0, right: x1, bottom: y1 },
+    };
+  }
+  function nativeCovered(box) {
+    if (!$('#dlg').hidden || !$('#ql').hidden) return true;
+    return ['#menu', '#toast', '#update', '#progress'].some((sel) => {
+      const el = $(sel);
+      if (!el || el.hidden) return false;
+      const r = el.getBoundingClientRect();
+      return r.left < box.right && r.right > box.left && r.top < box.bottom && r.bottom > box.top;
+    });
+  }
+  // Follows the preview area every frame (column glides, resizes, scrolling).
+  function trackNative() {
+    cancelAnimationFrame(native.raf);
+    const step = () => {
+      if (!native.el) return;
+      if (!native.el.isConnected) { nativeHide(); return; }
+      const r = nativeRects(native.el);
+      const show = r && !nativeCovered(r.box) && !document.hidden;
+      const key = show ? JSON.stringify(r) : 'off';
+      if (key !== native.rect) {
+        native.rect = key;
+        api.previewMove(show ? r.host : null, show ? r.inner : null);
+      }
+      native.raf = requestAnimationFrame(step);
+    };
+    native.raf = requestAnimationFrame(step);
   }
 
   // Gallery (Finder): the selected item's full preview on the stage — PDFs,
@@ -3157,6 +3243,7 @@
         ['列表密度', '列表與直欄的行高', sel('density', [['compact', '精簡'], ['normal', '標準'], ['roomy', '寬鬆']])],
         ['顯示側邊欄', null, sw('sidebarHidden', true)],
         ['預覽窗格', '在圖像、列表與常用頁的右側顯示', sw('previewPane')],
+        api.previewShow && ['直欄預覽使用檔案總管的預覽', 'Office、PDF 等用 Windows 註冊的預覽處理常式，跟檔案總管的預覽窗格一樣；沒有的類型用內建預覽', sw('nativePreview')],
       ] },
       { id: 'files', title: '檔案與資料夾', rows: [
         ['顯示隱藏的項目', null, sw('showHidden')],
@@ -3205,6 +3292,7 @@
     else if (key === 'previewPane') updatePane();
     else if (key === 'calcSizes') queueFolderSizes();
     else if (key === 'uiScale') api.setUiScale?.(value);
+    else if (key === 'nativePreview') { nativeHide(); rerenderItems(); }
     else if (['folderIcons', 'showHidden', 'showSystem', 'showExt', 'foldersFirst', 'sizeBase'].includes(key)) rerenderItems();
   }
   function openSettings(section) {
