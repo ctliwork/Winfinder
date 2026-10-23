@@ -1,8 +1,8 @@
 # Draws the app icon and writes every size Tauri needs.
 # Run: python3 scripts/make-icon.py src-tauri/icons  (needs Pillow)
 #
-# Taitung as layered paper: a blue sky with two cumulus clouds, three gentle
-# ranges from hazy blue to deep green, and a strip of the Pacific, each layer
+# Taitung as layered paper: a band of blue sky, three gentle ranges from hazy
+# blue to deep green, and a wide stretch of the Pacific, each layer
 # lifted off the next by a soft shadow. A macOS-style squircle tile.
 import math
 import sys
@@ -57,20 +57,6 @@ def band(y0, y1):
     return m
 
 
-def cumulus(cx, cy, k, flip=False):
-    """A cumulus: uneven puffs heaped on a soft, slightly lumpy base, `k` = scale."""
-    m = Image.new('L', (W, W), 0)
-    d = ImageDraw.Draw(m)
-    puffs = ((-74, 8, 20), (-48, -6, 30), (-14, -30, 40), (22, -46, 34), (52, -18, 38), (84, 0, 24), (-30, 14, 22), (40, 12, 26), (6, -2, 44))
-    for dx, dy, r in puffs:
-        dx = -dx if flip else dx
-        d.ellipse([U(cx + (dx - r) * k), U(cy + (dy - r) * k), U(cx + (dx + r) * k), U(cy + (dy + r) * k)], fill=255)
-    # a flat-ish underside, wider than it is tall, so the bottom isn't ruled straight
-    d.ellipse([U(cx - 96 * k), U(cy + 6 * k), U(cx + 106 * k), U(cy + 34 * k)] if not flip else
-              [U(cx - 106 * k), U(cy + 6 * k), U(cx + 96 * k), U(cy + 34 * k)], fill=255)
-    return m
-
-
 def shadow_of(mask, dy, blur, alpha):
     """`mask` moved down by `dy`, blurred, as a soft shadow."""
     sh = mask.transform((W, W), Image.AFFINE, (1, 0, 0, 0, 1, -U(dy))).filter(ImageFilter.GaussianBlur(U(blur)))
@@ -89,24 +75,17 @@ def squircle(x0, y0, x1, y1, n=5.0):
 
 
 def icon():
-    scene = vgrad((60, 150, 240), (132, 196, 250), 40, 300)
-    # three gentle ranges, from hazy blue to deep green, then the sea
+    scene = vgrad((60, 150, 240), (132, 196, 250), 40, 200)
+    # three gentle ranges, from hazy blue to deep green, then a wide sea
     layers = [
-        (ridge([(-10, 286), (160, 236), (340, 198), (530, 244)]), (176, 216, 246)),
-        (ridge([(-10, 338), (190, 294), (370, 316), (530, 288)]), (72, 184, 136)),
-        (ridge([(-10, 396), (210, 368), (530, 400)]), (34, 138, 98)),
-        (band(438, 512), (36, 112, 200)),
+        (ridge([(-10, 196), (160, 148), (340, 116), (530, 160)]), (176, 216, 246)),
+        (ridge([(-10, 248), (190, 208), (370, 228), (530, 202)]), (72, 184, 136)),
+        (ridge([(-10, 300), (210, 276), (530, 306)]), (34, 138, 98)),
+        (band(334, 512), vgrad((64, 146, 222), (26, 92, 182), 334, 470)),
     ]
     for m, colour in layers:
         paint(scene, SHADOW, shadow_of(m, 10, 8, 55))
         paint(scene, colour, m)
-    for cx, cy, k, flip in ((168, 146, 1.1, False), (378, 112, 0.74, True)):
-        cl = cumulus(cx, cy, k, flip)
-        paint(scene, SHADOW, shadow_of(cl, 8, 7, 45))
-        paint(scene, WHITE, cl)
-        # a cool shade along the underside, where the cloud turns away from the sun
-        lifted = cl.transform((W, W), Image.AFFINE, (1, 0, 0, 0, 1, U(12 * k))).filter(ImageFilter.GaussianBlur(U(5 * k)))
-        paint(scene, (228, 238, 250), ImageChops.subtract(cl, lifted))
 
     T = (40, 34, 472, 466)  # the tile, leaving room for its shadow below
     img = Image.new('RGBA', (W, W), (0, 0, 0, 0))
