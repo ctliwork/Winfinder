@@ -764,7 +764,6 @@
     $$('[data-thumb]', view).forEach((el) => thumbObserver.observe(el));
   }
 
-  // Render big folders in slices so the first screen appears immediately.
   // OneDrive (cloud files) status next to the name, with Explorer's icons and wording.
   const CLOUD = {
     online: { label: '僅在線上提供', svg: '<path d="M4.6 12.5h7a2.9 2.9 0 0 0 .4-5.8 4.1 4.1 0 0 0-7.9-.6 3.2 3.2 0 0 0 .5 6.4z" fill="none" stroke="currentColor" stroke-width="1.3"/>' },
@@ -777,7 +776,10 @@
     return c ? `<svg class="cloud ${e.cloud}" viewBox="0 0 16 16"><title>${c.label}</title>${c.svg}</svg>` : '';
   }
 
+  // Render folders in slices so the first screen appears immediately; from
+  // VIRTUAL_MIN items on, only what is on screen (renderVirtual).
   function renderRows(container, items, rowFn, prefix = '') {
+    if (items.length >= VIRTUAL_MIN) { renderVirtual(container, items, rowFn, prefix); return; }
     const first = 600;
     container.innerHTML = prefix + items.slice(0, first).map(rowFn).join('');
     let i = first;
@@ -791,8 +793,188 @@
     if (items.length > first) requestAnimationFrame(step);
   }
 
+  // ---------- big folders: draw only what is on screen ----------
+  // From VIRTUAL_MIN items on, the list and icon views keep only the rows in
+  // and near the viewport in the DOM, between two spacers that hold the full
+  // height, and draw the rest as they scroll into view. Rows are "slots": one
+  // item in the list, one line of icons in the icon view, plus the group
+  // header that starts a slot when grouping is on.
+  const VIRTUAL_MIN = 1000;
+  const OVERSCAN = 800; // px drawn beyond each edge of the viewport
+
+  // Height of `html` laid out in `container`, margins included.
+  function probe(container, html) {
+    container.insertAdjacentHTML('beforeend', html);
+    const el = container.lastElementChild;
+    const cs = getComputedStyle(el);
+    const h = el.getBoundingClientRect().height + parseFloat(cs.marginTop) + parseFloat(cs.marginBottom);
+    el.remove();
+    return h;
+  }
+
+  function renderVirtual(container, items, rowFn, prefix) {
+    const icons = container.classList.contains('grid');
+    container.innerHTML = prefix;
+    container.classList.add('virtual');
+    const keep = container.children.length;
+    const cs = getComputedStyle(container);
+    const gap = icons ? parseFloat(cs.rowGap) || 0 : 0;
+    const perRow = icons ? Math.max(1, cs.gridTemplateColumns.split(' ').length) : 1;
+    // Icon cells all get the height of one with a two-line name, so every line is the same height.
+    const rowH = icons
+      ? probe(container, `<div class="gi item"><div class="thumb"></div><div class="label">${'檔'.repeat(80)}</div></div>`)
+      : probe(container, '<div class="lrow item"><div class="name">檔</div></div>');
+    if (icons) container.style.setProperty('--vcell', `${rowH}px`);
+    const grouped = curGroup() !== 'none' && state.cwd !== HOME;
+    const headH = grouped ? probe(container, `<div class="${icons ? 'ggroup' : 'lgroup'}">檔<span>1</span></div>`) : 0;
+    const labels = grouped ? items.map((e) => groupOf(e).label) : null;
+    const slots = [];
+    for (let i = 0; i < items.length;) {
+      let end = i + 1;
+      while (end < items.length && end - i < perRow && !(grouped && labels[end] !== labels[i])) end++;
+      slots.push([i, end, grouped && (i === 0 || labels[i - 1] !== labels[i])]);
+      i = end;
+    }
+    const offs = new Float64Array(slots.length + 1);
+    const heads = new Int32Array(slots.length + 1); // group headers before each slot
+    slots.forEach(([, , head], k) => {
+      offs[k + 1] = offs[k] + (head ? headH + gap : 0) + rowH + gap;
+      heads[k + 1] = heads[k] + (head ? 1 : 0);
+    });
+    container._v = { items, rowFn, slots, offs, heads, gap, rowH, headH, perRow, icons, keep, a: 0, b: 0, base: null };
+    paintWindow(true);
+  }
+
+  // First slot whose bottom edge is below y (in the slots' own coordinates).
+  function slotAt(v, y) {
+    let lo = 0; let hi = v.slots.length;
+    while (lo < hi) { const m = (lo + hi) >> 1; if (v.offs[m + 1] <= y) lo = m + 1; else hi = m; }
+    return lo;
+  }
+  function slotOf(v, i) {
+    let lo = 0; let hi = v.slots.length - 1;
+    while (lo < hi) { const m = (lo + hi + 1) >> 1; if (v.slots[m][0] <= i) lo = m; else hi = m - 1; }
+    return lo;
+  }
+
+  function paintWindow(force = false) {
+    const v = view._v;
+    if (!v) return;
+    const n = v.slots.length;
+    const top = content.scrollTop - (v.base ?? 0);
+    const h = content.clientHeight;
+    if (!force && slotAt(v, top) >= v.a && Math.min(n, slotAt(v, top + h) + 1) <= v.b) return;
+    const a = Math.min(n - 1, slotAt(v, top - OVERSCAN));
+    const b = Math.min(n, slotAt(v, top + h + OVERSCAN) + 1);
+    const html = [];
+    for (let k = a; k < b; k++) for (let i = v.slots[k][0]; i < v.slots[k][1]; i++) html.push(v.rowFn(v.items[i], i));
+    const pad = (px) => (px > 0 ? `<div class="vpad" style="height:${px}px"></div>` : '');
+    const r = document.createRange();
+    r.setStart(view, v.keep ? [...view.childNodes].indexOf(view.children[v.keep - 1]) + 1 : 0);
+    r.setEnd(view, view.childNodes.length);
+    r.deleteContents();
+    let lead = pad(a ? v.offs[a] - v.gap : 0);
+    if (!v.icons) {
+      // List rows are striped by :nth-child, so keep each one at the same
+      // odd/even position it has when the whole folder is drawn.
+      const want = v.keep + v.slots[a][0] + v.heads[a];
+      lead = `<div class="vpad" style="height:${a ? v.offs[a] : 0}px"></div>${(v.keep + 1) % 2 === want % 2 ? '' : '<div class="vpad"></div>'}`;
+    }
+    view.insertAdjacentHTML('beforeend', lead + html.join('') + pad(b < n ? v.offs[n] - v.offs[b] - v.gap : 0));
+    v.a = a; v.b = b;
+    if (!force) view.classList.remove('animate'); // rows drawn while scrolling don't pop in
+    if (v.base == null) {
+      // Where slot 0 starts in the scroller (below the padding and the list header).
+      const first = view.children[v.keep];
+      v.base = first ? first.getBoundingClientRect().top - content.getBoundingClientRect().top + content.scrollTop : 0;
+      paintWindow();
+    }
+    observeThumbs();
+    fillShellIcons(view);
+  }
+  content.addEventListener('scroll', () => paintWindow(), { passive: true });
+  // Icon lines follow the window width; redo them when it changes.
+  new ResizeObserver(() => {
+    const v = view._v;
+    if (!v) return;
+    if (v.icons && getComputedStyle(view).gridTemplateColumns.split(' ').length !== v.perRow) { renderView(false); return; }
+    paintWindow();
+  }).observe(content);
+
+  // Every item's box in the scroller's coordinates (for the rubber band),
+  // worked out from the layout rather than from elements that may not exist.
+  function virtualRects(origin) {
+    const v = view._v;
+    const cs = getComputedStyle(view);
+    const vr = view.getBoundingClientRect();
+    const x0 = vr.left - origin.left + content.scrollLeft + parseFloat(cs.paddingLeft);
+    const tracks = v.icons
+      ? cs.gridTemplateColumns.split(' ').map(parseFloat)
+      : [view.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)];
+    const colGap = parseFloat(cs.columnGap) || 0;
+    const lefts = tracks.map((_, c) => x0 + tracks.slice(0, c).reduce((x, w) => x + w + colGap, 0));
+    const rects = [];
+    v.slots.forEach(([start, end, head], k) => {
+      const t = v.base + v.offs[k] + (head ? v.headH + v.gap : 0);
+      for (let i = start; i < end; i++) {
+        const c = i - start;
+        rects.push({ i, l: lefts[c], r: lefts[c] + tracks[c], t, b: t + v.rowH });
+      }
+    });
+    return rects;
+  }
+
+  // Scrolls an item into view (drawing it first in a big folder) and returns its element.
+  function revealPath(p) {
+    const v = view._v;
+    if (v && !inColumnsMode()) {
+      const i = state.entries.findIndex((e) => e.path === p);
+      if (i >= 0) {
+        const k = slotOf(v, i);
+        const t = v.base + v.offs[k + 1] - v.gap - v.rowH;
+        const b = t + v.rowH;
+        if (t < content.scrollTop) content.scrollTop = t;
+        else if (b > content.scrollTop + content.clientHeight) content.scrollTop = b - content.clientHeight;
+        paintWindow();
+      }
+    }
+    const el = elForPath(p);
+    el?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    return el;
+  }
+
+  // A scroller whose rows (or tiles, `horizontal`) all have the same pitch:
+  // the column view's columns and the gallery strip. Keeps only those near
+  // the visible part, between two spacers. `lead` is the scroller's padding
+  // before the first one; `gap` the flex gap between them.
+  function setStrip(box, opts) {
+    box._strip = { ...opts, a: 0, b: 0 };
+    if (!box._stripScroll) {
+      box._stripScroll = true;
+      box.addEventListener('scroll', () => { if (box._strip) paintStrip(box); }, { passive: true });
+    }
+  }
+  function paintStrip(box, force = false, pos = null) {
+    const s = box._strip;
+    const at = pos ?? (s.horizontal ? box.scrollLeft : box.scrollTop);
+    const size = (s.horizontal ? box.clientWidth : box.clientHeight) || 1000;
+    const first = Math.max(0, Math.floor((at - s.lead) / s.pitch));
+    const last = Math.min(s.n, Math.ceil((at - s.lead + size) / s.pitch));
+    if (!force && first >= s.a && last <= s.b) return;
+    const over = Math.ceil(OVERSCAN / s.pitch);
+    const a = Math.max(0, first - over);
+    const b = Math.min(s.n, last + over);
+    const pad = (k) => (k > 0 ? `<div class="vpad" style="${s.horizontal ? 'width' : 'height'}:${k * s.pitch - s.gap}px"></div>` : '');
+    let html = pad(a);
+    for (let i = a; i < b; i++) html += s.html(i);
+    box.innerHTML = html + pad(s.n - b);
+    s.a = a; s.b = b;
+    if (!force) { observeThumbs(); fillShellIcons(box); }
+  }
+
   async function renderView(animate) {
     const mode = viewMode();
+    view._v = null;
     queueFolderSizes();
     if (mode !== 'columns') { view.className = ''; view.style.minWidth = ''; cancelAnimationFrame(glide); }
     $('#empty').hidden = true;
@@ -887,12 +1069,27 @@
       }
       w.style.width = `${colWidth(dir)}px`;
       const col = w.firstElementChild;
-      if (col._rows !== rowsKey) {
+      const rowHtml = (i) => `<div class="${classes[i]}" data-col="${j}" data-i="${i}" draggable="true">
+          ${iconHtml(list[i], 36)}<span class="nm">${esc(shownName(list[i]))}</span>${cloudBadge(list[i])}
+          ${list[i].isDir ? '<svg class="chev" viewBox="0 0 10 10"><path d="M3.5 2l3 3-3 3"/></svg>' : ''}
+        </div>`;
+      const big = list.length >= VIRTUAL_MIN;
+      if (big) {
+        // Big folder: only the rows near the visible part (see setStrip).
         const top = col.scrollTop;
-        col.innerHTML = list.map((e, i) => `<div class="${classes[i]}" data-col="${j}" data-i="${i}" draggable="true">
-          ${iconHtml(e, 36)}<span class="nm">${esc(shownName(e))}</span>${cloudBadge(e)}
-          ${e.isDir ? '<svg class="chev" viewBox="0 0 10 10"><path d="M3.5 2l3 3-3 3"/></svg>' : ''}
-        </div>`).join('');
+        if (col._rows !== rowsKey || !col._strip) {
+          setStrip(col, { n: list.length, pitch: 0, lead: parseFloat(getComputedStyle(col).paddingTop) || 0, gap: 0 });
+        }
+        col._strip.pitch = probe(col, '<div class="crow item">檔</div>'); // follows the list density
+        col._strip.html = rowHtml;
+        col._focusRow = classes.findIndex((c, i) => c !== 'crow item' && (j < n || !state.focus || list[i].path === state.focus));
+        paintStrip(col, true, top);
+        col._rows = rowsKey;
+        col.scrollTop = top;
+      } else if (col._rows !== rowsKey || col._strip) {
+        col._strip = null;
+        const top = col.scrollTop;
+        col.innerHTML = list.map((_, i) => rowHtml(i)).join('');
         col._rows = rowsKey;
         col.scrollTop = top;
       } else {
@@ -918,8 +1115,17 @@
       preview.classList.toggle('empty', !shown && !multi);
       fillShellIcons(preview);
     }
+    for (const col of $$('.col', view)) {
+      // In a big column the highlighted row may not be drawn yet: scroll by position.
+      if (!col._strip || col._focusRow < 0) continue;
+      const t = col._strip.lead + col._focusRow * col._strip.pitch;
+      if (t < col.scrollTop) col.scrollTop = t - 6;
+      else if (t + col._strip.pitch > col.scrollTop + col.clientHeight) col.scrollTop = t + col._strip.pitch - col.clientHeight + 6;
+      paintStrip(col);
+    }
     for (const el of $$('.crow.sel, .crow.path', view)) {
       const col = el.parentElement;
+      if (col._strip) continue;
       if (el.offsetTop < col.scrollTop) col.scrollTop = el.offsetTop - 6;
       else if (el.offsetTop + el.offsetHeight > col.scrollTop + col.clientHeight) col.scrollTop = el.offsetTop + el.offsetHeight - col.clientHeight + 6;
     }
@@ -1158,9 +1364,22 @@
     view.innerHTML = `
       <div class="g-stage">${cur.isDir ? `<div class="hero">${fileIco(cur, 128)}</div>` : '<div class="cp-media g-media"></div>'}</div>
       <div class="g-caption"><b>${esc(shownName(cur))}</b><small>${esc(I.kindLabel(cur))}${cur.isDir ? '' : ` · ${fmtSize(cur.size)}`} · ${fmtDate(cur.mtime)}</small></div>
-      <div class="g-strip">${items.map((e, i) => `
-        <div class="g-item item${state.sel.has(e.path) ? ' sel' : ''}" data-i="${i}" draggable="true" title="${esc(e.name)}">${iconHtml(e, 64)}</div>`).join('')}
-      </div>`;
+      <div class="g-strip"></div>`;
+    const tile = (i) => `<div class="g-item item${state.sel.has(items[i].path) ? ' sel' : ''}" data-i="${i}" draggable="true" title="${esc(items[i].name)}">${iconHtml(items[i], 64)}</div>`;
+    const strip = $('.g-strip', view);
+    if (items.length >= VIRTUAL_MIN) {
+      // Big folder: only the tiles near the visible part, starting around the current one.
+      const cs = getComputedStyle(strip);
+      const gap = parseFloat(cs.columnGap) || 0;
+      const lead = parseFloat(cs.paddingLeft) || 0;
+      const pitch = probe(strip, '<div class="g-item item"></div>') + gap;
+      setStrip(strip, { n: items.length, pitch, lead, gap, horizontal: true, html: tile });
+      const at = Math.max(0, lead + items.indexOf(cur) * pitch - strip.clientWidth / 2);
+      paintStrip(strip, true, at);
+      strip.scrollLeft = at;
+    } else {
+      strip.innerHTML = items.map((_, i) => tile(i)).join('');
+    }
     if (kept) $('.g-stage', view).replaceWith(kept);
     else if (!cur.isDir) window.Preview.fill($('.g-media', view), cur, { helpers: previewHelpers });
     fillShellIcons(view);
@@ -1602,9 +1821,9 @@
     const origin = content.getBoundingClientRect();
     const sx = ev.clientX - origin.left + content.scrollLeft;
     const sy = ev.clientY - origin.top + content.scrollTop;
-    const rects = $$('.item', scope || view).map((el) => {
+    const rects = view._v && !scope ? virtualRects(origin) : $$('.item', scope || view).map((el) => {
       const r = el.getBoundingClientRect();
-      return { el, l: r.left - origin.left + content.scrollLeft, t: r.top - origin.top + content.scrollTop, r: r.right - origin.left + content.scrollLeft, b: r.bottom - origin.top + content.scrollTop };
+      return { i: Number(el.dataset.i), l: r.left - origin.left + content.scrollLeft, t: r.top - origin.top + content.scrollTop, r: r.right - origin.left + content.scrollLeft, b: r.bottom - origin.top + content.scrollTop };
     });
     let moved = false;
     const move = (e) => {
@@ -1617,7 +1836,7 @@
       box.hidden = false;
       const next = new Set(base);
       for (const it of rects) {
-        if (it.r > l && it.l < l + w && it.b > t && it.t < t + h) next.add(state.entries[Number(it.el.dataset.i)].path);
+        if (it.r > l && it.l < l + w && it.b > t && it.t < t + h) next.add(state.entries[it.i].path);
       }
       state.sel = next;
       paintSelection();
@@ -2025,11 +2244,10 @@
 
   function startRename(e) {
     if (!e || isVirtual(e)) return;
-    const el = elForPath(e.path);
+    const el = revealPath(e.path);
     if (!el) return;
     const label = $('.label, .nm', el);
     if (!label) return;
-    el.scrollIntoView({ block: 'nearest' });
     G.renaming = e.path;
     const input = document.createElement('input');
     input.className = 'rename';
@@ -2697,7 +2915,7 @@
     if (mode === 'icons') {
       const items = $$('.gi', view);
       const top0 = items[0]?.offsetTop;
-      let perRow = items.findIndex((el) => el.offsetTop !== top0);
+      let perRow = view._v?.perRow || items.findIndex((el) => el.offsetTop !== top0);
       if (perRow < 1) perRow = items.length;
       step = { left: -1, right: 1, up: -perRow, down: perRow }[dir];
     } else if (mode === 'gallery') {
@@ -2720,7 +2938,7 @@
       state.anchor = target.path;
       setSelection([target.path]);
     }
-    elForPath(target.path)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    revealPath(target.path);
     if (ql.isOpen) ql.update();
   }
 
@@ -2846,7 +3064,7 @@
       const hit = list.find((e) => e.name.toLowerCase().startsWith(typeBuf));
       if (hit) {
         if (inColumnsMode()) await columnClick(hit, state.colActive);
-        else { state.anchor = hit.path; setSelection([hit.path]); elForPath(hit.path)?.scrollIntoView({ block: 'nearest' }); }
+        else { state.anchor = hit.path; setSelection([hit.path]); revealPath(hit.path); }
       }
     }
   });

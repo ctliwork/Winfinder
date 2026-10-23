@@ -395,6 +395,11 @@ body.pane-open #preview-pane {
 .gi.sel .label { background: var(--accent); color: #fff; }
 .gi.cut { opacity: 0.45; }
 
+/* big folders draw only the rows on screen (renderVirtual / paintStrip) */
+.grid.virtual .gi { height: var(--vcell); }
+.grid .vpad { grid-column: 1 / -1; }
+.g-strip .vpad { flex: none; }
+
 /* ---------- list view ---------- */
 .list { padding: 0 8px 30px; }
 .lhead, .lrow {
