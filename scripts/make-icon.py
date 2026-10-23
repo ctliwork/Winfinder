@@ -57,13 +57,17 @@ def band(y0, y1):
     return m
 
 
-def cumulus(cx, cy, k):
-    """A fluffy cloud: overlapping puffs on a flat base, `k` = scale."""
+def cumulus(cx, cy, k, flip=False):
+    """A cumulus: uneven puffs heaped on a soft, slightly lumpy base, `k` = scale."""
     m = Image.new('L', (W, W), 0)
     d = ImageDraw.Draw(m)
-    for dx, dy, r in ((-62, 4, 26), (-30, -14, 36), (8, -28, 44), (50, -10, 34), (78, 6, 24)):
+    puffs = ((-74, 8, 20), (-48, -6, 30), (-14, -30, 40), (22, -46, 34), (52, -18, 38), (84, 0, 24), (-30, 14, 22), (40, 12, 26), (6, -2, 44))
+    for dx, dy, r in puffs:
+        dx = -dx if flip else dx
         d.ellipse([U(cx + (dx - r) * k), U(cy + (dy - r) * k), U(cx + (dx + r) * k), U(cy + (dy + r) * k)], fill=255)
-    d.rounded_rectangle([U(cx - 88 * k), U(cy - 4 * k), U(cx + 102 * k), U(cy + 30 * k)], U(17 * k), fill=255)
+    # a flat-ish underside, wider than it is tall, so the bottom isn't ruled straight
+    d.ellipse([U(cx - 96 * k), U(cy + 6 * k), U(cx + 106 * k), U(cy + 34 * k)] if not flip else
+              [U(cx - 106 * k), U(cy + 6 * k), U(cx + 96 * k), U(cy + 34 * k)], fill=255)
     return m
 
 
@@ -96,10 +100,13 @@ def icon():
     for m, colour in layers:
         paint(scene, SHADOW, shadow_of(m, 10, 8, 55))
         paint(scene, colour, m)
-    for cx, cy, k in ((168, 142, 1.1), (372, 112, 0.78)):
-        cl = cumulus(cx, cy, k)
+    for cx, cy, k, flip in ((168, 146, 1.1, False), (378, 112, 0.74, True)):
+        cl = cumulus(cx, cy, k, flip)
         paint(scene, SHADOW, shadow_of(cl, 8, 7, 45))
         paint(scene, WHITE, cl)
+        # a cool shade along the underside, where the cloud turns away from the sun
+        lifted = cl.transform((W, W), Image.AFFINE, (1, 0, 0, 0, 1, U(12 * k))).filter(ImageFilter.GaussianBlur(U(5 * k)))
+        paint(scene, (228, 238, 250), ImageChops.subtract(cl, lifted))
 
     T = (40, 34, 472, 466)  # the tile, leaving room for its shadow below
     img = Image.new('RGBA', (W, W), (0, 0, 0, 0))
