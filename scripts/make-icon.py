@@ -96,7 +96,7 @@ def icon():
     for m, colour in layers:
         paint(scene, SHADOW, shadow_of(m, 10, 8, 55))
         paint(scene, colour, m)
-    for cx, cy, k in ((150, 118, 0.8), (380, 92, 0.55)):
+    for cx, cy, k in ((168, 142, 1.1), (372, 112, 0.78)):
         cl = cumulus(cx, cy, k)
         paint(scene, SHADOW, shadow_of(cl, 8, 7, 45))
         paint(scene, WHITE, cl)
