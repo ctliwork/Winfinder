@@ -1,9 +1,9 @@
 # Draws the app icon and writes every size Tauri needs.
 # Run: python3 scripts/make-icon.py src-tauri/icons  (needs Pillow)
 #
-# Dapo Pond in Chishang, Taitung, in the style of macOS app icons: blue sky,
-# white clouds and the mountains mirrored in the still pond, with lotus pads
-# in the near water. A squircle tile with a soft shadow, lit softly from above.
+# Dapo Pond in Chishang, Taitung, in the style of macOS app icons, kept
+# simple: blue sky, two clouds and the mountain mirrored in the still pond.
+# A squircle tile with a soft shadow, lit softly from the upper left.
 import math
 import sys
 
@@ -63,7 +63,7 @@ H = 288  # the far shore: sky and mountains above, the pond's mirror below
 def clouds():
     m = Image.new('L', (W, W), 0)
     d = ImageDraw.Draw(m)
-    for x0, x1, y, h in ((40, 250, 118, 34), (86, 210, 98, 42), (280, 470, 76, 28), (318, 420, 62, 32), (220, 380, 186, 22)):
+    for x0, x1, y, h in ((40, 250, 118, 34), (86, 210, 98, 42), (280, 470, 76, 28), (318, 420, 62, 32)):
         d.rounded_rectangle([U(x0), U(y), U(x1), U(y + h)], U(h / 2), fill=255)
     return m
 
@@ -78,9 +78,10 @@ def landscape():
     paint(sc, vgrad((255, 255, 255), (224, 237, 250), 60, 220), cl)
     massif = ridge([(-10, 286), (90, 250), (200, 206), (262, 198), (330, 214), (430, 256), (530, 276)])
     paint(sc, vgrad((92, 200, 140), (38, 146, 98), 198, H), massif)
-    right = Image.new('L', (W, W), 0)
-    ImageDraw.Draw(right).rectangle([U(262), 0, W, W], fill=255)
-    paint(sc, vgrad((54, 170, 116), (24, 124, 84), 198, H), ImageChops.multiply(massif, right))
+    # shade deepening gradually toward the right (light from the upper left), no hard edge
+    shade = Image.linear_gradient('L').rotate(90).transpose(Image.FLIP_LEFT_RIGHT).resize((W, W))
+    shade = shade.point(lambda v: max(0, min(255, (v - 90) * 230 // 165)))
+    paint(sc, vgrad((54, 170, 116), (24, 124, 84), 198, H), ImageChops.multiply(massif, shade))
     return sc
 
 
@@ -97,28 +98,15 @@ def icon():
     water = Image.new('L', (W, W), 0)
     ImageDraw.Draw(water).rectangle([0, U(H), W, W], fill=255)
     paint(scene, pond, water)
-    # faint ripples
-    rip = Image.new('L', (W, W), 0)
-    rd = ImageDraw.Draw(rip)
-    for x, y, w in ((70, 344, 120), (300, 362, 110), (150, 402, 160), (330, 430, 90)):
-        rd.rounded_rectangle([U(x), U(y), U(x + w), U(y + 4)], U(2), fill=255)
-    paint(scene, (226, 242, 255), rip.point(lambda v: v * 80 // 255))
-
-    # the far shore: a thin green bank with treetops
+    # deeper water toward the viewer, so the reflection fades out near the bottom
+    depth = Image.new('L', (1, W))
+    for y in range(W):
+        depth.putpixel((0, y), int(max(0, min(1, (y / S - (H + 30)) / 110)) * 245))
+    paint(scene, (26, 104, 196), ImageChops.multiply(water, depth.resize((W, W))))
+    # the far shore: a thin green line where the mountain meets its reflection
     bank = Image.new('L', (W, W), 0)
-    bd = ImageDraw.Draw(bank)
-    bd.rectangle([0, U(H - 4), W, U(H + 4)], fill=255)
-    for x, r in ((34, 6), (48, 8), (62, 5), (306, 6), (320, 8), (334, 6), (446, 7), (460, 5)):
-        bd.ellipse([U(x - r), U(H - 4 - 2 * r), U(x + r), U(H - 4)], fill=255)
+    ImageDraw.Draw(bank).rectangle([0, U(H - 3), W, U(H + 3)], fill=255)
     paint(scene, (22, 104, 72), bank)
-
-    # lotus pads in the near water
-    lotus = Image.new('RGBA', (W, W), (0, 0, 0, 0))
-    ld = ImageDraw.Draw(lotus)
-    for cx, cy, rx, ry in ((132, 446, 54, 17), (238, 462, 40, 13)):
-        ld.ellipse([U(cx - rx), U(cy - ry), U(cx + rx), U(cy + ry)], fill=(56, 164, 104, 255))
-        ld.polygon([(U(cx), U(cy)), (U(cx + rx * 0.9), U(cy - ry * 0.5)), (U(cx + rx * 0.9), U(cy + ry * 0.1))], fill=(0, 0, 0, 0))
-    scene.alpha_composite(lotus)
 
     tile = squircle(*T)
     img = Image.new('RGBA', (W, W), (0, 0, 0, 0))
