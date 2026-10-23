@@ -38,20 +38,29 @@ function again(args = []) {
   return { exit: r.status, ms: Date.now() - t, timedOut: !!r.error };
 }
 async function step(name, fn) {
-  try { report[name] = await fn(); } catch (e) { report[name] = { error: String(e).slice(0, 300) }; }
+  try { report[name] = await fn(); } catch (e) { report[name] = { error: String(e).slice(0, 1500) }; }
   console.log(name, JSON.stringify(report[name]));
 }
 
 async function connect() {
+  let last = 'nothing listening';
   for (let i = 0; i < 60; i++) {
+    last = 'nothing listening';
     try {
+      const targets = await (await fetch(`http://127.0.0.1:${PORT}/json/list`)).json();
+      last = `targets: ${JSON.stringify(targets.map((t) => [t.type, t.url]))}`;
       const browser = await chromium.connectOverCDP(`http://127.0.0.1:${PORT}`);
-      const page = browser.contexts()[0]?.pages().find((p) => !p.url().startsWith('devtools'));
+      const pages = browser.contexts().flatMap((c) => c.pages());
+      const page = pages.find((p) => !p.url().startsWith('devtools'));
       if (page) return { browser, page };
-    } catch { /* not up yet */ }
+      last += `; playwright sees ${browser.contexts().length} contexts, pages ${JSON.stringify(pages.map((p) => p.url()))}`;
+      await browser.close().catch(() => {});
+    } catch (e) { last = `${last} | ${String(e).slice(0, 200)}`; }
     await sleep(1000);
   }
-  throw new Error('no DevTools connection');
+  const ports = ps(`Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | ? { $_.OwningProcess -in @(Get-Process ${PROC},msedgewebview2 -ErrorAction SilentlyContinue).Id } | % { $_.LocalPort }`);
+  desktop('no-devtools');
+  throw new Error(`no DevTools connection (${last}; ${JSON.stringify(windows())}; listening: ${ports.replace(/\s+/g, ' ')})`);
 }
 
 // What the column view's preview column shows, once something is there (or after 8 s).
