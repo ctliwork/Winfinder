@@ -242,6 +242,9 @@ fn unload(st: &mut State) {
 
 fn load(st: &mut State, parent: isize, path: &str, host: Rect, inner: Rect, dark: bool) -> Result<(), String> {
     unload(st);
+    // Hidden while the handler works (PowerPoint takes a while): the page's own
+    // preview of the file shows meanwhile, not a blank box or the last file.
+    hide_host(st);
     let ext = std::path::Path::new(path).extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
     let clsid = handler_clsid(&ext).ok_or("NO_HANDLER")?;
     let (bg, fg) = if dark { (0x002B_2A28u32, 0x00EB_EBEBu32) } else { (0x00FF_FFFF, 0x001F_1D1D) };
@@ -266,7 +269,7 @@ fn load(st: &mut State, parent: isize, path: &str, host: Rect, inner: Rect, dark
             }
         };
         let h = host_window(st, HWND(parent as _))?;
-        SetWindowPos(h, Some(HWND_TOP), host.x, host.y, host.w, host.h, SWP_NOACTIVATE | SWP_SHOWWINDOW).map_err(|e| e.message())?;
+        SetWindowPos(h, Some(HWND_TOP), host.x, host.y, host.w, host.h, SWP_NOACTIVATE).map_err(|e| e.message())?;
         ph.SetWindow(h, &inner.win()).map_err(|e| e.message())?;
         if let Ok(v) = ph.cast::<IPreviewHandlerVisuals>() {
             let _ = v.SetBackgroundColor(COLORREF(bg));
@@ -274,6 +277,7 @@ fn load(st: &mut State, parent: isize, path: &str, host: Rect, inner: Rect, dark
         }
         st.handler = Some(ph.clone());
         ph.DoPreview().map_err(|e| e.message())?;
+        let _ = SetWindowPos(h, Some(HWND_TOP), host.x, host.y, host.w, host.h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
         // Kept only once it has worked; the oldest kept one is let go.
         st.kept.insert(0, (clsid, ph));
         st.kept.truncate(KEEP);

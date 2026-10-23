@@ -1283,21 +1283,24 @@
     if (!native.avail.has(ext)) native.avail.set(ext, api.previewAvailable(ext));
     return native.avail.get(ext);
   }
+  // The built-in preview shows at once; when the file's handler has drawn its
+  // preview (prevhost keeps it hidden until then), that is laid over it. If
+  // the handler fails, the built-in one is already there.
   async function fillPreview(media, e) {
-    if (nativeWanted(e) && await nativeAvailable(e.ext) && media.isConnected) {
-      media._tok = (media._tok || 0) + 1; // a built-in preview still loading must not draw over this
-      media.dataset.kind = 'native';
-      media.innerHTML = '<div class="nv-wait">正在載入預覽…</div>';
-      const gen = ++native.gen;
-      native.el = media;
-      native.rect = '';
-      const r = nativeRects(media);
-      const res = r ? await api.previewShow(e.path, gen, r.host, r.inner, isDark()) : 'HIDDEN';
-      if (gen !== native.gen) return; // another file took over
-      if (res === true) { native.rect = JSON.stringify(r); trackNative(); return; }
-      native.el = null;
-    }
-    if (media.isConnected) window.Preview.fill(media, e, { helpers: previewHelpers });
+    const wanted = nativeWanted(e) && await nativeAvailable(e.ext);
+    if (!media.isConnected) return;
+    window.Preview.fill(media, e, { helpers: previewHelpers });
+    if (!wanted) return;
+    const gen = ++native.gen;
+    native.el = media;
+    native.rect = '';
+    const r = nativeRects(media);
+    const res = r ? await api.previewShow(e.path, gen, r.host, r.inner, isDark()) : 'HIDDEN';
+    if (gen !== native.gen) return; // another file took over
+    if (res !== true) { native.el = null; return; }
+    media._tok = (media._tok || 0) + 1; // a built-in preview still loading must not change the box now
+    media.dataset.kind = 'native';
+    trackNative();
   }
   // Starts the handlers for the commonest previewable types in the folder
   // before the first click; starting one is most of a first preview's wait.
