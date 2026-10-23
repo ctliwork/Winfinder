@@ -100,13 +100,31 @@ fn send(cmd: Cmd) -> Result<(), String> {
     unsafe { PostThreadMessageW(w.thread, WM_APP, WPARAM(0), LPARAM(0)) }.map_err(|e| e.message())
 }
 
+/// How long a handler may take before it is given up on.
+const GIVE_UP: std::time::Duration = std::time::Duration::from_secs(15);
+
 /// Loads `path` into the preview area. Blocks until the handler has drawn it
 /// (or failed); `gen` lets a newer request overtake this one.
 pub fn show(parent: isize, path: String, gen: u64, host: Rect, inner: Rect, dark: bool) -> Result<(), String> {
     LATEST.fetch_max(gen, Ordering::SeqCst);
     let (reply, rx) = channel();
     send(Cmd::Show { parent, path, gen, host, inner, dark, reply })?;
-    rx.recv().map_err(|e| e.to_string())?
+    match rx.recv_timeout(GIVE_UP) {
+        Ok(r) => r,
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+            // The handler is stuck inside the thread, and every later preview
+            // would wait behind it. Leave that thread to it and start a new one;
+            // whatever the old one finishes with is stale and gets hidden.
+            LATEST.fetch_add(1, Ordering::SeqCst);
+            if let Some(w) = WORKER.get() {
+                if let Ok(mut w) = w.lock() {
+                    *w = spawn();
+                }
+            }
+            Err("TIMEOUT".into())
+        }
+        Err(e) => Err(e.to_string()),
+    }
 }
 
 pub fn move_to(rects: Option<(Rect, Rect)>) -> Result<(), String> {
@@ -179,7 +197,7 @@ fn run(rx: Receiver<Cmd>) {
 fn handle(st: &mut State, cmd: Cmd) {
     match cmd {
         Cmd::Show { parent, path, gen, host, inner, dark, reply } => {
-            let r = if gen < LATEST.load(Ordering::SeqCst) { Err("STALE".into()) } else { load(st, parent, &path, host, inner, dark) };
+            let r = if gen < LATEST.load(Ordering::SeqCst) { Err("STALE".into()) } else { load(st, parent, &path, gen, host, inner, dark) };
             if r.is_err() {
                 unload(st);
                 hide_host(st);
@@ -240,7 +258,7 @@ fn unload(st: &mut State) {
     }
 }
 
-fn load(st: &mut State, parent: isize, path: &str, host: Rect, inner: Rect, dark: bool) -> Result<(), String> {
+fn load(st: &mut State, parent: isize, path: &str, gen: u64, host: Rect, inner: Rect, dark: bool) -> Result<(), String> {
     unload(st);
     // Hidden while the handler works (PowerPoint takes a while): the page's own
     // preview of the file shows meanwhile, not a blank box or the last file.
@@ -277,10 +295,14 @@ fn load(st: &mut State, parent: isize, path: &str, host: Rect, inner: Rect, dark
         }
         st.handler = Some(ph.clone());
         ph.DoPreview().map_err(|e| e.message())?;
-        let _ = SetWindowPos(h, Some(HWND_TOP), host.x, host.y, host.w, host.h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
         // Kept only once it has worked; the oldest kept one is let go.
         st.kept.insert(0, (clsid, ph));
         st.kept.truncate(KEEP);
+        // Another file was picked (or this one was given up on) while it drew: don't show it.
+        if gen < LATEST.load(Ordering::SeqCst) {
+            return Err("STALE".into());
+        }
+        let _ = SetWindowPos(h, Some(HWND_TOP), host.x, host.y, host.w, host.h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
     }
     Ok(())
 }
