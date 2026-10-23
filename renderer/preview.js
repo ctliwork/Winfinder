@@ -143,6 +143,26 @@
   const richOf = (e) => once('rich', e, () => api.richPreview(e.path));
   const textOf = (e) => once('text', e, () => api.readText(e.path));
   const thumbOf = (e) => once('thumb', e, () => api.thumb(e.path, 1024));
+  // Fonts: loaded under a name of their own, then shown with sample text.
+  const WEB_FONTS = new Set(['ttf', 'otf', 'woff', 'woff2']);
+  let fontSeq = 0;
+  const fontOf = (e, url) => once('font', e, async () => {
+    const family = `pv-font-${++fontSeq}`;
+    const face = new FontFace(family, `url("${url}")`);
+    await face.load();
+    document.fonts.add(face);
+    return family;
+  });
+  function fontSample(e, family) {
+    const name = esc(e.name.replace(/\.[^.]+$/, ''));
+    const line = (px, text) => `<div class="pf-line" style="font-size:${px}px"><span class="pf-px">${px}</span>${text}</div>`;
+    return `<div class="pv-scroll"><article class="pv-font" style="font-family:'${family}'">
+      <div class="pf-name">${name}</div>
+      <div class="pf-big">Aa 永</div>
+      <p>ABCDEFGHIJKLMNOPQRSTUVWXYZ<br>abcdefghijklmnopqrstuvwxyz<br>0123456789 !?&amp;@#%()[]{}</p>
+      ${[12, 16, 24, 36, 48].map((px) => line(px, 'The quick brown fox jumps over the lazy dog. 天地玄黃，宇宙洪荒。')).join('')}
+    </article></div>`;
+  }
   const isTexty = (e) => MARKDOWN.has(e.ext) || DELIMITED[e.ext] || ['text', 'code', 'other'].includes(I.category(e.ext));
 
   // Gets a file's preview ready without showing it (the neighbours of the one shown).
@@ -152,6 +172,7 @@
     if (bigPhoto(e)) { thumbOf(e); decoded(e, h.fileUrl(e.path)); return; }
     if (WEB_IMAGES.has(e.ext)) { new Image().src = h.fileUrl(e.path); return; }
     if (cat === 'video' || cat === 'audio' || e.ext === 'pdf') return;
+    if (WEB_FONTS.has(e.ext)) { fontOf(e, h.fileUrl(e.path)); return; }
     if (RICH.has(e.ext) && api.richPreview) { richOf(e); return; }
     if (isTexty(e)) { if ((e.size || 0) < 50e6) textOf(e); return; }
     if (!(h.icon?.(e) && !h.canThumb(e))) thumbOf(e);
@@ -199,6 +220,11 @@
       return set(`${infoCard(e, h)}<audio src="${url}" controls ${autoplay ? 'autoplay' : ''}></audio>`, 'info');
     }
     if (e.ext === 'pdf') return set(`<iframe src="${url}"></iframe>`, 'frame');
+    if (WEB_FONTS.has(e.ext)) {
+      const family = await fontOf(e, url);
+      if (!alive()) return;
+      if (family) return set(fontSample(e, family), 'doc');
+    }
 
     if (RICH.has(e.ext) && api.richPreview) {
       const r = await richOf(e);

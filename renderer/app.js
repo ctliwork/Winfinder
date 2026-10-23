@@ -1275,7 +1275,7 @@
   // start. Types without a handler fall back to them too. A native window draws over the page, so it steps aside while a
   // menu, dialog or Quick Look is open and is clipped to the visible area.
   const native = { el: null, gen: 0, rect: '', raf: 0, avail: new Map() };
-  const BUILTIN_FIRST = new Set(['image', 'video', 'audio', 'pdf', 'text', 'code']);
+  const BUILTIN_FIRST = new Set(['image', 'video', 'audio', 'pdf', 'text', 'code', 'font']);
   function nativeWanted(e) {
     return !!api.previewShow && prefs.nativePreview && !e.isDir && e.ext && !BUILTIN_FIRST.has(I.category(e.ext)) && !['csv', 'tsv'].includes(e.ext);
   }

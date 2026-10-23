@@ -310,6 +310,12 @@ body.pane-open #preview-pane {
 .pv-doc { user-select: text; line-height: 1.65; font-size: 13px; color: var(--text); }
 .pv-doc.page { background: var(--content-bg); max-width: 760px; margin: 0 auto; padding: 28px 34px; border-radius: 8px; box-shadow: var(--shadow-sm); }
 .pv-doc.md { max-width: 760px; margin: 0 auto; padding: 18px 24px; }
+.pv-font { max-width: 760px; margin: 0 auto; padding: 18px 24px; color: var(--text); user-select: text; }
+.pv-font .pf-name { font-family: system-ui, sans-serif; font-size: 13px; color: var(--text2); margin-bottom: 6px; }
+.pv-font .pf-big { font-size: 72px; line-height: 1.15; margin-bottom: 10px; }
+.pv-font p { font-size: 20px; line-height: 1.4; margin: 0 0 14px; }
+.pv-font .pf-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.35; padding: 3px 0; border-top: 0.5px solid var(--hairline); }
+.pv-font .pf-px { display: inline-block; width: 30px; font: 11px system-ui, sans-serif; color: var(--text3); vertical-align: middle; }
 .pv-doc h1 { font-size: 1.6em; margin: 0.4em 0; } .pv-doc h2 { font-size: 1.35em; margin: 0.6em 0 0.3em; }
 .pv-doc h3, .pv-doc h4 { font-size: 1.12em; margin: 0.6em 0 0.3em; }
 .pv-doc p { margin: 0.45em 0; } .pv-doc ul, .pv-doc ol { padding-left: 1.4em; margin: 0.4em 0; }
