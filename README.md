@@ -1,6 +1,6 @@
 # WinFinder
 
-**下載安裝：** [WinFinder_x64-setup.exe](https://github.com/ctliwork/winfinder/releases/latest/download/WinFinder_x64-setup.exe)（Windows 10／11，64 位元）
+**下載安裝：** [WinFinder_x64-setup.exe](https://github.com/ctliwork/Winfinder/releases/latest/download/WinFinder_x64-setup.exe)（Windows 10／11，64 位元）
 裝好之後有新版本會自動提示，按「更新並重新啟動」即可。
 
 仿 macOS Finder 的 Windows 檔案管理器，重點是直欄檢視（column view）。
