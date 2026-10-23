@@ -267,13 +267,9 @@ fn extract_other(archive: &str) -> Result<String, String> {
     if stem.to_lowercase().ends_with(".tar") {
         stem.truncate(stem.len() - 4);
     }
-    // tar unpacks "a.tar.gz" in one go; 7-Zip would stop at the inner .tar.
-    let (seven, tar) = (seven_zip(), tar());
-    let tools: Vec<(PathBuf, bool)> = if is_tarball(archive) {
-        tar.map(|t| (t, true)).into_iter().chain(seven.map(|s| (s, false))).collect()
-    } else {
-        seven.map(|s| (s, false)).into_iter().chain(tar.map(|t| (t, true))).collect()
-    };
+    // 7-Zip first: it handles every file name, while tar.exe goes through the
+    // system code page and can fail on names outside it.
+    let tools: Vec<(PathBuf, bool)> = seven_zip().map(|s| (s, false)).into_iter().chain(tar().map(|t| (t, true))).collect();
     if tools.is_empty() {
         return Err("NO_7ZIP".into());
     }
@@ -286,6 +282,18 @@ fn extract_other(archive: &str) -> Result<String, String> {
             // path goes through tar.exe's arguments (which may not take every name).
             let file = fs::File::open(src).map_err(|e| code(&e))?;
             tool(&exe, &["-xf".as_ref(), "-".as_ref()]).stdin(file).current_dir(&target).output().map_err(|e| code(&e))?
+        } else if is_tarball(archive) && ext_of(archive) != "tar" {
+            // 7-Zip opens one layer at a time: unpack the .gz (or .xz…) to a pipe and extract the tar from it.
+            let mut unpack = tool(&exe, &["x".as_ref(), "-so".as_ref(), "--".as_ref(), archive.as_ref()])
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .map_err(|e| code(&e))?;
+            let pipe = unpack.stdout.take().ok_or("INVALID")?;
+            let to = format!("-o{}", target.display());
+            let out = tool(&exe, &["x".as_ref(), "-y".as_ref(), "-si".as_ref(), "-ttar".as_ref(), to.as_ref()]).stdin(pipe).output().map_err(|e| code(&e))?;
+            let _ = unpack.wait();
+            out
         } else {
             let to = format!("-o{}", target.display());
             run(&exe, &["x".as_ref(), "-y".as_ref(), NO_PASSWORD.as_ref(), to.as_ref(), "--".as_ref(), archive.as_ref()])?
@@ -336,7 +344,7 @@ mod tests {
     /// Needs 7-Zip and tar (skipped without them): lists and extracts a 7z, extracts a .tar.gz.
     #[test]
     fn other_formats() {
-        let (Some(seven), Some(tar)) = (seven_zip(), tar()) else { return };
+        let Some(seven) = seven_zip() else { return };
         let d = std::env::temp_dir().join(format!("finder-7z-{}", std::process::id()));
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(d.join("src/資料夾")).unwrap();
@@ -345,8 +353,12 @@ mod tests {
         let src = d.join("src");
         let a7z = d.join("a.7z");
         assert!(std::process::Command::new(&seven).arg("a").arg("-bd").arg(&a7z).arg(".").current_dir(&src).output().unwrap().status.success());
+        // The .tar.gz is made with 7-Zip: tar.exe on Windows can't take names outside the system code page.
         let tgz = d.join("b.tar.gz");
-        assert!(std::process::Command::new(&tar).arg("-czf").arg(&tgz).arg(".").current_dir(&src).output().unwrap().status.success());
+        let plain_tar = d.join("b.tar");
+        assert!(std::process::Command::new(&seven).arg("a").arg("-ttar").arg(&plain_tar).arg(".").current_dir(&src).output().unwrap().status.success());
+        assert!(std::process::Command::new(&seven).arg("a").arg("-tgzip").arg(&tgz).arg(&plain_tar).output().unwrap().status.success());
+        fs::remove_file(&plain_tar).unwrap();
 
         let (entries, total) = list_other(&a7z.to_string_lossy(), 2000).unwrap();
         assert_eq!(total, 3);

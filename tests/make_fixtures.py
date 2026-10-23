@@ -73,7 +73,10 @@ with open(os.path.join(src, "資料夾", "b.txt"), "w", encoding="utf-8") as f:
     f.write("世界")
 seven = shutil.which("7z") or r"C:\Program Files\7-Zip\7z.exe"
 subprocess.run([seven, "a", "-bd", p("封存.7z"), "."], cwd=src, check=True, stdout=subprocess.DEVNULL)
-subprocess.run(["tar", "-czf", p("封存.tar.gz"), "."], cwd=src, check=True)
+# tar.exe on Windows can't take names outside the system code page; 7-Zip can.
+subprocess.run([seven, "a", "-bd", "-ttar", p("封存.tar"), "."], cwd=src, check=True, stdout=subprocess.DEVNULL)
+subprocess.run([seven, "a", "-bd", "-tgzip", p("封存.tar.gz"), p("封存.tar")], check=True, stdout=subprocess.DEVNULL)
+os.remove(p("封存.tar"))
 shutil.rmtree(src)
 
 os.makedirs(p("大資料夾"))
