@@ -33,7 +33,7 @@
     doc: { exts: 'doc docx rtf odt pages', color: '#2b6de8', label: 'Word 文件' },
     sheet: { exts: 'xls xlsx csv ods numbers tsv', color: '#1f9d55', label: '試算表' },
     slide: { exts: 'ppt pptx odp key', color: '#ff7a1a', label: '簡報' },
-    archive: { exts: 'zip rar 7z tar gz bz2 xz tgz iso dmg cab', color: '#8e8e93', label: '封存檔' },
+    archive: { exts: 'zip rar 7z tar gz bz2 xz tgz tbz2 txz zst iso dmg cab', color: '#8e8e93', label: '封存檔' },
     code: { exts: 'js ts jsx tsx mjs cjs json py rb go rs java kt c h cpp hpp cs php swift sh ps1 bat cmd html htm css scss vue xml yml yaml toml sql lua dart r', color: '#5856d6', label: '原始碼' },
     text: { exts: 'txt md log ini cfg conf nfo srt env', color: '#64748b', label: '純文字' },
     app: { exts: 'exe msi appx msix lnk url', color: '#0a84ff', label: '應用程式' },
