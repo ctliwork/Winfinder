@@ -105,6 +105,12 @@
     restoreTrash: (paths) => invoke('restore_trash', { paths }).catch(() => paths),
     readText: (path) => invoke('read_text', { path }),
     richPreview: (path) => invoke('rich_preview', { path }),
+    setKeepRunning: (on) => invoke('set_keep_running', { on }).catch(() => {}),
+    setRunAtLogin: (on) => invoke('set_run_at_login', { on }).then(() => '', (e) => String(e)),
+    quit: () => invoke('quit'),
+    // Another launch asked for a folder (null: just a new tab), or the window was closed into the background.
+    onOpenDir: (cb) => T.event.listen('open-dir', (e) => cb(e.payload)),
+    onHidden: (cb) => T.event.listen('window-hidden', () => cb()),
     cloudPin: (paths, state) => invoke('cloud_pin', { paths, state }).catch(() => paths),
     appVersion: () => T.app.getVersion(),
     saveTheme: (theme) => invoke('save_theme', { theme }).catch(() => {}),
@@ -140,7 +146,8 @@
       update();
     },
   };
-  window.__finderReady = () => win.show();
+  // Started at sign-in: stay hidden until opened from the notification area or launched again.
+  window.__finderReady = () => { if (!env.background) win.show(); };
 
   // Native drag regions: Tauri only honours the attribute on the element itself.
   for (const sel of ['#sidebar', '.sb-top', '#tabbar', '#tabs', '.tb-drag', '#toolbar', '#title-wrap', '#title', '#toolbar .spacer']) {

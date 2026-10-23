@@ -25,6 +25,7 @@
     startup: 'restore', startDir: '', newTab: 'home', theme: 'system', density: 'normal',
     showExt: true, foldersFirst: true, sizeBase: 1000, confirmTrash: false, autoUpdate: true, colPreview: true,
     rememberView: true, folderViews: {}, menuStyle: 'windows', calcSizes: false, smart: [], uiScale: 1, nativePreview: true,
+    keepRunning: true, runAtLogin: false,
   }, readPrefs());
   // Like Finder, reopen the last tabs. Earlier versions saved 'home' as the
   // default, so move that over once.
@@ -2516,6 +2517,7 @@
       { label: '重新整理', kbd: 'F5', action: () => refresh(true) },
       '-',
       { label: '設定…', kbd: 'Ctrl+,', action: () => openSettings() },
+      ...(api.quit && prefs.keepRunning ? [{ label: '結束 Finder', action: () => api.quit() }] : []),
     ], r.right - 230, r.bottom + 6);
   });
 
@@ -3500,6 +3502,8 @@
         Object.keys(prefs.folderViews).length && ['', null, '<button data-act="reset-views">全部改回預設檢視</button>'],
         ['丟到資源回收筒前先確認', null, sw('confirmTrash')],
         api.checkUpdate && ['自動檢查更新', '啟動後在背景檢查一次', sw('autoUpdate')],
+        api.setKeepRunning && ['關閉視窗後在背景執行', '按 × 只把視窗藏起來，程式留在通知區域，再打開就不用等待；要完全結束請在通知區域的圖示上按右鍵 →「結束」', sw('keepRunning')],
+        api.setRunAtLogin && ['登入 Windows 時在背景啟動', '開機後第一次打開也不用等待', sw('runAtLogin')],
       ] },
       { id: 'look', title: '外觀', rows: [
         ['主題', null, sel('theme', [['system', '跟隨系統'], ['light', '淺色'], ['dark', '深色']])],
@@ -3559,6 +3563,8 @@
     else if (key === 'previewPane') updatePane();
     else if (key === 'calcSizes') queueFolderSizes();
     else if (key === 'uiScale') api.setUiScale?.(value);
+    else if (key === 'keepRunning') api.setKeepRunning?.(value);
+    else if (key === 'runAtLogin') api.setRunAtLogin?.(value).then((err) => { if (err) toast(`無法設定登入時啟動：${err}`); });
     else if (key === 'nativePreview') { nativeHide(); paneShown = null; rerenderItems(); }
     else if (['folderIcons', 'showHidden', 'showSystem', 'showExt', 'foldersFirst', 'sizeBase'].includes(key)) rerenderItems();
   }
@@ -3638,6 +3644,11 @@
     document.body.classList.toggle('sidebar-hidden', !!prefs.sidebarHidden);
     $('#zoom').value = prefs.icon;
     api.setUiScale?.(prefs.uiScale); // the window opens at the saved size already (lib.rs); this keeps the two in step
+    api.setKeepRunning?.(prefs.keepRunning);
+    if (prefs.runAtLogin) api.setRunAtLogin?.(true); // keeps the path right after the app moves or updates
+    // Launching the app again shows this window; a folder it was given opens in a new tab.
+    api.onOpenDir?.((dir) => openTab(dir || newTabDir()));
+    api.onHidden?.(() => { ql.close(); closeMenu(); });
     try {
       G.places = await api.places();
       // A folder passed in wins; otherwise the startup setting.

@@ -16,6 +16,7 @@ use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_updater::UpdaterExt;
@@ -538,10 +539,20 @@ fn system_dark() -> bool {
     false
 }
 
-fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
-    let start_dir = std::env::args()
+/// The folder asked for on the command line: `--dir=<path>` or a folder as the first argument.
+fn dir_arg(args: &[String]) -> Option<String> {
+    args.iter()
         .find_map(|a| a.strip_prefix("--dir=").map(str::to_owned))
-        .or_else(|| std::env::args().nth(1).filter(|a| std::path::Path::new(a).is_dir()));
+        .or_else(|| args.get(1).filter(|a| std::path::Path::new(a).is_dir()).cloned())
+}
+
+/// Started at sign-in (see set_run_at_login): load everything but stay hidden.
+const BACKGROUND_ARG: &str = "--background";
+
+fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
+    let args: Vec<String> = std::env::args().collect();
+    let start_dir = dir_arg(&args);
+    let background = args.iter().any(|a| a == BACKGROUND_ARG);
 
     // Opaque on every platform: a transparent (Mica) window can show white
     // for a moment at startup while its layers catch up.
@@ -557,6 +568,7 @@ fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
         "material": material,
         "dir": start_dir,
         "sep": std::path::MAIN_SEPARATOR.to_string(),
+        "background": background,
     });
 
     #[allow(unused_mut)]
@@ -592,17 +604,114 @@ fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
         let _ = window.set_zoom(scale);
     }
     // Show the window even if the page never signals readiness.
-    let w = window.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(1500));
+    if !background {
+        let w = window.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(1500));
+            let _ = w.show();
+        });
+    }
+    Ok(())
+}
+
+// ---------- staying in the background ----------
+// Closing the window only hides it (Settings: 關閉視窗後在背景執行), so the
+// next open is instant. The app then lives in the notification area, and
+// starting it again brings back the window that is already running.
+static KEEP_RUNNING: AtomicBool = AtomicBool::new(true);
+
+#[tauri::command]
+fn set_keep_running(on: bool) {
+    KEEP_RUNNING.store(on, Ordering::Relaxed);
+}
+
+#[tauri::command]
+fn quit(app: AppHandle) {
+    app.exit(0);
+}
+
+fn show_main(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.unminimize();
         let _ = w.show();
-    });
+        let _ = w.set_focus();
+    }
+}
+
+fn create_tray(app: &AppHandle) -> tauri::Result<()> {
+    use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+    use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+    let menu = Menu::with_items(
+        app,
+        &[
+            &MenuItem::with_id(app, "open", "打開 Finder", true, None::<&str>)?,
+            &MenuItem::with_id(app, "new-tab", "新分頁", true, None::<&str>)?,
+            &PredefinedMenuItem::separator(app)?,
+            &MenuItem::with_id(app, "quit", "結束", true, None::<&str>)?,
+        ],
+    )?;
+    let mut tray = TrayIconBuilder::with_id("main")
+        .tooltip("Finder")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, ev| match ev.id().as_ref() {
+            "open" => show_main(app),
+            "new-tab" => {
+                show_main(app);
+                let _ = app.emit("open-dir", None::<String>);
+            }
+            "quit" => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, ev| {
+            if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = ev {
+                show_main(tray.app_handle());
+            }
+        });
+    if let Some(icon) = app.default_window_icon() {
+        tray = tray.icon(icon.clone());
+    }
+    tray.build(app)?;
+    Ok(())
+}
+
+/// Starts the app hidden when the user signs in to Windows (HKCU\...\Run).
+#[tauri::command]
+fn set_run_at_login(on: bool) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        use windows::core::w;
+        use windows::Win32::System::Registry::{RegDeleteKeyValueW, RegSetKeyValueW, HKEY_CURRENT_USER, REG_SZ};
+        const RUN: windows::core::PCWSTR = w!("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
+        const NAME: windows::core::PCWSTR = w!("Finder for Windows");
+        if on {
+            let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+            let cmd: Vec<u16> = format!("\"{}\" {BACKGROUND_ARG}", exe.display()).encode_utf16().chain(Some(0)).collect();
+            let r = unsafe { RegSetKeyValueW(HKEY_CURRENT_USER, RUN, NAME, REG_SZ.0, Some(cmd.as_ptr() as _), (cmd.len() * 2) as u32) };
+            r.ok().map_err(|e| e.message())?;
+        } else {
+            // Missing already is fine.
+            let _ = unsafe { RegDeleteKeyValueW(HKEY_CURRENT_USER, RUN, NAME) };
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = on;
     Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Must come first: a second launch hands its folder to this one and quits.
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            if args.iter().any(|a| a == BACKGROUND_ARG) {
+                return;
+            }
+            show_main(app);
+            if let Some(dir) = dir_arg(&args) {
+                let _ = app.emit("open-dir", Some(dir));
+            }
+        }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_drag::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -610,13 +719,23 @@ pub fn run() {
         .manage(WatchState { watcher: Mutex::new(None), dirs: Mutex::new(HashSet::new()) })
         .setup(|app| {
             create_main_window(app.handle())?;
+            create_tray(app.handle())?;
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" && KEEP_RUNNING.load(Ordering::Relaxed) {
+                    api.prevent_close();
+                    let _ = window.hide();
+                    let _ = window.emit("window-hidden", ());
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             places, pin_home, list_dir, list_many, cloud_pin, new_file, dir_size, cancel_dir_sizes, compress, extract, open_terminal, native_menu, properties,
             clipboard_write, clipboard_read, clipboard_clear, save_theme, set_ui_scale, preview_available, preview_show, preview_move, preview_hide, cancel_transfer, restore_trash,
             everything_available, everything, disk_free, disk_space, recent_files, resolve_link, folder_count, thumbnail, open_path, reveal, trash, rename, mkdir,
-            transfer, read_text, rich_preview, search, watch, check_update, install_update
+            transfer, read_text, rich_preview, search, watch, check_update, install_update, set_keep_running, set_run_at_login, quit
         ])
         .run(tauri::generate_context!())
         .expect("error while running Finder");
