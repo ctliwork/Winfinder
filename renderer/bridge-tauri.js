@@ -97,6 +97,7 @@
       previewShow: (path, gen, host, inner, dark) => invoke('preview_show', { path, gen, host, inner, dark }).then(() => true, (e) => String(e)),
       previewMove: (host, inner) => invoke('preview_move', { host, inner }).catch(() => {}),
       previewHide: (gen) => invoke('preview_hide', { gen }).catch(() => {}),
+      previewWarm: (exts) => invoke('preview_warm', { exts }).catch(() => {}),
     } : {}),
     openTerminal: (dir) => invoke('open_terminal', { dir }).then(() => '', (e) => String(e)),
     transfer: (op, files, dest, conflict) => invoke('transfer', { op, files, dest, conflict }),

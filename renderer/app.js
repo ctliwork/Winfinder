@@ -571,6 +571,7 @@
     renderToolbar();
     renderSidebar();
     await renderView(animate);
+    warmPreviews();
     renderPathbar();
     renderStatus();
     updatePane();
@@ -1294,6 +1295,22 @@
       native.el = null;
     }
     if (media.isConnected) window.Preview.fill(media, e, { helpers: previewHelpers });
+  }
+  // Starts the handlers for the commonest previewable types in the folder
+  // before the first click; starting one is most of a first preview's wait.
+  const warmed = new Set();
+  async function warmPreviews() {
+    if (!api.previewWarm || !prefs.nativePreview || !(inColumnsMode() ? prefs.colPreview : prefs.previewPane)) return;
+    const list = (inColumnsMode() ? state.colLists[state.colLists.length - 1] : state.entries) || [];
+    const counts = new Map();
+    for (const e of list) if (nativeWanted(e)) counts.set(e.ext, (counts.get(e.ext) || 0) + 1);
+    const exts = [];
+    for (const [ext] of [...counts].sort((a, b) => b[1] - a[1]).slice(0, 3)) {
+      if (warmed.has(ext)) continue;
+      warmed.add(ext);
+      if (await nativeAvailable(ext)) exts.push(ext);
+    }
+    if (exts.length) api.previewWarm(exts);
   }
   function nativeHide() {
     if (!native.el) return;

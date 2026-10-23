@@ -3,7 +3,13 @@
 //! a child window laid over the page's preview area.
 //!
 //! One STA thread owns the host window and talks to the handlers, so a slow
-//! one (Word can take a second) never stalls the UI thread. Rectangles are in
+//! one (Word can take a second) never stalls the UI thread.
+//!
+//! Starting a handler is the slow part: most run in prevhost.exe, which
+//! starts and loads the handler again once nothing holds it. So, like
+//! Explorer, handlers are kept and reused for the next file of their type
+//! (Unload, then Initialize again), and the ones a folder will need can be
+//! started ahead of time (`warm`). Rectangles are in
 //! physical pixels: `host` relative to the main window's client area, `inner`
 //! (the preview itself, which may stick out of the visible part) relative to
 //! `host`.
@@ -48,7 +54,12 @@ enum Cmd {
     /// None: hide for now (something is drawn over the preview), keeping it loaded.
     Move(Option<(Rect, Rect)>),
     Hide,
+    /// Start the handlers for these extensions while nothing else is waiting.
+    Warm(Vec<String>),
 }
+
+/// Handlers kept for reuse, most recently used first.
+const KEEP: usize = 4;
 
 struct Worker {
     tx: Sender<Cmd>,
@@ -108,6 +119,11 @@ pub fn hide(gen: u64) -> Result<(), String> {
     send(Cmd::Hide)
 }
 
+/// Starts (and keeps) the handlers for `exts`, so their first preview is quick.
+pub fn warm(exts: Vec<String>) -> Result<(), String> {
+    send(Cmd::Warm(exts))
+}
+
 fn spawn() -> Worker {
     let (tx, rx) = channel();
     let (ready_tx, ready_rx) = channel();
@@ -127,7 +143,12 @@ fn spawn() -> Worker {
 #[derive(Default)]
 struct State {
     host: Option<HWND>,
+    /// The handler showing the current file.
     handler: Option<IPreviewHandler>,
+    /// Handlers kept for reuse (the current one included), most recent first.
+    kept: Vec<(GUID, IPreviewHandler)>,
+    /// Extensions waiting to be warmed up.
+    warm: Vec<String>,
 }
 
 fn run(rx: Receiver<Cmd>) {
@@ -138,6 +159,14 @@ fn run(rx: Receiver<Cmd>) {
             if msg.hwnd.is_invalid() && msg.message == WM_APP {
                 while let Ok(cmd) = rx.try_recv() {
                     handle(&mut st, cmd);
+                }
+                // One warm-up at a time, then look at the queue again, so a
+                // preview asked for meanwhile doesn't wait for all of them.
+                if let Some(ext) = st.warm.pop() {
+                    warm_one(&mut st, &ext);
+                    if !st.warm.is_empty() {
+                        let _ = PostThreadMessageW(GetCurrentThreadId(), WM_APP, WPARAM(0), LPARAM(0));
+                    }
                 }
                 continue;
             }
@@ -170,7 +199,29 @@ fn handle(st: &mut State, cmd: Cmd) {
             unload(st);
             hide_host(st);
         }
+        Cmd::Warm(exts) => {
+            for ext in exts {
+                if !st.warm.contains(&ext) {
+                    st.warm.insert(0, ext);
+                }
+            }
+        }
     }
+}
+
+fn warm_one(st: &mut State, ext: &str) {
+    let Some(clsid) = handler_clsid(ext) else { return };
+    if st.kept.iter().any(|(c, _)| *c == clsid) || st.kept.len() >= KEEP {
+        return;
+    }
+    if let Ok(ph) = create(&clsid) {
+        st.kept.push((clsid, ph));
+    }
+}
+
+fn create(clsid: &GUID) -> Result<IPreviewHandler, String> {
+    // Most handlers run out of process (prevhost.exe), like in Explorer.
+    unsafe { CoCreateInstance(clsid, None, CLSCTX_LOCAL_SERVER | CLSCTX_INPROC_SERVER) }.map_err(|e| e.message())
 }
 
 fn hide_host(st: &State) {
@@ -196,9 +247,24 @@ fn load(st: &mut State, parent: isize, path: &str, host: Rect, inner: Rect, dark
     let (bg, fg) = if dark { (0x002B_2A28u32, 0x00EB_EBEBu32) } else { (0x00FF_FFFF, 0x001F_1D1D) };
     BG.store(bg, Ordering::SeqCst);
     unsafe {
-        // Most handlers run out of process (prevhost.exe), like in Explorer.
-        let ph: IPreviewHandler = CoCreateInstance(&clsid, None, CLSCTX_LOCAL_SERVER | CLSCTX_INPROC_SERVER).map_err(|e| e.message())?;
-        init(&ph, path)?;
+        // Reuse a kept handler of this type; one that won't take another file is replaced.
+        let ph = match st.kept.iter().position(|(c, _)| *c == clsid) {
+            Some(i) => {
+                let (_, old) = st.kept.remove(i);
+                if init(&old, path).is_ok() {
+                    old
+                } else {
+                    let ph = create(&clsid)?;
+                    init(&ph, path)?;
+                    ph
+                }
+            }
+            None => {
+                let ph = create(&clsid)?;
+                init(&ph, path)?;
+                ph
+            }
+        };
         let h = host_window(st, HWND(parent as _))?;
         SetWindowPos(h, Some(HWND_TOP), host.x, host.y, host.w, host.h, SWP_NOACTIVATE | SWP_SHOWWINDOW).map_err(|e| e.message())?;
         ph.SetWindow(h, &inner.win()).map_err(|e| e.message())?;
@@ -208,6 +274,9 @@ fn load(st: &mut State, parent: isize, path: &str, host: Rect, inner: Rect, dark
         }
         st.handler = Some(ph.clone());
         ph.DoPreview().map_err(|e| e.message())?;
+        // Kept only once it has worked; the oldest kept one is let go.
+        st.kept.insert(0, (clsid, ph));
+        st.kept.truncate(KEEP);
     }
     Ok(())
 }

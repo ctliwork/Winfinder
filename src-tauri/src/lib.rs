@@ -301,6 +301,18 @@ fn preview_hide(gen: u64) -> Result<(), String> {
     }
 }
 
+/// Starts the preview handlers a folder will need before the first click.
+#[tauri::command]
+fn preview_warm(exts: Vec<String>) -> Result<(), String> {
+    #[cfg(windows)]
+    return prevhost::warm(exts);
+    #[cfg(not(windows))]
+    {
+        let _ = exts;
+        Ok(())
+    }
+}
+
 #[cfg(windows)]
 type ClipFiles = winshell::ClipFiles;
 #[cfg(not(windows))]
@@ -733,7 +745,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             places, pin_home, list_dir, list_many, cloud_pin, new_file, dir_size, cancel_dir_sizes, compress, extract, open_terminal, native_menu, properties,
-            clipboard_write, clipboard_read, clipboard_clear, save_theme, set_ui_scale, preview_available, preview_show, preview_move, preview_hide, cancel_transfer, restore_trash,
+            clipboard_write, clipboard_read, clipboard_clear, save_theme, set_ui_scale, preview_available, preview_show, preview_move, preview_hide, preview_warm, cancel_transfer, restore_trash,
             everything_available, everything, disk_free, disk_space, recent_files, resolve_link, folder_count, thumbnail, open_path, reveal, trash, rename, mkdir,
             transfer, read_text, rich_preview, search, watch, check_update, install_update, set_keep_running, set_run_at_login, quit
         ])
