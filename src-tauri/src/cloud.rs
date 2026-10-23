@@ -101,4 +101,19 @@ mod tests {
         assert_eq!(state(0x10 | RECALL_ON_DATA_ACCESS, true), None);
         assert_eq!(state(0x10 | PINNED | RECALL_ON_OPEN, true), Some("pinned"));
     }
+
+    /// An ordinary folder isn't a sync root, and pinning one of its files fails cleanly.
+    #[cfg(windows)]
+    #[test]
+    fn plain_files_on_windows() {
+        let d = std::env::temp_dir().join(format!("finder-cloud-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let f = d.join("a.txt");
+        std::fs::write(&f, "x").unwrap();
+        assert!(!in_sync_root(&d.to_string_lossy()));
+        let path = f.to_string_lossy().into_owned();
+        assert_eq!(set_pin_state(std::slice::from_ref(&path), "pinned"), vec![path.clone()]);
+        assert_eq!(set_pin_state(&[d.join("missing").to_string_lossy().into_owned()], "unpinned").len(), 1);
+        std::fs::remove_dir_all(&d).unwrap();
+    }
 }

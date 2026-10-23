@@ -162,8 +162,8 @@ fn reg_7zip_dir() -> Option<PathBuf> {
     None
 }
 
-/// Runs a tool without a console window, with no input (so a password prompt fails instead of waiting).
-fn run(exe: &Path, args: &[&std::ffi::OsStr]) -> Result<std::process::Output, String> {
+/// A tool without a console window, with no input (so a password prompt fails instead of waiting).
+fn tool(exe: &Path, args: &[&std::ffi::OsStr]) -> std::process::Command {
     let mut cmd = std::process::Command::new(exe);
     cmd.args(args).stdin(std::process::Stdio::null());
     #[cfg(windows)]
@@ -171,7 +171,11 @@ fn run(exe: &Path, args: &[&std::ffi::OsStr]) -> Result<std::process::Output, St
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     }
-    cmd.output().map_err(|e| code(&e))
+    cmd
+}
+
+fn run(exe: &Path, args: &[&std::ffi::OsStr]) -> Result<std::process::Output, String> {
+    tool(exe, args).output().map_err(|e| code(&e))
 }
 
 fn failure(out: &std::process::Output) -> String {
@@ -192,7 +196,21 @@ pub type Listed = (String, u64, bool);
 /// The archive's entries, at most `limit`, and how many there are.
 pub fn list_other(path: &str, limit: usize) -> Result<(Vec<Listed>, usize), String> {
     let exe = seven_zip().ok_or("NO_7ZIP")?;
-    let out = run(&exe, &["l".as_ref(), "-slt".as_ref(), "-ba".as_ref(), "-sccUTF-8".as_ref(), "--".as_ref(), path.as_ref()])?;
+    let list: [&std::ffi::OsStr; 4] = ["l".as_ref(), "-slt".as_ref(), "-ba".as_ref(), "-sccUTF-8".as_ref()];
+    let out = if is_tarball(path) && ext_of(path) != "tar" {
+        // 7-Zip opens one layer at a time: unpack the .gz (or .xz…) to a pipe and list the tar in it.
+        let mut unpack = tool(&exe, &["x".as_ref(), "-so".as_ref(), "--".as_ref(), path.as_ref()])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .map_err(|e| code(&e))?;
+        let pipe = unpack.stdout.take().ok_or("INVALID")?;
+        let out = tool(&exe, &[&list[..], &["-si".as_ref(), "-ttar".as_ref()]].concat()).stdin(pipe).output().map_err(|e| code(&e))?;
+        let _ = unpack.wait();
+        out
+    } else {
+        run(&exe, &[&list[..], &["--".as_ref(), path.as_ref()]].concat())?
+    };
     if !out.status.success() {
         return Err(failure(&out));
     }
@@ -212,7 +230,10 @@ pub fn list_other(path: &str, limit: usize) -> Result<(Vec<Listed>, usize), Stri
         match key {
             "Path" => {
                 flush(&mut cur);
-                cur = Some((value.replace('\\', "/"), 0, false));
+                // Tars made from "." name everything "./…" and include "." itself.
+                let name = value.replace('\\', "/");
+                let name = name.strip_prefix("./").unwrap_or(&name);
+                cur = (!name.is_empty() && name != ".").then(|| (name.to_string(), 0, false));
             }
             "Size" => {
                 if let Some(c) = cur.as_mut() {
@@ -323,6 +344,10 @@ mod tests {
         assert_eq!(total, 3);
         assert!(entries.contains(&("讀我.txt".into(), 5, false)));
         assert!(entries.contains(&("資料夾".into(), 0, true)));
+        assert!(entries.contains(&("資料夾/b.txt".into(), "世界".len() as u64, false)));
+
+        let (entries, total) = list_other(&tgz.to_string_lossy(), 2000).unwrap();
+        assert_eq!(total, 3, "{entries:?}");
         assert!(entries.contains(&("資料夾/b.txt".into(), "世界".len() as u64, false)));
 
         let out = PathBuf::from(extract(&a7z.to_string_lossy()).unwrap());

@@ -203,6 +203,8 @@ fn xlsx(path: &str) -> Result<Preview, String> {
         }
     }
 
+    let dates = date_styles(&mut z);
+    let mut date1904 = false;
     let mut sheets = Vec::new();
     if let Some(xml) = read_member(&mut z, "xl/workbook.xml") {
         let mut r = Reader::from_str(&xml);
@@ -210,6 +212,9 @@ fn xlsx(path: &str) -> Result<Preview, String> {
             match r.read_event() {
                 Ok(Event::Empty(e)) | Ok(Event::Start(e)) if local(e.name().as_ref()) == b"sheet" => {
                     sheets.push(attr(&e, b"name").unwrap_or_default());
+                }
+                Ok(Event::Empty(e)) | Ok(Event::Start(e)) if local(e.name().as_ref()) == b"workbookPr" => {
+                    date1904 = matches!(attr(&e, b"date1904").as_deref(), Some("1" | "true"));
                 }
                 Ok(Event::Eof) | Err(_) => break,
                 _ => {}
@@ -229,6 +234,7 @@ fn xlsx(path: &str) -> Result<Preview, String> {
     let mut rows: Vec<Vec<String>> = Vec::new();
     let mut row: Vec<String> = Vec::new();
     let (mut col, mut kind, mut val, mut in_v) = (0usize, String::new(), String::new(), false);
+    let mut is_date = false;
     let mut truncated = false;
     loop {
         match r.read_event() {
@@ -237,6 +243,7 @@ fn xlsx(path: &str) -> Result<Preview, String> {
                 b"c" => {
                     col = attr(&e, b"r").map(|s| col_index(&s)).unwrap_or(row.len());
                     kind = attr(&e, b"t").unwrap_or_default();
+                    is_date = attr(&e, b"s").and_then(|i| i.parse::<usize>().ok()).is_some_and(|i| dates.get(i) == Some(&true));
                     val.clear();
                 }
                 b"v" | b"t" => in_v = true,
@@ -250,6 +257,7 @@ fn xlsx(path: &str) -> Result<Preview, String> {
                         let text = match kind.as_str() {
                             "s" => val.trim().parse::<usize>().ok().and_then(|i| shared.get(i).cloned()).unwrap_or_default(),
                             "b" => if val == "1" { "TRUE".into() } else { "FALSE".into() },
+                            "" | "n" if is_date => val.trim().parse::<f64>().ok().map(|v| excel_date(v, date1904)).unwrap_or_else(|| val.clone()),
                             _ => val.clone(),
                         };
                         if row.len() <= col {
@@ -446,6 +454,78 @@ fn doc_paragraphs(text: &[u16]) -> (Vec<Paragraph>, bool) {
     (paragraphs, false)
 }
 
+/// For each cell style (xl/styles.xml cellXfs), whether its number format is a date or time.
+fn date_styles(z: &mut Zip) -> Vec<bool> {
+    let Some(xml) = read_member(z, "xl/styles.xml") else { return Vec::new() };
+    let mut custom = std::collections::HashMap::new();
+    let mut xfs = Vec::new();
+    let mut in_xfs = false;
+    let mut r = Reader::from_str(&xml);
+    loop {
+        match r.read_event() {
+            Ok(Event::Start(e)) if local(e.name().as_ref()) == b"cellXfs" => in_xfs = true,
+            Ok(Event::End(e)) if local(e.name().as_ref()) == b"cellXfs" => in_xfs = false,
+            Ok(Event::Empty(e)) | Ok(Event::Start(e)) => match local(e.name().as_ref()) {
+                b"numFmt" => {
+                    if let (Some(id), Some(code)) = (attr(&e, b"numFmtId"), attr(&e, b"formatCode")) {
+                        custom.insert(id, code);
+                    }
+                }
+                b"xf" if in_xfs => xfs.push(attr(&e, b"numFmtId").unwrap_or_default()),
+                _ => {}
+            },
+            Ok(Event::Eof) | Err(_) => break,
+            _ => {}
+        }
+    }
+    xfs.iter()
+        .map(|id| match id.parse::<u32>() {
+            // Excel's built-in date and time formats, including the East Asian ones.
+            Ok(14..=22 | 27..=36 | 45..=47 | 50..=58) => true,
+            _ => custom.get(id).is_some_and(|c| is_date_format(c)),
+        })
+        .collect()
+}
+
+/// A custom number format that shows a date or time ("yyyy/mm/dd", "上午/下午 h:mm"…).
+fn is_date_format(code: &str) -> bool {
+    let (mut plain, mut quoted, mut bracket, mut escaped) = (String::new(), false, false, false);
+    for c in code.chars() {
+        match c {
+            _ if escaped => escaped = false,
+            '\\' => escaped = true,
+            '"' => quoted = !quoted,
+            '[' if !quoted => bracket = true,
+            ']' if !quoted => bracket = false,
+            _ if quoted || bracket => {}
+            _ => plain.push(c.to_ascii_lowercase()),
+        }
+    }
+    let first = plain.split(';').next().unwrap_or("");
+    first != "general" && first.chars().any(|c| matches!(c, 'y' | 'm' | 'd' | 'h' | 's'))
+}
+
+/// An Excel date serial as "2025/01/15" (with " 09:30" when it has a time of day).
+fn excel_date(serial: f64, date1904: bool) -> String {
+    let days = serial.floor() as i64 + if date1904 { -24107 } else { -25569 }; // days since 1970-01-01
+    // Howard Hinnant's civil_from_days.
+    let z = days + 719468;
+    let era = z.div_euclid(146097);
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    let secs = ((serial - serial.floor()) * 86400.0).round() as i64;
+    if secs == 0 || secs >= 86400 {
+        format!("{y}/{m:02}/{d:02}")
+    } else {
+        format!("{y}/{m:02}/{d:02} {:02}:{:02}", secs / 3600, secs % 3600 / 60)
+    }
+}
+
 fn archive(path: &str) -> Result<Preview, String> {
     let mut z = open_zip(path)?;
     let total = z.len();
@@ -512,6 +592,22 @@ mod tests {
         assert_eq!(rows[0], vec!["品名", "", "備註"]);
         assert_eq!(rows[1], vec!["蘋果", "3.5"]);
         assert_eq!(col_index("AB7"), 27);
+
+        // Dates: a built-in format (14), a custom one, and a plain number next to them.
+        let styles = r##"<styleSheet><numFmts><numFmt numFmtId="164" formatCode="yyyy&quot;年&quot;m&quot;月&quot;d&quot;日&quot; h:mm"/>
+            <numFmt numFmtId="165" formatCode="#,##0.00&quot;元&quot;"/></numFmts>
+            <cellStyleXfs><xf numFmtId="14"/></cellStyleXfs>
+            <cellXfs><xf numFmtId="0"/><xf numFmtId="14"/><xf numFmtId="164"/><xf numFmtId="165"/></cellXfs></styleSheet>"##;
+        let sheet = r#"<worksheet><sheetData><row r="1">
+            <c r="A1" s="1"><v>45672</v></c><c r="B1" s="2"><v>45672.5</v></c><c r="C1" s="3"><v>45672</v></c><c r="D1"><v>45672</v></c>
+        </row></sheetData></worksheet>"#;
+        let p = make_zip("e.xlsx", &[("xl/styles.xml", styles), ("xl/workbook.xml", wb), ("xl/worksheets/sheet1.xml", sheet)]);
+        let Preview::Sheet { rows, .. } = preview(&p).unwrap() else { panic!() };
+        assert_eq!(rows[0], vec!["2025/01/15", "2025/01/15 12:00", "45672", "45672"]);
+        assert_eq!(excel_date(1462.0, true), "1908/01/02");
+        assert_eq!(excel_date(61.0, false), "1900/03/01");
+        assert!(!is_date_format("0.00E+00") && !is_date_format("General") && !is_date_format("[Red]#,##0"));
+        assert!(is_date_format("[$-404]e/m/d") && is_date_format("上午/下午 h\\:mm") && is_date_format("mm:ss"));
     }
 
     fn make_cfb(name: &str, streams: &[(&str, &[u8])]) -> String {

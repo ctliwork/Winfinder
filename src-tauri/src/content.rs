@@ -60,3 +60,18 @@ pub fn search(root: &str, query: &str, filter: &Filter) -> Result<ContentResult,
 pub fn search(_root: &str, _query: &str, _filter: &Filter) -> Result<ContentResult, String> {
     Err("UNSUPPORTED".into())
 }
+
+#[cfg(all(test, windows))]
+mod tests {
+    /// Indexed or not, a folder can be asked; a missing one is an error, not a crash.
+    #[test]
+    fn asks_the_index() {
+        let d = std::env::temp_dir().join(format!("finder-content-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("note.txt"), "zebra quartz").unwrap();
+        let r = super::search(&d.to_string_lossy(), "zebra", &Default::default()).unwrap();
+        assert!(r.entries.len() <= 1);
+        assert!(super::search(&d.join("missing").to_string_lossy(), "zebra", &Default::default()).is_err());
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+}

@@ -718,6 +718,30 @@ fn set_run_at_login(on: bool) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(all(test, windows))]
+mod tests {
+    /// The sign-in entry is written with --background and removed again.
+    #[test]
+    fn run_at_login_round_trip() {
+        let read = || {
+            let out = std::process::Command::new("reg")
+                .args(["query", r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run", "/v", "Finder for Windows"])
+                .output()
+                .unwrap();
+            out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+        };
+        if read().is_some() {
+            return; // this PC uses the setting: leave it alone
+        }
+        super::set_run_at_login(true).unwrap();
+        let value = read().expect("value written");
+        assert!(value.contains("--background"), "{value}");
+        assert!(value.contains(".exe\""), "{value}");
+        super::set_run_at_login(false).unwrap();
+        assert!(read().is_none());
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
