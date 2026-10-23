@@ -1287,6 +1287,7 @@
   // preview (prevhost keeps it hidden until then), that is laid over it. If
   // the handler fails, the built-in one is already there.
   async function fillPreview(media, e) {
+    prefetchAround(e);
     const wanted = nativeWanted(e) && await nativeAvailable(e.ext);
     if (!media.isConnected) return;
     window.Preview.fill(media, e, { helpers: previewHelpers });
@@ -1317,6 +1318,17 @@
       if (await nativeAvailable(ext)) exts.push(ext);
     }
     if (exts.length) api.previewWarm(exts);
+  }
+  // While one file is looked at, the ones before and after it get their
+  // previews ready, so the arrow keys show them at once.
+  let prefetchTimer = 0;
+  function prefetchAround(e) {
+    clearTimeout(prefetchTimer);
+    prefetchTimer = setTimeout(() => {
+      const list = (inColumnsMode() ? state.colLists[state.colActive] : state.entries) || [];
+      const i = list.findIndex((x) => x.path === e.path);
+      if (i >= 0) for (const k of [i + 1, i - 1]) window.Preview.prefetch(list[k], previewHelpers);
+    }, 150);
   }
   function nativeHide() {
     if (!native.el) return;
@@ -1405,7 +1417,7 @@
       strip.innerHTML = items.map((_, i) => tile(i)).join('');
     }
     if (kept) $('.g-stage', view).replaceWith(kept);
-    else if (!cur.isDir) window.Preview.fill($('.g-media', view), cur, { helpers: previewHelpers });
+    else if (!cur.isDir) { window.Preview.fill($('.g-media', view), cur, { helpers: previewHelpers }); prefetchAround(cur); }
     fillShellIcons(view);
     $('.g-item.sel', view)?.scrollIntoView({ block: 'nearest', inline: 'center' });
   }
@@ -3249,6 +3261,7 @@
     async show(e) {
       this.current = e;
       $('#ql-title').textContent = e.name;
+      prefetchAround(e);
       await window.Preview.fill($('#ql-body'), e, { autoplay: true, helpers: previewHelpers });
     },
     close() {

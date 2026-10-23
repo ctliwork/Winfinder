@@ -121,6 +121,42 @@
     return null;
   }
 
+  // ---------- loading, remembered ----------
+  // The slower lookups for the files looked at last and the ones next to them
+  // (see prefetch), so stepping back and forth through a folder is instant.
+  const memo = new Map();
+  function once(kind, e, load) {
+    const key = `${kind}|${e.path}|${e.mtime}|${e.size}`;
+    let p = memo.get(key);
+    if (!p) {
+      p = load().catch(() => null);
+      memo.set(key, p);
+      if (memo.size > 60) memo.delete(memo.keys().next().value);
+    }
+    return p;
+  }
+  // Big photos (phone and camera pictures) take a while to read and decode;
+  // Windows usually has a thumbnail cached, which is shown first.
+  const BIG_IMAGE = 1.5e6;
+  const bigPhoto = (e) => WEB_IMAGES.has(e.ext) && (e.size || 0) >= BIG_IMAGE && e.ext !== 'gif' && e.ext !== 'svg';
+  const decoded = (e, url) => once('full', e, () => { const img = new Image(); img.src = url; return img.decode().then(() => url); });
+  const richOf = (e) => once('rich', e, () => api.richPreview(e.path));
+  const textOf = (e) => once('text', e, () => api.readText(e.path));
+  const thumbOf = (e) => once('thumb', e, () => api.thumb(e.path, 1024));
+  const isTexty = (e) => MARKDOWN.has(e.ext) || DELIMITED[e.ext] || ['text', 'code', 'other'].includes(I.category(e.ext));
+
+  // Gets a file's preview ready without showing it (the neighbours of the one shown).
+  function prefetch(e, h) {
+    if (!e || e.isDir) return;
+    const cat = I.category(e.ext);
+    if (bigPhoto(e)) { thumbOf(e); decoded(e, h.fileUrl(e.path)); return; }
+    if (WEB_IMAGES.has(e.ext)) { new Image().src = h.fileUrl(e.path); return; }
+    if (cat === 'video' || cat === 'audio' || e.ext === 'pdf') return;
+    if (RICH.has(e.ext) && api.richPreview) { richOf(e); return; }
+    if (isTexty(e)) { if ((e.size || 0) < 50e6) textOf(e); return; }
+    if (!(h.icon?.(e) && !h.canThumb(e))) thumbOf(e);
+  }
+
   function infoCard(e, h, extra = '') {
     return `<div class="ql-info">${h.icon?.(e) || (e.isDir ? I.folder(h.badge(e.path)) : I.file(e.ext))}
       <div class="pv-name">${esc(e.name)}</div>
@@ -141,6 +177,20 @@
       return;
     }
     const url = h.fileUrl(e.path);
+    if (bigPhoto(e)) {
+      // Whichever is ready first, Windows' thumbnail or the photo itself; then the photo in its place.
+      const full = decoded(e, url);
+      const quick = await Promise.race([full, thumbOf(e)]);
+      if (!alive()) return;
+      set(`<img src="${quick || url}" draggable="false">`, 'media');
+      if (quick && quick !== url) {
+        full.then((u) => {
+          const img = el.querySelector(':scope > img');
+          if (u && alive() && img) img.src = u;
+        });
+      }
+      return;
+    }
     if (WEB_IMAGES.has(e.ext)) return set(`<img src="${url}" draggable="false">`, 'media');
     if (cat === 'video' && PLAYABLE_VIDEO.has(e.ext)) {
       return set(`<video src="${url}" controls ${autoplay ? 'autoplay' : 'muted'} playsinline></video>`, 'media');
@@ -151,17 +201,16 @@
     if (e.ext === 'pdf') return set(`<iframe src="${url}"></iframe>`, 'frame');
 
     if (RICH.has(e.ext) && api.richPreview) {
-      const r = await api.richPreview(e.path).catch(() => null);
+      const r = await richOf(e);
       if (!alive()) return;
       const html = r && rich(r, h);
       if (html) return set(html, 'doc');
     }
 
-    const texty = MARKDOWN.has(e.ext) || DELIMITED[e.ext] || ['text', 'code', 'other'].includes(cat);
-    if (texty && (e.size || 0) < 50e6) {
-      const res = await api.readText(e.path);
+    if (isTexty(e) && (e.size || 0) < 50e6) {
+      const res = await textOf(e);
       if (!alive()) return;
-      if (res.text != null) {
+      if (res?.text != null) {
         if (MARKDOWN.has(e.ext)) return set(markdown(res.text), 'doc');
         if (DELIMITED[e.ext]) return set(table(parseDelimited(res.text, DELIMITED[e.ext]), { note: res.truncated ? '只顯示檔案開頭部分' : '' }), 'doc');
         return set(textBlock(res.text, res.truncated), 'doc');
@@ -171,7 +220,7 @@
     // Windows renders thumbnails for Office, PSD, HEIC and other formats.
     // With Windows icons on, other files (apps, shortcuts...) show their icon.
     if (h.icon?.(e) && !h.canThumb(e)) return set(infoCard(e, h), 'info');
-    const thumb = await api.thumb(e.path, 1024);
+    const thumb = await thumbOf(e);
     if (!alive()) return;
     set(thumb ? `<img src="${thumb}" draggable="false">` : infoCard(e, h), thumb ? 'media' : 'info');
   }
@@ -258,5 +307,5 @@
     });
   }
 
-  window.Preview = { fill, markdown, parseDelimited };
+  window.Preview = { fill, prefetch, markdown, parseDelimited };
 })();
