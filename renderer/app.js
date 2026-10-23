@@ -765,6 +765,18 @@
   }
 
   // Render big folders in slices so the first screen appears immediately.
+  // OneDrive (cloud files) status next to the name, with Explorer's icons and wording.
+  const CLOUD = {
+    online: { label: '僅在線上提供', svg: '<path d="M4.6 12.5h7a2.9 2.9 0 0 0 .4-5.8 4.1 4.1 0 0 0-7.9-.6 3.2 3.2 0 0 0 .5 6.4z" fill="none" stroke="currentColor" stroke-width="1.3"/>' },
+    local: { label: '可在此裝置上使用', svg: '<circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M5.3 8.2l1.8 1.8 3.6-3.8" fill="none" stroke="currentColor" stroke-width="1.4"/>' },
+    pinned: { label: '一律在此裝置上提供', svg: '<circle cx="8" cy="8" r="6.6" fill="currentColor"/><path d="M5.3 8.2l1.8 1.8 3.6-3.8" fill="none" stroke="#fff" stroke-width="1.5"/>' },
+    downloading: { label: '正在同步', svg: '<path d="M12.6 6.5A4.8 4.8 0 0 0 3.7 5.6M3.4 9.5a4.8 4.8 0 0 0 8.9.9" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M3.2 3.2v2.9h2.9M12.8 12.8V9.9H9.9" fill="none" stroke="currentColor" stroke-width="1.3"/>' },
+  };
+  function cloudBadge(e) {
+    const c = e.cloud && CLOUD[e.cloud];
+    return c ? `<svg class="cloud ${e.cloud}" viewBox="0 0 16 16"><title>${c.label}</title>${c.svg}</svg>` : '';
+  }
+
   function renderRows(container, items, rowFn, prefix = '') {
     const first = 600;
     container.innerHTML = prefix + items.slice(0, first).map(rowFn).join('');
@@ -804,7 +816,7 @@
       renderRows(view, items, (e, i) => `${groupHead(items, i, counts, 'ggroup')}
         <div class="gi item${state.sel.has(e.path) ? ' sel' : ''}${cut.has(e.path) ? ' cut' : ''}" data-i="${i}" style="--i:${Math.min(i, 40)}" draggable="true">
           <div class="thumb">${iconHtml(e, prefs.icon)}</div>
-          <div class="label">${esc(shownName(e))}</div>
+          <div class="label">${esc(shownName(e))}${cloudBadge(e)}</div>
         </div>`);
     } else if (mode === 'list') {
       view.className = 'list';
@@ -816,7 +828,7 @@
       const counts = groupCounts(items);
       renderRows(view, items, (e, i) => `${groupHead(items, i, counts, 'lgroup')}
         <div class="lrow item${state.sel.has(e.path) ? ' sel' : ''}${cut.has(e.path) ? ' cut' : ''}" data-i="${i}" draggable="true">
-          <div class="name">${iconHtml(e, 40)}<span class="nm">${esc(shownName(e))}</span></div>
+          <div class="name">${iconHtml(e, 40)}<span class="nm">${esc(shownName(e))}</span>${cloudBadge(e)}</div>
           ${cols.map((k) => `<div>${LIST_COLS[k].cell(e)}</div>`).join('')}
         </div>`, header);
     } else if (mode === 'gallery') {
@@ -862,7 +874,7 @@
       });
       // Thumbnails are left out of the key so a late-loading thumbnail
       // doesn't force the column to be rebuilt.
-      const rowsKey = `${j}|${list.map((e) => `${e.path}|${e.mtime}|${e.isDir}`).join('\n')}`;
+      const rowsKey = `${j}|${list.map((e) => `${e.path}|${e.mtime}|${e.isDir}|${e.cloud || ''}`).join('\n')}`;
       let w = wraps[j];
       if (w && norm(w.dataset.dir) !== norm(dir)) { wraps.slice(j).forEach((x) => x.remove()); wraps.length = j; w = null; }
       if (!w) {
@@ -878,7 +890,7 @@
       if (col._rows !== rowsKey) {
         const top = col.scrollTop;
         col.innerHTML = list.map((e, i) => `<div class="${classes[i]}" data-col="${j}" data-i="${i}" draggable="true">
-          ${iconHtml(e, 36)}<span class="nm">${esc(shownName(e))}</span>
+          ${iconHtml(e, 36)}<span class="nm">${esc(shownName(e))}</span>${cloudBadge(e)}
           ${e.isDir ? '<svg class="chev" viewBox="0 0 10 10"><path d="M3.5 2l3 3-3 3"/></svg>' : ''}
         </div>`).join('');
         col._rows = rowsKey;
@@ -1040,6 +1052,7 @@
         <div><span>建立日期</span><span>${fmtDate(e.birth)}</span></div>
         <div><span>修改日期</span><span>${fmtDate(e.mtime)}</span></div>
         ${e.isDir ? '' : `<div><span>大小</span><span>${e.size?.toLocaleString() ?? '--'} 位元組</span></div>`}
+        ${CLOUD[e.cloud] ? `<div><span>狀態</span><span>${CLOUD[e.cloud].label}</span></div>` : ''}
       </div>`;
   }
 
@@ -1177,7 +1190,7 @@
         <div class="bar"><i style="width:0%"></i></div><small class="space">&nbsp;</small></div></div>`).join('');
     const rec = recent.map((e) => `
       <div class="lrow item${sel(e)}${cut.has(e.path) ? ' cut' : ''}" data-i="${at(e)}" draggable="true">
-        <div class="name">${iconHtml(e, 40)}<span class="nm">${esc(shownName(e))}</span></div>
+        <div class="name">${iconHtml(e, 40)}<span class="nm">${esc(shownName(e))}</span>${cloudBadge(e)}</div>
         <div>${fmtDate(e.mtime)}</div><div>${esc(P.dirname(e.path))}</div></div>`).join('');
     view.innerHTML =
       sec('pinned', '快速存取', pinned.length ? `<div class="qa-grid">${qa}</div>` : '<div class="h-empty">沒有釘選的資料夾</div>') +
@@ -2126,6 +2139,7 @@
       ...(one?.ext === 'zip' && api.extract ? [{ label: `解壓縮到「${P.basename(one.path).replace(/\.zip$/i, '')}」`, action: () => extractZip(one) }] : []),
       ...(one?.isDir && !isVirtual(one) && api.dirSize ? [{ label: '計算大小', action: () => calcSize(one) }] : []),
       ...(one?.isDir && !isVirtual(one) && api.openTerminal ? [{ label: '在終端機中開啟', action: () => openTerminal(one.path) }] : []),
+      ...cloudItems(entries),
       '-',
       ...(one?.isDir && one.kind !== 'drive' ? [{ label: isFav ? '從快速存取取消釘選' : '釘選到快速存取', action: () => toggleFavorite(one.path) }] : []),
       ...(one?.ext === 'lnk' && api.resolveLink ? [{ label: '顯示原始項目', action: () => showOriginal(one) }] : []),
@@ -2136,6 +2150,20 @@
         { label: '內容', kbd: 'Alt+Enter', disabled: virt, action: () => showProperties(entries.map((e) => e.path)) },
         { label: '顯示更多選項', kbd: 'Shift+F10', disabled: virt, action: () => nativeMenu(entries) }] : []),
     ], x, y);
+  }
+
+  // OneDrive's two commands, as in Explorer's menu (which has them itself).
+  function cloudItems(entries) {
+    if (!api.cloudPin || !entries.some((e) => e.cloud)) return [];
+    const pinned = entries.every((e) => e.cloud === 'pinned');
+    return ['-',
+      { label: '一律保留在此裝置', check: pinned, action: () => setPinState(entries, pinned ? 'unspecified' : 'pinned') },
+      { label: '釋放空間', action: () => setPinState(entries, 'unpinned') }];
+  }
+  async function setPinState(entries, pinState) {
+    const failed = await api.cloudPin(entries.map((e) => e.path), pinState);
+    if (failed.length) toast(failed.length === 1 ? `無法變更「${P.basename(failed[0])}」的同步狀態` : `有 ${failed.length} 個項目無法變更同步狀態`);
+    refresh(true);
   }
 
   // Explorer's own context menu (7-Zip, VS Code, Git, OneDrive… entries).
@@ -2878,6 +2906,7 @@
           ['建立日期', e.birth ? fmtDate(e.birth) : null],
           ['修改日期', e.mtime ? fmtDate(e.mtime) : null],
           ['位置', isVirtual(e) ? null : P.dirname(e.path)],
+          ['狀態', CLOUD[e.cloud]?.label],
         ])}
         ${e.isDir && !isVirtual(e) && api.dirSize ? `<div class="pv-table"><div><span>大小</span><span>${dirSizes.has(norm(e.path))
           ? esc(`${fmtSize(dirSizes.get(norm(e.path)).size)}，${dirSizes.get(norm(e.path)).files.toLocaleString()} 個檔案`)

@@ -105,6 +105,7 @@
     restoreTrash: (paths) => invoke('restore_trash', { paths }).catch(() => paths),
     readText: (path) => invoke('read_text', { path }),
     richPreview: (path) => invoke('rich_preview', { path }),
+    cloudPin: (paths, state) => invoke('cloud_pin', { paths, state }).catch(() => paths),
     appVersion: () => T.app.getVersion(),
     saveTheme: (theme) => invoke('save_theme', { theme }).catch(() => {}),
     setUiScale: (scale) => invoke('set_ui_scale', { scale }).catch(() => {}),

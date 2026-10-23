@@ -441,6 +441,11 @@ body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-sel
 .crow .ico.folder { height: 15px; }
 .crow img { width: 18px; height: 18px; object-fit: cover; border-radius: 3px; }
 .crow .nm { overflow: hidden; text-overflow: ellipsis; flex: 1; }
+.cloud { width: 14px; height: 14px; flex: none; color: #2b7cd3; vertical-align: -2px; }
+.cloud.local, .cloud.pinned { color: #13a10e; }
+.gi .label .cloud { display: inline-block; margin-left: 3px; }
+#content:focus-within .lrow.sel .cloud, #content:focus-within .crow.sel .cloud, .gi.sel .label .cloud { color: #fff; }
+#content:focus-within .lrow.sel .cloud.pinned path, #content:focus-within .crow.sel .cloud.pinned path, .gi.sel .cloud.pinned path { stroke: var(--accent); }
 .crow .chev { width: 10px; opacity: 0.5; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; }
 .crow.path { background: var(--sel-muted); }
 .crow.sel { background: var(--accent); color: #fff; }

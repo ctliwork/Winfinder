@@ -23,6 +23,9 @@ pub struct Entry {
     /// be opened). Shown only when that is asked for separately.
     pub system: bool,
     pub link: bool,
+    /// Cloud sync status (see cloud::state); absent outside synced folders.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cloud: Option<&'static str>,
 }
 
 /// Maps an io::Error to the short codes the UI understands.
@@ -104,6 +107,7 @@ pub fn entry_from(path: &Path, lmeta: Option<fs::Metadata>) -> Entry {
         hidden,
         system,
         link,
+        cloud: crate::cloud::state(a, is_dir),
     }
 }
 
@@ -119,11 +123,16 @@ pub fn list(dir: &str) -> Result<Vec<Entry>, String> {
             (de.path(), meta, cheap)
         })
         .collect();
+    let synced = crate::cloud::in_sync_root(dir);
     Ok(items
         .into_par_iter()
         .map(|(p, meta, cheap)| {
             let meta = if cheap { meta } else { fs::symlink_metadata(&p).ok() };
-            entry_from(&p, meta)
+            let mut e = entry_from(&p, meta);
+            if synced && e.cloud.is_none() && !e.is_dir {
+                e.cloud = Some("local");
+            }
+            e
         })
         .collect())
 }

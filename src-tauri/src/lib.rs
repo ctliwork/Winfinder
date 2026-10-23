@@ -1,4 +1,5 @@
 mod archive;
+mod cloud;
 #[doc(hidden)]
 pub mod fsops;
 mod places;
@@ -39,6 +40,12 @@ async fn pin_home(path: String, pin: bool) -> Result<(), String> {
 #[tauri::command]
 async fn list_dir(dir: String) -> Result<Vec<fsops::Entry>, String> {
     blocking(move || fsops::list(&dir)).await?
+}
+
+/// "Always keep on this device" / "Free up space" (see cloud::set_pin_state); returns the paths that failed.
+#[tauri::command]
+async fn cloud_pin(paths: Vec<String>, state: String) -> Result<Vec<String>, String> {
+    blocking(move || cloud::set_pin_state(&paths, &state)).await
 }
 
 /// Folder listings read ahead before a drag (see fsops::list_many).
@@ -606,7 +613,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            places, pin_home, list_dir, list_many, new_file, dir_size, cancel_dir_sizes, compress, extract, open_terminal, native_menu, properties,
+            places, pin_home, list_dir, list_many, cloud_pin, new_file, dir_size, cancel_dir_sizes, compress, extract, open_terminal, native_menu, properties,
             clipboard_write, clipboard_read, clipboard_clear, save_theme, set_ui_scale, preview_available, preview_show, preview_move, preview_hide, cancel_transfer, restore_trash,
             everything_available, everything, disk_free, disk_space, recent_files, resolve_link, folder_count, thumbnail, open_path, reveal, trash, rename, mkdir,
             transfer, read_text, rich_preview, search, watch, check_update, install_update
