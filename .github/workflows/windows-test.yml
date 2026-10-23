@@ -1,0 +1,46 @@
+name: Windows test
+
+# Manual only (Actions tab → Windows test → Run workflow): the Rust tests on
+# Windows, then the real app end to end (tests/windows-e2e.mjs). The report
+# and desktop screenshots are in the run's "e2e" artifact.
+on:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci
+
+      - name: Rust tests on Windows
+        working-directory: src-tauri
+        run: cargo test
+
+      - name: Build the app (debug)
+        run: npx tauri build --debug --no-bundle
+
+      - name: Test files
+        run: |
+          pip install python-docx python-pptx openpyxl fpdf2 pillow
+          python tests/make_fixtures.py e2e-files
+
+      - name: End to end
+        run: |
+          npm install --no-save playwright-core@1.58.2
+          node tests/windows-e2e.mjs e2e-files
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e
+          path: e2e-out

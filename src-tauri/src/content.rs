@@ -18,8 +18,16 @@ pub struct ContentResult {
 #[cfg(windows)]
 const LIMIT: usize = 500;
 
+/// Runs on a thread of its own: the shared blocking threads also host the
+/// single-threaded COM work (thumbnails, shell), and the two kinds can't mix.
 #[cfg(windows)]
 pub fn search(root: &str, query: &str, filter: &Filter) -> Result<ContentResult, String> {
+    let (root, query, filter) = (root.to_string(), query.to_string(), filter.clone());
+    std::thread::spawn(move || query_index(&root, &query, &filter)).join().map_err(|_| "INVALID".to_string())?
+}
+
+#[cfg(windows)]
+fn query_index(root: &str, query: &str, filter: &Filter) -> Result<ContentResult, String> {
     use crate::fsops::entry_from;
     use windows::core::HSTRING;
     use windows::Storage::Search::{FolderDepth, IndexedState, IndexerOption, QueryOptions};

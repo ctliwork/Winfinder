@@ -704,6 +704,9 @@ fn set_run_at_login(on: bool) -> Result<(), String> {
         const RUN: windows::core::PCWSTR = w!("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
         const NAME: windows::core::PCWSTR = w!("Finder for Windows");
         if on {
+            // Turned off in Task Manager's startup apps earlier: that choice is kept
+            // there and would win, so asking for it here clears it.
+            let _ = unsafe { RegDeleteKeyValueW(HKEY_CURRENT_USER, w!("Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run"), NAME) };
             let exe = std::env::current_exe().map_err(|e| e.to_string())?;
             let cmd: Vec<u16> = format!("\"{}\" {BACKGROUND_ARG}", exe.display()).encode_utf16().chain(Some(0)).collect();
             let r = unsafe { RegSetKeyValueW(HKEY_CURRENT_USER, RUN, NAME, REG_SZ.0, Some(cmd.as_ptr() as _), (cmd.len() * 2) as u32) };

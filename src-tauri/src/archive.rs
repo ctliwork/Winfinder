@@ -162,6 +162,9 @@ fn reg_7zip_dir() -> Option<PathBuf> {
     None
 }
 
+/// Given for every archive, so an encrypted one fails with "Wrong password" instead of asking.
+const NO_PASSWORD: &str = "-pfinder-win-no-password";
+
 /// A tool without a console window, with no input (so a password prompt fails instead of waiting).
 fn tool(exe: &Path, args: &[&std::ffi::OsStr]) -> std::process::Command {
     let mut cmd = std::process::Command::new(exe);
@@ -196,7 +199,7 @@ pub type Listed = (String, u64, bool);
 /// The archive's entries, at most `limit`, and how many there are.
 pub fn list_other(path: &str, limit: usize) -> Result<(Vec<Listed>, usize), String> {
     let exe = seven_zip().ok_or("NO_7ZIP")?;
-    let list: [&std::ffi::OsStr; 4] = ["l".as_ref(), "-slt".as_ref(), "-ba".as_ref(), "-sccUTF-8".as_ref()];
+    let list: [&std::ffi::OsStr; 5] = ["l".as_ref(), "-slt".as_ref(), "-ba".as_ref(), "-sccUTF-8".as_ref(), NO_PASSWORD.as_ref()];
     let out = if is_tarball(path) && ext_of(path) != "tar" {
         // 7-Zip opens one layer at a time: unpack the .gz (or .xz…) to a pipe and list the tar in it.
         let mut unpack = tool(&exe, &["x".as_ref(), "-so".as_ref(), "--".as_ref(), path.as_ref()])
@@ -279,12 +282,17 @@ fn extract_other(archive: &str) -> Result<String, String> {
     for (exe, is_tar) in tools {
         fs::create_dir(&target).map_err(|e| code(&e))?;
         let out = if is_tar {
-            run(&exe, &["-xf".as_ref(), archive.as_ref(), "-C".as_ref(), target.as_os_str()])?
+            // The archive on stdin and the folder as the working directory, so no
+            // path goes through tar.exe's arguments (which may not take every name).
+            let file = fs::File::open(src).map_err(|e| code(&e))?;
+            tool(&exe, &["-xf".as_ref(), "-".as_ref()]).stdin(file).current_dir(&target).output().map_err(|e| code(&e))?
         } else {
             let to = format!("-o{}", target.display());
-            run(&exe, &["x".as_ref(), "-y".as_ref(), to.as_ref(), "--".as_ref(), archive.as_ref()])?
+            run(&exe, &["x".as_ref(), "-y".as_ref(), NO_PASSWORD.as_ref(), to.as_ref(), "--".as_ref(), archive.as_ref()])?
         };
-        if out.status.success() {
+        // 7-Zip's 1 means warnings (some files skipped) with the rest extracted.
+        let warned = !is_tar && out.status.code() == Some(1) && fs::read_dir(&target).is_ok_and(|mut d| d.next().is_some());
+        if out.status.success() || warned {
             return Ok(target.to_string_lossy().into_owned());
         }
         last = failure(&out);
@@ -356,6 +364,15 @@ mod tests {
         let out = PathBuf::from(extract(&tgz.to_string_lossy()).unwrap());
         assert!(out.ends_with("b"));
         assert_eq!(fs::read_to_string(out.join("讀我.txt")).unwrap(), "hello");
+
+        // Encrypted (names too, and names only): reported as such, nothing left behind.
+        for (name, flags) in [("locked.7z", vec!["-psecret", "-mhe=on"]), ("locked-data.7z", vec!["-psecret"])] {
+            let p = d.join(name);
+            assert!(std::process::Command::new(&seven).arg("a").args(&flags).arg(&p).arg(".").current_dir(&src).output().unwrap().status.success());
+            assert_eq!(extract(&p.to_string_lossy()), Err("PASSWORD".to_string()), "{name}");
+            assert!(!d.join(name.trim_end_matches(".7z")).exists());
+        }
+        assert_eq!(list_other(&d.join("locked.7z").to_string_lossy(), 10).map(|r| r.1), Err("PASSWORD".to_string()));
 
         fs::write(d.join("broken.7z"), "not an archive").unwrap();
         assert!(extract(&d.join("broken.7z").to_string_lossy()).is_err());

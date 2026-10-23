@@ -20,7 +20,7 @@ const SKIP_DIRS: &[&str] = &["node_modules", "$recycle.bin", "system volume info
 
 /// The search bar's type / size / date filters, applied while walking so the
 /// result limit counts only matches.
-#[derive(Deserialize, Default)]
+#[derive(Deserialize, Default, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Filter {
     /// Some(true): folders only.
