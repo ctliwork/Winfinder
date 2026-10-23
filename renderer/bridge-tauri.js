@@ -72,6 +72,7 @@
     diskFree: (path) => invoke('disk_free', { path }),
     diskSpace: (path) => invoke('disk_space', { path }),
     recentFiles: () => invoke('recent_files'),
+    resolveLink: (path) => invoke('resolve_link', { path }).catch(() => null),
     folderCount: (dir) => invoke('folder_count', { dir }),
     thumb: (path, size) => invoke('thumbnail', { path, size: Math.round(size) }).catch(() => null),
     nativeIcon: (path) => invoke('thumbnail', { path, size: 96 }).catch(() => null),

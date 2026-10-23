@@ -33,8 +33,9 @@ fn candidates() -> Vec<PathBuf> {
     links.into_iter().take(LIMIT * 4).filter_map(|(_, p)| lnk_target(&p)).collect()
 }
 
+/// Where a shortcut (.lnk) points, if it points at something local.
 #[cfg(windows)]
-fn lnk_target(link: &Path) -> Option<PathBuf> {
+pub fn lnk_target(link: &Path) -> Option<PathBuf> {
     // Malformed shortcuts must never take the app down.
     std::panic::catch_unwind(|| {
         let l = lnk::ShellLink::open(link, lnk::encoding::WINDOWS_1252).ok()?;
@@ -51,6 +52,21 @@ fn lnk_target(link: &Path) -> Option<PathBuf> {
     })
     .ok()
     .flatten()
+}
+
+/// What a shortcut points at, as an entry (None when it's broken).
+pub fn link_target(link: &str) -> Option<Entry> {
+    #[cfg(windows)]
+    {
+        let t = lnk_target(Path::new(link))?;
+        let meta = std::fs::symlink_metadata(&t).ok()?;
+        Some(entry_from(&t, Some(meta)))
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = link;
+        None
+    }
 }
 
 #[cfg(not(windows))]

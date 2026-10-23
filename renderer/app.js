@@ -1481,8 +1481,22 @@
   document.addEventListener('keydown', cancelSlowRename, true);
 
   // ---------- opening ----------
+  // A shortcut to a folder opens the folder here (like a Finder alias), not in Explorer.
+  async function linkTarget(e) {
+    return e && !e.isDir && e.ext === 'lnk' && api.resolveLink ? api.resolveLink(e.path) : null;
+  }
+  // Finder's 顯示原始項目: go to the folder holding the target and select it.
+  async function showOriginal(e) {
+    const t = await linkTarget(e);
+    if (!t) { toast(`找不到「${e.name}」指向的項目`); return; }
+    const dir = P.dirname(t.path);
+    await navigate(dir, { root: guessRoot(dir), select: t.path });
+  }
+
   async function openEntry(e) {
     if (!e) return;
+    const target = await linkTarget(e);
+    if (target?.isDir) { await navigate(target.path, { root: guessRoot(target.path) }); return; }
     if (e.isDir) {
       if (isVirtual(e)) await navigate(e.path, { root: e.path });
       else if (state.search.results || state.cwd === HOME) await navigate(e.path, { root: guessRoot(e.path) });
@@ -2112,6 +2126,7 @@
       ...(one?.isDir && !isVirtual(one) && api.openTerminal ? [{ label: '在終端機中開啟', action: () => openTerminal(one.path) }] : []),
       '-',
       ...(one?.isDir && one.kind !== 'drive' ? [{ label: isFav ? '從快速存取取消釘選' : '釘選到快速存取', action: () => toggleFavorite(one.path) }] : []),
+      ...(one?.ext === 'lnk' && api.resolveLink ? [{ label: '顯示原始項目', action: () => showOriginal(one) }] : []),
       { label: isWin ? '在檔案總管中顯示' : '在系統檔案管理員中顯示', action: () => api.reveal(entries[0].path) },
       '-',
       { label: '丟到資源回收筒', kbd: 'Delete', disabled: virt, action: trashSelected },
@@ -2142,6 +2157,7 @@
       entries.length > 1 && { label: `批次重新命名 ${entries.length} 個項目…`, action: () => batchRename(entries) },
       { label: '拷貝路徑', action: copyPath },
       one?.isDir && api.dirSize && { label: '計算大小', action: () => calcSize(one) },
+      one?.ext === 'lnk' && api.resolveLink && { label: '顯示原始項目', action: () => showOriginal(one) },
     ];
   }
   function appItemsForBackground() {

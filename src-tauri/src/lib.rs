@@ -58,6 +58,11 @@ async fn disk_space(path: String) -> Option<places::Space> {
 }
 
 #[tauri::command]
+async fn resolve_link(path: String) -> Option<fsops::Entry> {
+    blocking(move || recent::link_target(&path)).await.ok().flatten()
+}
+
+#[tauri::command]
 async fn recent_files() -> Vec<fsops::Entry> {
     blocking(recent::recent_files).await.unwrap_or_default()
 }
@@ -603,7 +608,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             places, pin_home, list_dir, list_many, new_file, dir_size, cancel_dir_sizes, compress, extract, open_terminal, native_menu, properties,
             clipboard_write, clipboard_read, clipboard_clear, save_theme, set_ui_scale, preview_available, preview_show, preview_move, preview_hide, cancel_transfer, restore_trash,
-            everything_available, everything, disk_free, disk_space, recent_files, folder_count, thumbnail, open_path, reveal, trash, rename, mkdir,
+            everything_available, everything, disk_free, disk_space, recent_files, resolve_link, folder_count, thumbnail, open_path, reveal, trash, rename, mkdir,
             transfer, read_text, rich_preview, search, watch, check_update, install_update
         ])
         .run(tauri::generate_context!())
