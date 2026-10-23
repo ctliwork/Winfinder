@@ -757,6 +757,13 @@ img.panning, video.panning { cursor: grabbing; transition: none; }
   border-radius: 10px;
 }
 .col-preview .cp-media[data-kind="doc"] { background: rgba(0, 0, 0, 0.025); }
+/* documents and PDFs get most of the column's height, so there is something to read */
+.col-preview .cp-media[data-kind="doc"], .col-preview .cp-media[data-kind="frame"] { height: max(260px, calc(100vh - 330px)); }
+/* gallery stage: the same previews, as large as the stage allows */
+.g-stage .g-media { width: 100%; height: 100%; max-width: 1100px; padding: 0; animation: heroIn 0.35s cubic-bezier(.2, .8, .2, 1); }
+.g-stage .g-media[data-kind="doc"] { background: rgba(0, 0, 0, 0.025); border-radius: 10px; padding: 10px; }
+.g-stage .g-media[data-kind="frame"] { padding: 0; }
+.g-stage .g-media .ql-info > .pv-name, .g-stage .g-media .ql-info > .pv-kind { display: none; }
 .col-preview { padding: 18px 20px 24px; }
 .cp-media .ql-info > .pv-name, .cp-media .ql-info > .pv-kind { display: none; } /* shown below the preview */
 

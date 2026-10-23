@@ -904,7 +904,6 @@
       if (shown) window.Preview.fill($('.cp-media', preview), shown, { helpers: previewHelpers });
       preview.classList.toggle('empty', !shown && !multi);
       fillShellIcons(preview);
-      fillPreviewArt();
     }
     for (const el of $$('.crow.sel, .crow.path', view)) {
       const col = el.parentElement;
@@ -1043,40 +1042,26 @@
       </div>`;
   }
 
-  async function fillPreviewArt() {
-    for (const art of $$('[data-art]', view)) {
-      const e = entryOf(art.dataset.art);
-      if (!e || e.isDir) continue;
-      const media = await mediaHtml(e, 440, false);
-      if (media && art.isConnected) art.innerHTML = media;
-    }
-  }
-
-  // Returns <img>/<video> markup for a rich preview, or null.
-  async function mediaHtml(e, px, controls) {
-    if (winIcons() && !canThumb(e)) return null; // keep the Windows icon
-    const cat = I.category(e.ext);
-    const url = P.fileUrl(e.path);
-    if (cat === 'video' && ['mp4', 'webm', 'm4v', 'mov', 'mkv'].includes(e.ext)) {
-      return `<video src="${url}" ${controls ? 'controls autoplay' : 'muted loop autoplay playsinline'}></video>`;
-    }
-    if (WEB_IMAGES.has(e.ext)) return `<img src="${url}" decoding="async" draggable="false">`;
-    const t = await api.thumb(e.path, px);
-    return t ? `<img src="${t}" draggable="false">` : null;
-  }
-
+  // Gallery (Finder): the selected item's full preview on the stage — PDFs,
+  // Word/Excel/PowerPoint, text, images, video — with the strip below. The
+  // stage is kept while the same file stays selected, so a refresh doesn't
+  // reload it (or lose a PDF's scroll position).
   function renderGallery() {
     const items = state.entries;
     let cur = selectedEntries()[0];
     if (!cur) { cur = items[0]; state.sel = new Set([cur.path]); state.focus = cur.path; state.anchor = cur.path; }
+    const key = `${cur.path}|${cur.mtime}|${cur.size}`;
+    const kept = view._gKey === key ? $('.g-stage', view) : null;
+    view._gKey = key;
     view.className = 'gallery';
     view.innerHTML = `
-      <div class="g-stage"><div class="hero" data-art="${esc(cur.path)}">${fileIco(cur, 128)}</div></div>
+      <div class="g-stage">${cur.isDir ? `<div class="hero">${fileIco(cur, 128)}</div>` : '<div class="cp-media g-media"></div>'}</div>
       <div class="g-caption"><b>${esc(shownName(cur))}</b><small>${esc(I.kindLabel(cur))}${cur.isDir ? '' : ` · ${fmtSize(cur.size)}`} · ${fmtDate(cur.mtime)}</small></div>
       <div class="g-strip">${items.map((e, i) => `
         <div class="g-item item${state.sel.has(e.path) ? ' sel' : ''}" data-i="${i}" draggable="true" title="${esc(e.name)}">${iconHtml(e, 64)}</div>`).join('')}
       </div>`;
-    fillPreviewArt();
+    if (kept) $('.g-stage', view).replaceWith(kept);
+    else if (!cur.isDir) window.Preview.fill($('.g-media', view), cur, { helpers: previewHelpers });
     fillShellIcons(view);
     $('.g-item.sel', view)?.scrollIntoView({ block: 'nearest', inline: 'center' });
   }
