@@ -1,7 +1,7 @@
-; The app was called "Finder for Windows" before. Installing WinFinder (also as an
-; update) quietly removes that install, so there aren't two. Settings stay: they
-; belong to the app's identifier, which didn't change, and a silent uninstall
-; never deletes app data.
+; The app was called "Finder for Windows" before. Installing Winfinder (also as an
+; update) quietly removes that install, so there aren't two. Settings stay: a
+; silent uninstall never deletes app data, and Winfinder moves it over from the
+; old folders when it first starts (see move_old_settings in lib.rs).
 !macro NSIS_HOOK_PREINSTALL
   ReadRegStr $0 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Finder for Windows" "UninstallString"
   StrCmp $0 "" +2

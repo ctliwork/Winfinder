@@ -544,7 +544,7 @@ mod tests {
     use std::io::Write;
 
     fn make_zip(name: &str, members: &[(&str, &str)]) -> String {
-        let path = std::env::temp_dir().join(format!("finder-win-prev-{}-{name}", std::process::id()));
+        let path = std::env::temp_dir().join(format!("winfinder-prev-{}-{name}", std::process::id()));
         let mut w = zip::ZipWriter::new(File::create(&path).unwrap());
         let opts = zip::write::SimpleFileOptions::default();
         for (n, body) in members {
@@ -611,7 +611,7 @@ mod tests {
     }
 
     fn make_cfb(name: &str, streams: &[(&str, &[u8])]) -> String {
-        let path = std::env::temp_dir().join(format!("finder-win-prev-{}-{name}", std::process::id()));
+        let path = std::env::temp_dir().join(format!("winfinder-prev-{}-{name}", std::process::id()));
         let mut cf = cfb::create(&path).unwrap();
         for (n, body) in streams {
             cf.create_stream(n).unwrap().write_all(body).unwrap();

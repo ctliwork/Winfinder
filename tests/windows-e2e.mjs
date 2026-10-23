@@ -12,7 +12,7 @@ import path from 'node:path';
 const FILES = path.resolve(process.argv[2] || 'e2e-files');
 const OUT = path.resolve('e2e-out');
 const DEBUG = path.resolve('src-tauri/target/debug');
-const EXE = path.join(DEBUG, fs.readdirSync(DEBUG).find((f) => /^(winfinder|finder-win)\.exe$/i.test(f)));
+const EXE = path.join(DEBUG, fs.readdirSync(DEBUG).find((f) => /^winfinder\.exe$/i.test(f)));
 const PROC = path.basename(EXE, '.exe');
 const PORT = 9222;
 const env = { ...process.env, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${PORT}` };
@@ -99,7 +99,7 @@ await step('start', async () => {
   launch([`--dir=${FILES}`]);
   ({ browser, page } = await connect());
   await page.evaluate(() => {
-    const k = 'finder-win:prefs';
+    const k = 'winfinder:prefs';
     const p = JSON.parse(localStorage.getItem(k) || '{}');
     Object.assign(p, { menuStyle: 'finder', view: 'columns', rememberView: false, colPreview: true, nativePreview: true, keepRunning: true });
     localStorage.setItem(k, JSON.stringify(p));
@@ -184,7 +184,7 @@ await step('open again', async () => {
 
 await step('quit', async () => {
   await page.click('#btn-more');
-  await page.locator('#menu >> text=結束 WinFinder').click();
+  await page.locator('#menu >> text=結束 Winfinder').click();
   await sleep(4000);
   return windows();
 });

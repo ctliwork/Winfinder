@@ -163,7 +163,7 @@ fn reg_7zip_dir() -> Option<PathBuf> {
 }
 
 /// Given for every archive, so an encrypted one fails with "Wrong password" instead of asking.
-const NO_PASSWORD: &str = "-pfinder-win-no-password";
+const NO_PASSWORD: &str = "-pwinfinder-no-password";
 
 /// A tool without a console window, with no input (so a password prompt fails instead of waiting).
 fn tool(exe: &Path, args: &[&std::ffi::OsStr]) -> std::process::Command {
@@ -191,6 +191,12 @@ fn failure(out: &std::process::Output) -> String {
     } else {
         line.to_string()
     }
+}
+
+/// Whether 7-Zip lists any entry of the archive as encrypted.
+fn encrypted(exe: &Path, archive: &str) -> bool {
+    run(exe, &["l".as_ref(), "-slt".as_ref(), "-ba".as_ref(), NO_PASSWORD.as_ref(), "--".as_ref(), archive.as_ref()])
+        .is_ok_and(|out| String::from_utf8_lossy(&out.stdout).lines().any(|l| l.trim() == "Encrypted = +"))
 }
 
 /// An archive entry: name (with "/"), size, is a folder.
@@ -304,6 +310,11 @@ fn extract_other(archive: &str) -> Result<String, String> {
             return Ok(target.to_string_lossy().into_owned());
         }
         last = failure(&out);
+        // A wrong password doesn't always say so: the garbage it decrypts to can also
+        // end early or run past the end, which 7-Zip reports without the hint.
+        if !is_tar && last != "PASSWORD" && encrypted(&exe, archive) {
+            last = "PASSWORD".into();
+        }
         let _ = fs::remove_dir_all(&target);
         if last == "PASSWORD" {
             break;

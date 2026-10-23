@@ -17,7 +17,7 @@
   const collator = new Intl.Collator('zh-Hant', { numeric: true, sensitivity: 'base' });
 
   // ---------- preferences ----------
-  const PREF_KEY = 'finder-win:prefs';
+  const PREF_KEY = 'winfinder:prefs';
   const prefs = Object.assign({
     view: 'columns', icon: 72, sidebarW: 220, showHidden: false,
     sort: { key: 'name', dir: 1 }, accent: '#0a84ff', favorites: [], sidebarHidden: false,
@@ -2556,7 +2556,7 @@
       { label: '重新整理', kbd: 'F5', action: () => refresh(true) },
       '-',
       { label: '設定…', kbd: 'Ctrl+,', action: () => openSettings() },
-      ...(api.quit && prefs.keepRunning ? [{ label: '結束 WinFinder', action: () => api.quit() }] : []),
+      ...(api.quit && prefs.keepRunning ? [{ label: '結束 Winfinder', action: () => api.quit() }] : []),
     ], r.right - 230, r.bottom + 6);
   });
 

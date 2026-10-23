@@ -1,9 +1,9 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "WinFinder",
-  "mainBinaryName": "WinFinder",
+  "productName": "Winfinder",
+  "mainBinaryName": "Winfinder",
   "version": "0.2.0",
-  "identifier": "community.finderwin.app",
+  "identifier": "Winfinder",
   "build": {
     "frontendDist": "../renderer"
   },
@@ -22,6 +22,7 @@
   },
   "bundle": {
     "active": true,
+    "publisher": "Winfinder",
     "targets": [
       "nsis",
       "msi"

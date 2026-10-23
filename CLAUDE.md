@@ -1,4 +1,4 @@
-# finder-win
+# Winfinder
 
 ## Git
 

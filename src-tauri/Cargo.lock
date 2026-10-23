@@ -1194,34 +1194,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1c66915cc5391097de7a2b0b972e8505aa33c0df401fd3a6811dbdb32881ba48"
 
 [[package]]
-name = "finder-win"
-version = "0.2.0"
-dependencies = [
- "base64 0.22.1",
- "calamine",
- "cfb",
- "dirs 6.0.0",
- "jwalk",
- "libc",
- "lnk",
- "notify",
- "png 0.17.16",
- "quick-xml 0.37.5",
- "rayon",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-drag",
- "tauri-plugin-opener",
- "tauri-plugin-single-instance",
- "tauri-plugin-updater",
- "trash",
- "windows 0.61.3",
- "zip 2.6.1",
-]
-
-[[package]]
 name = "flate2"
 version = "1.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5597,6 +5569,34 @@ name = "windows_x86_64_msvc"
 version = "0.53.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6bbff5f0aada427a1e5a6da5f1f98158182f26556f345ac9e04d36d0ebed650"
+
+[[package]]
+name = "winfinder"
+version = "0.2.0"
+dependencies = [
+ "base64 0.22.1",
+ "calamine",
+ "cfb",
+ "dirs 6.0.0",
+ "jwalk",
+ "libc",
+ "lnk",
+ "notify",
+ "png 0.17.16",
+ "quick-xml 0.37.5",
+ "rayon",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-drag",
+ "tauri-plugin-opener",
+ "tauri-plugin-single-instance",
+ "tauri-plugin-updater",
+ "trash",
+ "windows 0.61.3",
+ "zip 2.6.1",
+]
 
 [[package]]
 name = "winnow"

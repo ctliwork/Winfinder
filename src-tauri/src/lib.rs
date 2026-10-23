@@ -479,6 +479,27 @@ fn watch(app: AppHandle, state: State<WatchState>, dirs: Vec<String>) {
     *current = wanted;
 }
 
+// ---------- settings from the earlier name ----------
+// Up to 0.3.19 the app's identifier was community.finderwin.app, so its settings
+// and the page's storage (EBWebView) are in folders of that name. Moved over once,
+// before the window opens and starts using the new ones. Something already in the
+// new folder wins; whatever can't move stays where it was.
+fn move_old_settings(app: &AppHandle) {
+    let path = app.path();
+    for dir in [path.app_config_dir(), path.app_local_data_dir()].into_iter().flatten() {
+        let Some(old) = dir.parent().map(|p| p.join("community.finderwin.app")) else { continue };
+        let Ok(entries) = std::fs::read_dir(&old) else { continue };
+        let _ = std::fs::create_dir_all(&dir);
+        for e in entries.flatten() {
+            let to = dir.join(e.file_name());
+            if !to.exists() {
+                let _ = std::fs::rename(e.path(), to);
+            }
+        }
+        let _ = std::fs::remove_dir(&old); // only goes once it's empty
+    }
+}
+
 // ---------- window ----------
 // The theme chosen in Settings lives in the page's storage, which the window
 // can't read before it exists. A copy on disk lets the window open in that
@@ -592,7 +613,7 @@ fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
 
     #[allow(unused_mut)]
     let mut builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-        .title("WinFinder")
+        .title("Winfinder")
         .inner_size(1180.0, 740.0)
         .min_inner_size(680.0, 420.0)
         .decorations(false)
@@ -663,14 +684,14 @@ fn create_tray(app: &AppHandle) -> tauri::Result<()> {
     let menu = Menu::with_items(
         app,
         &[
-            &MenuItem::with_id(app, "open", "打開 WinFinder", true, None::<&str>)?,
+            &MenuItem::with_id(app, "open", "打開 Winfinder", true, None::<&str>)?,
             &MenuItem::with_id(app, "new-tab", "新分頁", true, None::<&str>)?,
             &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(app, "quit", "結束", true, None::<&str>)?,
         ],
     )?;
     let mut tray = TrayIconBuilder::with_id("main")
-        .tooltip("WinFinder")
+        .tooltip("Winfinder")
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, ev| match ev.id().as_ref() {
@@ -702,7 +723,7 @@ fn set_run_at_login(on: bool) -> Result<(), String> {
         use windows::core::w;
         use windows::Win32::System::Registry::{RegDeleteKeyValueW, RegSetKeyValueW, HKEY_CURRENT_USER, REG_SZ};
         const RUN: windows::core::PCWSTR = w!("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
-        const NAME: windows::core::PCWSTR = w!("WinFinder");
+        const NAME: windows::core::PCWSTR = w!("Winfinder");
         // Written under the app's earlier name (Finder for Windows) by older versions.
         let _ = unsafe { RegDeleteKeyValueW(HKEY_CURRENT_USER, RUN, w!("Finder for Windows")) };
         if on {
@@ -730,7 +751,7 @@ mod tests {
     fn run_at_login_round_trip() {
         let read = || {
             let out = std::process::Command::new("reg")
-                .args(["query", r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run", "/v", "WinFinder"])
+                .args(["query", r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run", "/v", "Winfinder"])
                 .output()
                 .unwrap();
             out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
@@ -766,6 +787,7 @@ pub fn run() {
         .manage(PendingUpdate::default())
         .manage(WatchState { watcher: Mutex::new(None), dirs: Mutex::new(HashSet::new()) })
         .setup(|app| {
+            move_old_settings(app.handle());
             create_main_window(app.handle())?;
             create_tray(app.handle())?;
             Ok(())
@@ -786,5 +808,5 @@ pub fn run() {
             transfer, read_text, rich_preview, search, watch, check_update, install_update, set_keep_running, set_run_at_login, quit
         ])
         .run(tauri::generate_context!())
-        .expect("error while running WinFinder");
+        .expect("error while running Winfinder");
 }

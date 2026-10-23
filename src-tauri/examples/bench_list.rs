@@ -7,7 +7,7 @@ fn main() {
     let mut n = 0;
     for _ in 0..5 {
         let t = Instant::now();
-        n = finder_win_lib::fsops::list(&dir).unwrap().len();
+        n = winfinder_lib::fsops::list(&dir).unwrap().len();
         best = best.min(t.elapsed().as_secs_f64() * 1000.0);
     }
     println!("rust: {n} entries, best of 5: {best:.1} ms");

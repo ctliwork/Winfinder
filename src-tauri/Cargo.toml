@@ -1,12 +1,12 @@
 [package]
-name = "finder-win"
+name = "winfinder"
 version = "0.2.0"
 description = "A macOS Finder-style file manager for Windows"
 edition = "2021"
 rust-version = "1.80"
 
 [lib]
-name = "finder_win_lib"
+name = "winfinder_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

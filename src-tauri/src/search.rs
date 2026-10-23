@@ -172,7 +172,7 @@ mod tests {
 
     #[test]
     fn finds_nested_matches_and_skips_hidden() {
-        let d = std::env::temp_dir().join(format!("finder-win-search-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("winfinder-search-{}", std::process::id()));
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(d.join("a/b/c")).unwrap();
         fs::create_dir_all(d.join(".git/x")).unwrap();
@@ -191,7 +191,7 @@ mod tests {
 
     #[test]
     fn filters_apply_while_walking() {
-        let d = std::env::temp_dir().join(format!("finder-win-filter-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("winfinder-filter-{}", std::process::id()));
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(d.join("photos/old")).unwrap();
         fs::write(d.join("photos/a.jpg"), vec![0u8; 2000]).unwrap();

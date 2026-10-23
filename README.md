@@ -1,6 +1,6 @@
-# WinFinder
+# Winfinder
 
-**下載安裝：** [WinFinder_x64-setup.exe](https://github.com/ctliwork/Winfinder/releases/latest/download/WinFinder_x64-setup.exe)（Windows 10／11，64 位元）
+**下載安裝：** [Winfinder_x64-setup.exe](https://github.com/ctliwork/Winfinder/releases/latest/download/Winfinder_x64-setup.exe)（Windows 10／11，64 位元）
 裝好之後有新版本會自動提示，按「更新並重新啟動」即可。
 
 仿 macOS Finder 的 Windows 檔案管理器，重點是直欄檢視（column view）。
@@ -57,7 +57,7 @@ npm run build    # 產生安裝檔：src-tauri/target/release/bundle/nsis/*.exe
 npm test         # Rust 單元測試
 ```
 
-指定起始資料夾：`WinFinder.exe --dir=D:\Projects`
+指定起始資料夾：`Winfinder.exe --dir=D:\Projects`
 
 ## 發布新版本與自動更新
 
@@ -66,7 +66,7 @@ npm test         # Rust 單元測試
 1. 在 Windows 上跑 Rust 測試
 2. 把版本設成 `0.3.<執行編號>`，每次自動遞增
 3. 打包安裝檔，用更新私鑰簽章，發布成 GitHub Release，附上 `latest.json`
-4. 另外上傳固定檔名的 `WinFinder_x64-setup.exe`（也上傳一份改名前的 `Finder-for-Windows_x64-setup.exe`，舊連結不會失效），讓上面的下載連結永遠指向最新版
+4. 另外上傳固定檔名的 `Winfinder_x64-setup.exe`（也上傳一份改名前的 `Finder-for-Windows_x64-setup.exe`，舊連結不會失效），讓上面的下載連結永遠指向最新版
 
 已安裝的 App 啟動後幾秒會讀 `releases/latest/download/latest.json`，有新版就在右下角提示；也可以從「⋯」選單手動「檢查更新…」。下載的更新會用 `tauri.conf.json` 裡的公鑰驗證簽章，對不上就不會安裝。
 

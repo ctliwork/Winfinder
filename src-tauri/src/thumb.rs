@@ -118,7 +118,7 @@ mod tests {
         use base64::Engine;
         let url = super::encode_png(&[30, 144, 255, 255].repeat(64 * 64), 64, 64).unwrap();
         let bytes = base64::engine::general_purpose::STANDARD.decode(url.split(',').nth(1).unwrap()).unwrap();
-        let file = std::env::temp_dir().join(format!("finder-win-thumb-{}.png", std::process::id()));
+        let file = std::env::temp_dir().join(format!("winfinder-thumb-{}.png", std::process::id()));
         std::fs::write(&file, bytes).unwrap();
         let thumb = super::platform_thumbnail(file.to_str().unwrap(), 48, false);
         assert!(thumb.is_some_and(|t| t.starts_with("data:image/png;base64,")));
