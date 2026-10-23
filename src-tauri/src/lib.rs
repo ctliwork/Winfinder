@@ -1,5 +1,6 @@
 mod archive;
 mod cloud;
+mod content;
 #[doc(hidden)]
 pub mod fsops;
 mod places;
@@ -374,6 +375,12 @@ async fn rich_preview(path: String) -> Result<preview::Preview, String> {
     blocking(move || preview::preview(&path)).await?
 }
 
+/// Searches inside files below `root` through the Windows Search index.
+#[tauri::command]
+async fn content_search(root: String, query: String, filter: Option<search::Filter>) -> Result<content::ContentResult, String> {
+    blocking(move || content::search(&root, &query, &filter.unwrap_or_default())).await?
+}
+
 #[tauri::command]
 fn everything_available() -> bool {
     search::everything_available()
@@ -746,7 +753,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             places, pin_home, list_dir, list_many, cloud_pin, new_file, dir_size, cancel_dir_sizes, compress, extract, open_terminal, native_menu, properties,
             clipboard_write, clipboard_read, clipboard_clear, save_theme, set_ui_scale, preview_available, preview_show, preview_move, preview_hide, preview_warm, cancel_transfer, restore_trash,
-            everything_available, everything, disk_free, disk_space, recent_files, resolve_link, folder_count, thumbnail, open_path, reveal, trash, rename, mkdir,
+            everything_available, everything, content_search, disk_free, disk_space, recent_files, resolve_link, folder_count, thumbnail, open_path, reveal, trash, rename, mkdir,
             transfer, read_text, rich_preview, search, watch, check_update, install_update, set_keep_running, set_run_at_login, quit
         ])
         .run(tauri::generate_context!())

@@ -122,6 +122,7 @@
     search: (root, query, showHidden, filter) => invoke('search', { root, query, showHidden, filter }),
     everythingAvailable: () => invoke('everything_available').catch(() => false),
     everything: (query) => invoke('everything', { query }).catch(() => null),
+    ...(isWin ? { contentSearch: (root, query, filter) => invoke('content_search', { root, query, filter }).catch((e) => ({ error: String(e) })) } : {}),
     watch: (dirs) => { invoke('watch', { dirs }).catch(() => {}); },
     onChanged: (cb) => T.event.listen('fs-changed', (e) => cb(e.payload)),
     // Resolves when the drag is over (dropped anywhere or cancelled).

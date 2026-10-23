@@ -2801,6 +2801,7 @@
   });
   // Everything (whole-PC search) shows up when its command-line client is installed.
   api.everythingAvailable?.().then((ok) => { $('[data-scope="pc"]').hidden = !ok; });
+  $('[data-scope="content"]').hidden = !api.contentSearch;
 
   function setScope(scope) {
     state.search.scope = scope;
@@ -2841,13 +2842,20 @@
     renderStatus();
     const tab = state;
     const pc = state.search.scope === 'pc';
+    const inside = state.search.scope === 'content';
     const f = state.search.filters || {};
-    const res = pc ? await api.everything(everythingQuery(q, f)) : await api.search(state.cwd === HOME ? G.places.home : state.cwd, q, prefs.showHidden, searchFilter(f));
+    const root = state.cwd === HOME ? G.places.home : state.cwd;
+    let res;
+    if (pc) res = await api.everything(everythingQuery(q, f));
+    else if (inside && api.contentSearch) res = q ? await api.contentSearch(root, q, searchFilter(f)) : { entries: [], indexed: true };
+    else res = await api.search(root, q, prefs.showHidden, searchFilter(f));
     if (tab !== state || state.search.query.trim() !== q) return;
-    if (!res) {
+    if (!res || res.error || res.indexed === false) {
       state.search.busy = false;
-      $('#search-status').textContent = pc ? '無法使用 Everything（請確認它正在執行）' : '';
-      renderStatus();
+      $('#search-status').textContent = pc ? '無法使用 Everything（請確認它正在執行）'
+        : res?.indexed === false ? '這個資料夾沒有 Windows 搜尋索引，無法搜尋內容（可在 Windows 設定 →「搜尋 Windows」加入）'
+          : res?.error ? `無法搜尋內容：${res.error}` : '';
+      if (inside) { state.search.results = []; computeEntries(); render(); } else renderStatus();
       return;
     }
     state.search.busy = false;
@@ -2863,7 +2871,7 @@
   function smartDesc(sf) {
     const f = sf.filters || {};
     const opt = (id, v) => (v ? $(`#sf-${id} option[value="${v}"]`)?.textContent : null);
-    const where = sf.scope === 'pc' ? '整台電腦' : `${displayName(sf.root)}${sf.scope === 'deep' ? '（包含子資料夾）' : ''}`;
+    const where = sf.scope === 'pc' ? '整台電腦' : `${displayName(sf.root)}${{ deep: '（包含子資料夾）', content: '（檔案內容）' }[sf.scope] || ''}`;
     return [sf.query && `「${sf.query}」`, opt('kind', f.kind), opt('size', f.size), opt('date', f.date), `位置：${where}`].filter(Boolean).join('，');
   }
   async function openSmart(sf, { silent = false } = {}) {
