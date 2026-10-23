@@ -157,6 +157,7 @@
     EACCES: '沒有權限', EPERM: '沒有權限', ENOENT: '找不到項目', EBUSY: '檔案正在使用中',
     EXISTS: '已有相同名稱的項目', INVALID: '名稱包含無效字元', INTO_SELF: '不能把資料夾移到它自己裡面',
     ENOTDIR: '不是資料夾', timeout: '逾時',
+    NO_7ZIP: '需要安裝 7-Zip', PASSWORD: '這個壓縮檔有密碼保護', BAD_ARCHIVE: '無法讀取這個壓縮檔',
   };
   const errText = (code) => ERRORS[code] || code;
 
@@ -2188,6 +2189,9 @@
     await afterCreate(res.path, `已建立「${P.basename(res.path)}」`);
   }
 
+  // Extracted with the zip crate, or 7-Zip / Windows' tar for the rest (archive.rs).
+  const ARCHIVES = new Set(['zip', '7z', 'rar', 'tar', 'gz', 'tgz', 'bz2', 'tbz2', 'xz', 'txz', 'zst', 'iso', 'cab']);
+  const archiveStem = (name) => name.replace(/\.[^.]+$/, '').replace(/\.tar$/i, '');
   async function extractZip(e) {
     toast('正在解壓縮…');
     const res = await api.extract(e.path);
@@ -2390,7 +2394,7 @@
       { label: '拷貝路徑', kbd: 'Ctrl+Alt+C', action: copyPath },
       '-',
       ...(api.compress && !virt ? [{ label: '壓縮成 ZIP 檔', action: () => compressSelected(entries) }] : []),
-      ...(one?.ext === 'zip' && api.extract ? [{ label: `解壓縮到「${P.basename(one.path).replace(/\.zip$/i, '')}」`, action: () => extractZip(one) }] : []),
+      ...(one && ARCHIVES.has(one.ext) && api.extract ? [{ label: `解壓縮到「${archiveStem(one.name)}」`, action: () => extractZip(one) }] : []),
       ...(one?.isDir && !isVirtual(one) && api.dirSize ? [{ label: '計算大小', action: () => calcSize(one) }] : []),
       ...(one?.isDir && !isVirtual(one) && api.openTerminal ? [{ label: '在終端機中開啟', action: () => openTerminal(one.path) }] : []),
       ...cloudItems(entries),

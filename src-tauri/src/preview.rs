@@ -75,6 +75,11 @@ pub fn preview(path: &str) -> Result<Preview, String> {
         "xlsb" => workbook::<calamine::Xlsb<_>>(path),
         "ods" => workbook::<calamine::Ods<_>>(path),
         "zip" | "jar" | "apk" | "epub" | "nupkg" | "vsix" => archive(path),
+        e if crate::archive::OTHER.contains(&e) => {
+            let (list, total) = crate::archive::list_other(path, 2000)?;
+            let entries = list.into_iter().map(|(name, size, is_dir)| ArchiveEntry { name, size, is_dir }).collect();
+            Ok(Preview::Archive { entries, total })
+        }
         _ => Err("UNSUPPORTED".into()),
     }
 }
