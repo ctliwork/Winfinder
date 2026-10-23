@@ -1,9 +1,9 @@
 # Draws the app icon and writes every size Tauri needs.
 # Run: python3 scripts/make-icon.py src-tauri/icons  (needs Pillow)
 #
-# Dapo Pond in Chishang, Taitung, in the style of macOS app icons, kept
-# simple: blue sky, two clouds and the mountain mirrored in the still pond.
-# A squircle tile with a soft shadow, lit softly from the upper left.
+# Taitung as layered paper: a blue sky with two cumulus clouds, three gentle
+# ranges from hazy blue to deep green, and a strip of the Pacific, each layer
+# lifted off the next by a soft shadow. A macOS-style squircle tile.
 import math
 import sys
 
@@ -12,6 +12,9 @@ from PIL import Image, ImageChops, ImageDraw, ImageFilter
 S = 4  # supersampling
 W = 512 * S
 U = lambda v: v * S  # 512-unit design coords -> canvas px
+
+WHITE = (255, 255, 255)
+SHADOW = (0, 40, 110)
 
 
 def vgrad(top, bottom, y0, y1):
@@ -30,18 +33,44 @@ def paint(img, colour, mask):
     img.alpha_composite(c)
 
 
-def ridge(points, base=600):
-    """A filled range through (x, y) points, eased between them, down to `base`."""
+def poly(pts):
+    m = Image.new('L', (W, W), 0)
+    ImageDraw.Draw(m).polygon([(U(x), U(y)) for x, y in pts], fill=255)
+    return m
+
+
+def ridge(points):
+    """A range through (x, y) points, eased between them, filled to the bottom."""
     pts = []
     for (x0, y0), (x1, y1) in zip(points, points[1:]):
         for i in range(32):
             t = i / 32
-            s = (1 - math.cos(math.pi * t)) / 2
-            pts.append((U(x0 + (x1 - x0) * t), U(y0 + (y1 - y0) * s)))
-    pts.append((U(points[-1][0]), U(points[-1][1])))
+            e = (1 - math.cos(math.pi * t)) / 2
+            pts.append((x0 + (x1 - x0) * t, y0 + (y1 - y0) * e))
+    pts.append(points[-1])
+    return poly(pts + [(points[-1][0], 600), (points[0][0], 600)])
+
+
+def band(y0, y1):
     m = Image.new('L', (W, W), 0)
-    ImageDraw.Draw(m).polygon(pts + [(U(points[-1][0]), U(base)), (U(points[0][0]), U(base))], fill=255)
+    ImageDraw.Draw(m).rectangle([0, U(y0), W, U(y1)], fill=255)
     return m
+
+
+def cumulus(cx, cy, k):
+    """A fluffy cloud: overlapping puffs on a flat base, `k` = scale."""
+    m = Image.new('L', (W, W), 0)
+    d = ImageDraw.Draw(m)
+    for dx, dy, r in ((-62, 4, 26), (-30, -14, 36), (8, -28, 44), (50, -10, 34), (78, 6, 24)):
+        d.ellipse([U(cx + (dx - r) * k), U(cy + (dy - r) * k), U(cx + (dx + r) * k), U(cy + (dy + r) * k)], fill=255)
+    d.rounded_rectangle([U(cx - 88 * k), U(cy - 4 * k), U(cx + 102 * k), U(cy + 30 * k)], U(17 * k), fill=255)
+    return m
+
+
+def shadow_of(mask, dy, blur, alpha):
+    """`mask` moved down by `dy`, blurred, as a soft shadow."""
+    sh = mask.transform((W, W), Image.AFFINE, (1, 0, 0, 0, 1, -U(dy))).filter(ImageFilter.GaussianBlur(U(blur)))
+    return sh.point(lambda v: v * alpha // 255)
 
 
 def squircle(x0, y0, x1, y1, n=5.0):
@@ -51,72 +80,31 @@ def squircle(x0, y0, x1, y1, n=5.0):
     for i in range(720):
         a = 2 * math.pi * i / 720
         c, s = math.cos(a), math.sin(a)
-        pts.append((U(cx + rx * math.copysign(abs(c) ** (2 / n), c)), U(cy + ry * math.copysign(abs(s) ** (2 / n), s))))
-    m = Image.new('L', (W, W), 0)
-    ImageDraw.Draw(m).polygon(pts, fill=255)
-    return m
-
-
-H = 288  # the far shore: sky and mountains above, the pond's mirror below
-
-
-def clouds():
-    m = Image.new('L', (W, W), 0)
-    d = ImageDraw.Draw(m)
-    for x0, x1, y, h in ((40, 250, 118, 34), (86, 210, 98, 42), (280, 470, 76, 28), (318, 420, 62, 32)):
-        d.rounded_rectangle([U(x0), U(y), U(x1), U(y + h)], U(h / 2), fill=255)
-    return m
-
-
-def landscape():
-    """Sky, clouds and the mountains behind the pond, down to the far shore."""
-    sc = vgrad((22, 118, 230), (124, 194, 248), 40, H)
-    paint(sc, vgrad((164, 208, 246), (136, 194, 240), 190, H), ridge([(-10, 236), (110, 204), (240, 226), (380, 190), (530, 222)]))
-    cl = clouds()
-    shade = cl.filter(ImageFilter.GaussianBlur(U(4))).transform((W, W), Image.AFFINE, (1, 0, 0, 0, 1, -U(4)))
-    paint(sc, (20, 70, 150), shade.point(lambda v: v * 45 // 255))
-    paint(sc, vgrad((255, 255, 255), (224, 237, 250), 60, 220), cl)
-    massif = ridge([(-10, 286), (90, 250), (200, 206), (262, 198), (330, 214), (430, 256), (530, 276)])
-    paint(sc, vgrad((92, 200, 140), (38, 146, 98), 198, H), massif)
-    # shade deepening gradually toward the right (light from the upper left), no hard edge
-    shade = Image.linear_gradient('L').rotate(90).transpose(Image.FLIP_LEFT_RIGHT).resize((W, W))
-    shade = shade.point(lambda v: max(0, min(255, (v - 90) * 230 // 165)))
-    paint(sc, vgrad((54, 170, 116), (24, 124, 84), 198, H), ImageChops.multiply(massif, shade))
-    return sc
+        pts.append((cx + rx * math.copysign(abs(c) ** (2 / n), c), cy + ry * math.copysign(abs(s) ** (2 / n), s)))
+    return poly(pts)
 
 
 def icon():
+    scene = vgrad((60, 150, 240), (132, 196, 250), 40, 300)
+    # three gentle ranges, from hazy blue to deep green, then the sea
+    layers = [
+        (ridge([(-10, 286), (160, 236), (340, 198), (530, 244)]), (176, 216, 246)),
+        (ridge([(-10, 338), (190, 294), (370, 316), (530, 288)]), (72, 184, 136)),
+        (ridge([(-10, 396), (210, 368), (530, 400)]), (34, 138, 98)),
+        (band(438, 512), (36, 112, 200)),
+    ]
+    for m, colour in layers:
+        paint(scene, SHADOW, shadow_of(m, 10, 8, 55))
+        paint(scene, colour, m)
+    for cx, cy, k in ((150, 118, 0.8), (380, 92, 0.55)):
+        cl = cumulus(cx, cy, k)
+        paint(scene, SHADOW, shadow_of(cl, 8, 7, 45))
+        paint(scene, WHITE, cl)
+
     T = (40, 34, 472, 466)  # the tile, leaving room for its shadow below
-    up = landscape()
-    scene = up.copy()
-
-    # the pond: the landscape mirrored at the far shore, a little deeper in tone
-    mirror = up.crop((0, 0, W, U(H))).transpose(Image.FLIP_TOP_BOTTOM)
-    pond = Image.new('RGBA', (W, W), (0, 0, 0, 0))
-    pond.paste(mirror, (0, U(H)))
-    pond = Image.blend(pond, Image.new('RGBA', (W, W), (18, 96, 150, 255)), 0.28)
-    water = Image.new('L', (W, W), 0)
-    ImageDraw.Draw(water).rectangle([0, U(H), W, W], fill=255)
-    paint(scene, pond, water)
-    # deeper water toward the viewer, so the reflection fades out near the bottom
-    depth = Image.new('L', (1, W))
-    for y in range(W):
-        depth.putpixel((0, y), int(max(0, min(1, (y / S - (H + 30)) / 110)) * 245))
-    paint(scene, (26, 104, 196), ImageChops.multiply(water, depth.resize((W, W))))
-    # the far shore: a thin green line where the mountain meets its reflection
-    bank = Image.new('L', (W, W), 0)
-    ImageDraw.Draw(bank).rectangle([0, U(H - 3), W, U(H + 3)], fill=255)
-    paint(scene, (22, 104, 72), bank)
-
-    tile = squircle(*T)
     img = Image.new('RGBA', (W, W), (0, 0, 0, 0))
-    # a soft shadow under the tile, as macOS draws its icons
-    shadow = squircle(T[0] + 4, T[1] + 10, T[2] - 4, T[3] + 10).filter(ImageFilter.GaussianBlur(U(9)))
-    paint(img, (0, 30, 70), shadow.point(lambda v: v * 70 // 255))
-    paint(img, scene, tile)
-    # a faint highlight along the top edge
-    edge = ImageChops.subtract(tile, squircle(T[0], T[1] + 3, T[2], T[3] + 3))
-    paint(img, (255, 255, 255), edge.point(lambda v: v * 90 // 255))
+    paint(img, (0, 30, 70), shadow_of(squircle(T[0] + 4, T[1], T[2] - 4, T[3]), 10, 9, 70))
+    paint(img, scene, squircle(*T))
     return img.resize((512, 512), Image.LANCZOS)
 
 
