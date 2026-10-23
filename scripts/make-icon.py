@@ -86,6 +86,12 @@ def icon():
     for m, colour in layers:
         paint(scene, SHADOW, shadow_of(m, 10, 8, 55))
         paint(scene, colour, m)
+    # gentle swells: two more paper layers of sea with rolling edges
+    for y, amp, crests, phase, colour in ((418, 5, 3, 0.0, (40, 116, 204)), (448, 5, 3.5, 1.4, (28, 96, 186))):
+        edge = [(x, y + amp * math.sin(2 * math.pi * crests * x / 512 + phase)) for x in range(-10, 531, 4)]
+        m = poly(edge + [(530, 600), (-10, 600)])
+        paint(scene, SHADOW, shadow_of(m, 6, 6, 40))
+        paint(scene, colour, m)
 
     T = (40, 34, 472, 466)  # the tile, leaving room for its shadow below
     img = Image.new('RGBA', (W, W), (0, 0, 0, 0))
