@@ -8,7 +8,7 @@
 
   const WEB_IMAGES = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'ico', 'avif']);
   const PLAYABLE_VIDEO = new Set(['mp4', 'webm', 'm4v', 'mov', 'mkv', 'ogv']);
-  const RICH = new Set(['docx', 'docm', 'dotx', 'pptx', 'pptm', 'xlsx', 'xlsm', 'zip', 'jar', 'apk', 'epub', 'nupkg', 'vsix']);
+  const RICH = new Set(['docx', 'docm', 'dotx', 'doc', 'dot', 'pptx', 'pptm', 'xlsx', 'xlsm', 'xls', 'xlt', 'xlsb', 'ods', 'zip', 'jar', 'apk', 'epub', 'nupkg', 'vsix']);
   const MARKDOWN = new Set(['md', 'markdown', 'mdx']);
   const DELIMITED = { csv: ',', tsv: '\t' };
 
