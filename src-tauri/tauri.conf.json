@@ -47,7 +47,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDVBN0E2NzMyRUUwMDc5MTAKUldRUWVRRHVNbWQ2V3RDOWZmWWlvWTc0ZWd5SEJpaXNnL3k3Q1VJTWNzYnkrNUpsZkNmL21ka0YK",
       "endpoints": [
-        "https://github.com/ctliwork/finder-win/releases/latest/download/latest.json"
+        "https://github.com/ctliwork/winfinder/releases/latest/download/latest.json"
       ],
       "windows": {
         "installMode": "passive"
