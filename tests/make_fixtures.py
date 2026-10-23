@@ -16,7 +16,7 @@ from openpyxl import Workbook
 from PIL import Image
 from pptx import Presentation
 
-root = sys.argv[1]
+root = os.path.abspath(sys.argv[1])  # absolute: some steps run with another working directory
 shutil.rmtree(root, ignore_errors=True)
 os.makedirs(root)
 p = lambda *n: os.path.join(root, *n)
@@ -71,7 +71,8 @@ with open(os.path.join(src, "讀我.txt"), "w", encoding="utf-8") as f:
     f.write("hello")
 with open(os.path.join(src, "資料夾", "b.txt"), "w", encoding="utf-8") as f:
     f.write("世界")
-seven = shutil.which("7z") or r"C:\Program Files\7-Zip\7z.exe"
+# The real 7z.exe, not a package manager's shim on the PATH (Chocolatey's mangles non-ASCII arguments).
+seven = next((c for c in (r"C:\Program Files\7-Zip\7z.exe", shutil.which("7z"), shutil.which("7zz")) if c and os.path.isfile(c)), "7z")
 subprocess.run([seven, "a", "-bd", p("封存.7z"), "."], cwd=src, check=True, stdout=subprocess.DEVNULL)
 # tar.exe on Windows can't take names outside the system code page; 7-Zip can.
 subprocess.run([seven, "a", "-bd", "-ttar", p("封存.tar"), "."], cwd=src, check=True, stdout=subprocess.DEVNULL)
