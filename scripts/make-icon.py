@@ -86,20 +86,6 @@ def icon():
     for m, colour in layers:
         paint(scene, SHADOW, shadow_of(m, 10, 8, 55))
         paint(scene, colour, m)
-    # the beach in front, and a wave washing up it: shallow turquoise water
-    # with a lobed edge of white foam running up the sand
-    paint(scene, (240, 222, 184), band(400, 512))
-    edge = [(x, 424 + 9 * math.sin(2 * math.pi * 1.4 * x / 512 + 0.6) + 4 * math.sin(2 * math.pi * 3.1 * x / 512)) for x in range(-10, 531, 4)]
-    wash = poly([(-10, 378)] + edge + [(530, 378)])
-    paint(scene, vgrad((64, 146, 222), (100, 204, 222), 378, 436), wash)
-    # the line the last wave left on the sand
-    mark = Image.new('L', (W, W), 0)
-    ImageDraw.Draw(mark).line([(U(x), U(y + 20 + 3 * math.sin(2 * math.pi * 2.2 * x / 512))) for x, y in edge], fill=255, width=U(4), joint='curve')
-    paint(scene, (226, 204, 160), mark)
-    foam = Image.new('L', (W, W), 0)
-    ImageDraw.Draw(foam).line([(U(x), U(y)) for x, y in edge], fill=255, width=U(7), joint='curve')
-    paint(scene, SHADOW, shadow_of(foam, 4, 4, 35))
-    paint(scene, WHITE, foam)
 
     T = (40, 34, 472, 466)  # the tile, leaving room for its shadow below
     img = Image.new('RGBA', (W, W), (0, 0, 0, 0))
