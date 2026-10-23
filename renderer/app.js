@@ -1148,7 +1148,7 @@
     glideTo(target, Math.max(right, target + vw));
   }
 
-  const PREVIEW_MIN = 260; // .col-preview min-width when it shows a file
+  const PREVIEW_MIN = 160; // .col-preview min-width when it shows a file
   let glide = 0;
   // Scrolls the column view to `target` with an ease-out; `width` is the
   // room to keep afterwards so the position never snaps.

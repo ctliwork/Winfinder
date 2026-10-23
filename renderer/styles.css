@@ -462,7 +462,7 @@ body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-sel
 .crow .chev { width: 10px; opacity: 0.5; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; }
 .crow.path { background: var(--sel-muted); }
 .crow.sel { background: var(--accent); color: #fff; }
-.col-preview { flex: 1; min-width: 260px; padding: 30px 26px; display: flex; flex-direction: column; align-items: center; overflow-y: auto; }
+.col-preview { flex: 1; min-width: 160px; padding: 30px 26px; display: flex; flex-direction: column; align-items: center; overflow-y: auto; }
 .col-preview.empty { visibility: hidden; min-width: 0; padding: 0; } /* takes no room until a file is selected */
 
 /* ---------- gallery ---------- */
@@ -785,7 +785,12 @@ img.panning, video.panning { cursor: grabbing; transition: none; }
 .g-stage .g-media[data-kind="doc"] { background: rgba(0, 0, 0, 0.025); border-radius: 10px; padding: 10px; }
 .g-stage .g-media[data-kind="frame"] { padding: 0; }
 .g-stage .g-media .ql-info > .pv-name, .g-stage .g-media .ql-info > .pv-kind { display: none; }
-.col-preview { padding: 18px 20px 24px; }
+.col-preview { padding: 18px 20px 24px; container-type: inline-size; }
+/* a narrow preview column (down to 160px) keeps its details readable */
+@container (max-width: 240px) {
+  .col-preview > .pv-table div { flex-direction: column; gap: 0; }
+  .col-preview > .pv-table span:last-child { word-break: break-all; }
+}
 .cp-media .ql-info > .pv-name, .cp-media .ql-info > .pv-kind { display: none; } /* shown below the preview */
 
 
