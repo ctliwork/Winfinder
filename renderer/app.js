@@ -1268,13 +1268,16 @@
   // The column view's preview column and the preview pane show what Explorer's
   // preview pane shows:
   // the file type's registered preview handler (Office, PDF, text, PowerToys…)
-  // in a native window over the preview area. Images, video and audio keep the
-  // built-in previews (zoom, playback); types without a handler fall back to
-  // them too. A native window draws over the page, so it steps aside while a
+  // in a native window over the preview area, for Office files and other types
+  // the built-in previews can't show. Images, video, audio, PDF, text and code
+  // keep the built-in previews: they appear at once and zoom, while those
+  // handlers (Edge's PDF engine, PowerToys' code viewer…) take a second to
+  // start. Types without a handler fall back to them too. A native window draws over the page, so it steps aside while a
   // menu, dialog or Quick Look is open and is clipped to the visible area.
   const native = { el: null, gen: 0, rect: '', raf: 0, avail: new Map() };
+  const BUILTIN_FIRST = new Set(['image', 'video', 'audio', 'pdf', 'text', 'code']);
   function nativeWanted(e) {
-    return !!api.previewShow && prefs.nativePreview && !e.isDir && e.ext && !['image', 'video', 'audio'].includes(I.category(e.ext));
+    return !!api.previewShow && prefs.nativePreview && !e.isDir && e.ext && !BUILTIN_FIRST.has(I.category(e.ext)) && !['csv', 'tsv'].includes(e.ext);
   }
   function nativeAvailable(ext) {
     if (!native.avail.has(ext)) native.avail.set(ext, api.previewAvailable(ext));
@@ -3531,7 +3534,7 @@
         ['列表密度', '列表與直欄的行高', sel('density', [['compact', '精簡'], ['normal', '標準'], ['roomy', '寬鬆']])],
         ['顯示側邊欄', null, sw('sidebarHidden', true)],
         ['預覽窗格', '在圖像、列表與常用頁的右側顯示', sw('previewPane')],
-        api.previewShow && ['使用檔案總管的預覽', '直欄的預覽欄與預覽窗格：Office、PDF 等用 Windows 註冊的預覽處理常式，跟檔案總管一樣；沒有的類型用內建預覽', sw('nativePreview')],
+        api.previewShow && ['使用檔案總管的預覽', '直欄的預覽欄與預覽窗格：Office 等檔案用 Windows 註冊的預覽處理常式，跟檔案總管一樣；圖片、影片、PDF、文字與程式碼用內建預覽，比較快', sw('nativePreview')],
       ] },
       { id: 'files', title: '檔案與資料夾', rows: [
         ['顯示隱藏的項目', null, sw('showHidden')],
