@@ -48,8 +48,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         with:
           tagName: v__VERSION__
-          releaseName: Finder for Windows v__VERSION__
-          releaseBody: ${{ inputs.notes || '下載 Finder-for-Windows_x64-setup.exe 安裝。已安裝的版本會自動提示更新。' }}
+          releaseName: WinFinder v__VERSION__
+          releaseBody: ${{ inputs.notes || '下載 WinFinder_x64-setup.exe 安裝。已安裝的版本會自動提示更新。' }}
           releaseDraft: false
           prerelease: false
           includeUpdaterJson: true
@@ -62,5 +62,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          cp src-tauri/target/release/bundle/nsis/*.exe Finder-for-Windows_x64-setup.exe
-          gh release upload "v$VERSION" Finder-for-Windows_x64-setup.exe --clobber
+          cp src-tauri/target/release/bundle/nsis/*.exe WinFinder_x64-setup.exe
+          # The old name too, for links made before the app was renamed.
+          cp WinFinder_x64-setup.exe Finder-for-Windows_x64-setup.exe
+          gh release upload "v$VERSION" WinFinder_x64-setup.exe Finder-for-Windows_x64-setup.exe --clobber

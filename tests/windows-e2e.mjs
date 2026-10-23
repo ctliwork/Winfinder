@@ -12,7 +12,8 @@ import path from 'node:path';
 const FILES = path.resolve(process.argv[2] || 'e2e-files');
 const OUT = path.resolve('e2e-out');
 const DEBUG = path.resolve('src-tauri/target/debug');
-const EXE = path.join(DEBUG, fs.readdirSync(DEBUG).find((f) => /^finder.*\.exe$/i.test(f)));
+const EXE = path.join(DEBUG, fs.readdirSync(DEBUG).find((f) => /^(winfinder|finder-win)\.exe$/i.test(f)));
+const PROC = path.basename(EXE, '.exe');
 const PORT = 9222;
 const env = { ...process.env, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${PORT}` };
 fs.mkdirSync(OUT, { recursive: true });
@@ -27,7 +28,7 @@ function desktop(name) {
 }
 // How many app processes run, and whether one shows its window.
 function windows() {
-  const [n, visible] = ps(`$p=@(Get-Process finder-win -ErrorAction SilentlyContinue); "$($p.Count) $(@($p | ? { $_.MainWindowHandle -ne 0 }).Count)"`).split(' ').map(Number);
+  const [n, visible] = ps(`$p=@(Get-Process ${PROC} -ErrorAction SilentlyContinue); "$($p.Count) $(@($p | ? { $_.MainWindowHandle -ne 0 }).Count)"`).split(' ').map(Number);
   return { processes: n, visible: visible > 0 };
 }
 const launch = (args) => spawn(EXE, args, { env, detached: true, stdio: 'ignore' }).unref();
@@ -174,7 +175,7 @@ await step('open again', async () => {
 
 await step('quit', async () => {
   await page.click('#btn-more');
-  await page.locator('#menu >> text=結束 Finder').click();
+  await page.locator('#menu >> text=結束 WinFinder').click();
   await sleep(4000);
   return windows();
 });

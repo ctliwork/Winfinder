@@ -592,7 +592,7 @@ fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
 
     #[allow(unused_mut)]
     let mut builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-        .title("Finder")
+        .title("WinFinder")
         .inner_size(1180.0, 740.0)
         .min_inner_size(680.0, 420.0)
         .decorations(false)
@@ -663,14 +663,14 @@ fn create_tray(app: &AppHandle) -> tauri::Result<()> {
     let menu = Menu::with_items(
         app,
         &[
-            &MenuItem::with_id(app, "open", "打開 Finder", true, None::<&str>)?,
+            &MenuItem::with_id(app, "open", "打開 WinFinder", true, None::<&str>)?,
             &MenuItem::with_id(app, "new-tab", "新分頁", true, None::<&str>)?,
             &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(app, "quit", "結束", true, None::<&str>)?,
         ],
     )?;
     let mut tray = TrayIconBuilder::with_id("main")
-        .tooltip("Finder")
+        .tooltip("WinFinder")
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, ev| match ev.id().as_ref() {
@@ -702,7 +702,9 @@ fn set_run_at_login(on: bool) -> Result<(), String> {
         use windows::core::w;
         use windows::Win32::System::Registry::{RegDeleteKeyValueW, RegSetKeyValueW, HKEY_CURRENT_USER, REG_SZ};
         const RUN: windows::core::PCWSTR = w!("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
-        const NAME: windows::core::PCWSTR = w!("Finder for Windows");
+        const NAME: windows::core::PCWSTR = w!("WinFinder");
+        // Written under the app's earlier name (Finder for Windows) by older versions.
+        let _ = unsafe { RegDeleteKeyValueW(HKEY_CURRENT_USER, RUN, w!("Finder for Windows")) };
         if on {
             // Turned off in Task Manager's startup apps earlier: that choice is kept
             // there and would win, so asking for it here clears it.
@@ -728,7 +730,7 @@ mod tests {
     fn run_at_login_round_trip() {
         let read = || {
             let out = std::process::Command::new("reg")
-                .args(["query", r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run", "/v", "Finder for Windows"])
+                .args(["query", r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run", "/v", "WinFinder"])
                 .output()
                 .unwrap();
             out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
@@ -784,5 +786,5 @@ pub fn run() {
             transfer, read_text, rich_preview, search, watch, check_update, install_update, set_keep_running, set_run_at_login, quit
         ])
         .run(tauri::generate_context!())
-        .expect("error while running Finder");
+        .expect("error while running WinFinder");
 }

@@ -2556,7 +2556,7 @@
       { label: '重新整理', kbd: 'F5', action: () => refresh(true) },
       '-',
       { label: '設定…', kbd: 'Ctrl+,', action: () => openSettings() },
-      ...(api.quit && prefs.keepRunning ? [{ label: '結束 Finder', action: () => api.quit() }] : []),
+      ...(api.quit && prefs.keepRunning ? [{ label: '結束 WinFinder', action: () => api.quit() }] : []),
     ], r.right - 230, r.bottom + 6);
   });
 
