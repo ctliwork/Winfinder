@@ -15,7 +15,7 @@ const DEBUG = path.resolve('src-tauri/target/debug');
 const EXE = path.join(DEBUG, fs.readdirSync(DEBUG).find((f) => /^winfinder\.exe$/i.test(f)));
 const PROC = path.basename(EXE, '.exe');
 const PORT = 9222;
-const env = { ...process.env, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${PORT}` };
+const env = { ...process.env, WINFINDER_DEVTOOLS_PORT: String(PORT) }; // see create_main_window in lib.rs
 fs.mkdirSync(OUT, { recursive: true });
 
 const report = { exe: EXE };
@@ -165,6 +165,28 @@ await step('snap layouts', async () => {
   await page.mouse.move(400, 400);
   await sleep(500);
   return { build, ...windows() };
+});
+
+await step('two panes', async () => {
+  await page.locator('.col .crow', { hasText: '筆記.txt' }).first().click();
+  await page.keyboard.press('Control+\\');
+  let frame = null;
+  for (let i = 0; i < 40 && !frame; i++) { await sleep(250); frame = page.frames().find((f) => f.url().includes('pane=2')); }
+  if (!frame) throw new Error('no right-hand pane');
+  await frame.waitForSelector('.crow', { timeout: 15000 });
+  const sub = path.join(FILES, '子資料夾');
+  await frame.evaluate((dir) => window.__finderPane.go(dir), sub);
+  await frame.waitForFunction(() => document.querySelector('#title')?.textContent === '子資料夾', null, { timeout: 8000 });
+  desktop('two-panes');
+  await page.locator('.col .crow', { hasText: '筆記.txt' }).first().click({ button: 'right' });
+  const items = await page.$$eval('#menu .mi, #menu > *', (els) => els.map((e) => e.textContent.trim()).filter((t) => /到「/.test(t)));
+  await page.locator('#menu >> text=/^拷貝到「子資料夾」/').first().click();
+  await sleep(2000);
+  const right = await frame.$$eval('.crow .nm', (els) => els.map((e) => e.textContent));
+  desktop('two-panes-copied');
+  await page.keyboard.press('Control+\\');
+  await sleep(500);
+  return { menu: items, copied: fs.existsSync(path.join(sub, '筆記.txt')), right, closed: await page.$eval('#pane2', (e) => e.hidden) };
 });
 
 await step('big folder', async () => {

@@ -16,7 +16,7 @@ mod winshell;
 
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -446,7 +446,8 @@ async fn install_update(app: AppHandle, pending: State<'_, PendingUpdate>) -> Re
 // ---------- folder watching ----------
 struct WatchState {
     watcher: Mutex<Option<RecommendedWatcher>>,
-    dirs: Mutex<HashSet<PathBuf>>,
+    /// What each pane (1: left, 2: right) watches; the watcher covers them all.
+    dirs: Mutex<HashMap<u32, HashSet<PathBuf>>>,
 }
 
 fn make_watcher(app: AppHandle) -> Option<RecommendedWatcher> {
@@ -469,21 +470,23 @@ fn make_watcher(app: AppHandle) -> Option<RecommendedWatcher> {
 }
 
 #[tauri::command]
-fn watch(app: AppHandle, state: State<WatchState>, dirs: Vec<String>) {
+fn watch(app: AppHandle, state: State<WatchState>, dirs: Vec<String>, pane: Option<u32>) {
     let mut guard = state.watcher.lock().unwrap();
     if guard.is_none() {
         *guard = make_watcher(app);
     }
     let Some(watcher) = guard.as_mut() else { return };
-    let wanted: HashSet<PathBuf> = dirs.into_iter().map(PathBuf::from).collect();
-    let mut current = state.dirs.lock().unwrap();
-    for old in current.difference(&wanted) {
+    let mut panes = state.dirs.lock().unwrap();
+    let all = |panes: &HashMap<u32, HashSet<PathBuf>>| panes.values().flatten().cloned().collect::<HashSet<_>>();
+    let before = all(&panes);
+    panes.insert(pane.unwrap_or(1), dirs.into_iter().map(PathBuf::from).collect());
+    let after = all(&panes);
+    for old in before.difference(&after) {
         let _ = watcher.unwatch(old);
     }
-    for new in wanted.difference(&current) {
+    for new in after.difference(&before) {
         let _ = watcher.watch(new, RecursiveMode::NonRecursive);
     }
-    *current = wanted;
 }
 
 // ---------- settings from the earlier name ----------
@@ -631,6 +634,13 @@ fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
     #[cfg(windows)]
     {
         builder = builder.shadow(true);
+    }
+    // The Windows end-to-end test (tests/windows-e2e.mjs) drives a debug build
+    // through WebView2's DevTools port; release builds never open one.
+    #[cfg(all(windows, debug_assertions))]
+    if let Some(port) = std::env::var("WINFINDER_DEVTOOLS_PORT").ok().and_then(|p| p.parse::<u16>().ok()) {
+        // wry's own arguments, which these replace, plus the port.
+        builder = builder.additional_browser_args(&format!("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --remote-debugging-port={port}"));
     }
     // The window and the webview start out in the page's own background colour
     // (body / --side-solid in styles.css), so the first frame already matches.
@@ -840,7 +850,7 @@ pub fn run() {
         .plugin(tauri_plugin_drag::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(PendingUpdate::default())
-        .manage(WatchState { watcher: Mutex::new(None), dirs: Mutex::new(HashSet::new()) })
+        .manage(WatchState { watcher: Mutex::new(None), dirs: Mutex::new(HashMap::new()) })
         .setup(|app| {
             move_old_settings(app.handle());
             create_main_window(app.handle())?;

@@ -162,6 +162,17 @@ body.sidebar-hidden #sidebar { width: 0; margin-left: 0; opacity: 0; border-widt
 }
 body.material-none #main { border-radius: 0; }
 
+/* ---------- two panes ---------- */
+#panes { flex: 1; min-height: 0; display: flex; }
+#pane1 { flex: var(--split1, 1) 1 0; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+#pane2 { flex: var(--split2, 1) 1 0; min-width: 0; border: 0; background: var(--content-bg); }
+#split-resizer { width: 5px; flex: none; cursor: col-resize; background: var(--hairline); background-clip: content-box; padding: 0 2px; }
+#split-resizer:hover, #split-resizer.dragging { background: rgba(var(--accent-rgb), 0.6); padding: 0 1px; }
+/* The right-hand pane's page: just the folder, without the window's chrome. */
+body.pane-mode #sidebar, body.pane-mode #sidebar-resizer, body.pane-mode #tabbar { display: none; }
+/* The pane not being worked in: its title fades, as its selection does. */
+.pane-inactive #title, .pane-inactive #pathbar { color: var(--text3); }
+
 /* ---------- tabs & caption ---------- */
 #tabbar {
   height: 42px; flex: none; display: flex; align-items: flex-end;
@@ -265,6 +276,17 @@ body.blurred .cap { color: var(--text3); }
 #search-clear svg .soft { fill: var(--text3); }
 #search-clear svg .inv { stroke: var(--content-bg); stroke-width: 1.6; }
 .search.has-text #search-clear { visibility: visible; }
+
+/* A narrow toolbar (two panes, a small window): the search box becomes its
+   icon until clicked, then the view buttons and New Folder go (both are in
+   the ⋯ menu and have shortcuts). */
+#toolbar { container-type: inline-size; }
+@container (max-width: 700px) {
+  .search:not(:focus-within):not(.has-text) { width: 34px; padding: 0 0 0 9px; cursor: pointer; }
+  .search:focus-within, .search.has-text { width: 170px; }
+}
+@container (max-width: 470px) { #view-seg { display: none; } }
+@container (max-width: 360px) { #btn-newfolder, #btn-dual { display: none; } }
 
 #search-scope {
   display: flex; align-items: center; gap: 6px; padding: 6px 16px;
@@ -657,7 +679,7 @@ body.density-roomy .lrow { height: 34px; }
 #dlg { position: fixed; inset: 0; z-index: 110; display: grid; place-items: center; }
 #dlg-backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.25); animation: fadeIn 0.15s; }
 #dlg-window {
-  position: relative; border-radius: 14px; box-shadow: var(--shadow-lg); background: var(--glass-strong);
+  position: relative; outline: none; border-radius: 14px; box-shadow: var(--shadow-lg); background: var(--glass-strong);
   padding: 20px 22px 16px; width: min(380px, 90vw); animation: popIn 0.2s cubic-bezier(.2, .8, .2, 1);
 }
 #dlg-window.wide { width: min(640px, 92vw); }

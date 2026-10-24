@@ -2,7 +2,7 @@
 <html lang="zh-Hant">
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' ipc: http://ipc.localhost; img-src 'self' file: data: asset: http://asset.localhost; media-src file: asset: http://asset.localhost; object-src file: asset: http://asset.localhost; frame-src file: asset: http://asset.localhost; font-src 'self' file: asset: http://asset.localhost; style-src 'self' 'unsafe-inline'; script-src 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' ipc: http://ipc.localhost; img-src 'self' file: data: asset: http://asset.localhost; media-src file: asset: http://asset.localhost; object-src file: asset: http://asset.localhost; frame-src 'self' file: asset: http://asset.localhost; font-src 'self' file: asset: http://asset.localhost; style-src 'self' 'unsafe-inline'; script-src 'self'">
   <title>Winfinder</title>
   <link rel="stylesheet" href="styles.css">
   <script src="early.js"></script>
@@ -26,6 +26,8 @@
           <button class="cap close" data-act="close" title="關閉"><svg viewBox="0 0 10 10"><path d="M.5.5l9 9M9.5.5l-9 9"/></svg></button>
         </div>
       </div>
+      <div id="panes">
+      <div id="pane1">
       <header id="toolbar">
         <div class="capsule nav">
           <button id="btn-back" class="tb" title="上一頁 (Alt+←)"><svg viewBox="0 0 20 20"><path d="M12.5 4.5L7 10l5.5 5.5"/></svg></button>
@@ -44,6 +46,7 @@
         </div>
         <div class="capsule">
           <button id="btn-newfolder" class="tb" title="新增資料夾 (Ctrl+Shift+N)"><svg viewBox="0 0 20 20"><path d="M2.8 6.2c0-1 .8-1.7 1.7-1.7h3.2l1.6 1.6h6.2c1 0 1.7.8 1.7 1.7v6.4c0 1-.8 1.7-1.7 1.7H4.5c-1 0-1.7-.8-1.7-1.7z"/><path d="M10 8.6v4.6M7.7 10.9h4.6"/></svg></button>
+          <button id="btn-dual" class="tb" title="雙窗格 (Ctrl+\)"><svg viewBox="0 0 20 20"><rect x="2.8" y="4" width="14.4" height="12" rx="2"/><path d="M10 4v12"/></svg></button>
           <button id="btn-preview" class="tb" title="預覽窗格 (Alt+P)"><svg viewBox="0 0 20 20"><rect x="2.8" y="4" width="14.4" height="12" rx="2"/><path d="M11.5 4v12"/><path d="M13.4 7.5h2M13.4 10h2" /></svg></button>
           <button id="btn-more" class="tb" title="更多選項"><svg viewBox="0 0 20 20"><circle cx="5" cy="10" r="1.2" class="fill"/><circle cx="10" cy="10" r="1.2" class="fill"/><circle cx="15" cy="10" r="1.2" class="fill"/></svg></button>
         </div>
@@ -96,6 +99,11 @@
         <span id="status-text"></span>
         <input id="zoom" type="range" min="48" max="160" step="8" title="圖像大小">
       </footer>
+      </div>
+      <!-- Two panes side by side: the right one is this page again (?pane=2). -->
+      <div id="split-resizer" hidden></div>
+      <iframe id="pane2" title="右側窗格" hidden></iframe>
+      </div>
     </main>
   </div>
 
