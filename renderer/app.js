@@ -25,7 +25,7 @@
     startup: 'restore', startDir: '', newTab: 'home', theme: 'system', density: 'normal',
     showExt: true, foldersFirst: true, sizeBase: 1000, confirmTrash: false, autoUpdate: true, colPreview: true,
     rememberView: true, folderViews: {}, menuStyle: 'windows', calcSizes: false, smart: [], uiScale: 1, nativePreview: true,
-    keepRunning: true, runAtLogin: false,
+    keepRunning: true, resetOnClose: true, runAtLogin: false,
   }, readPrefs());
   // Like Finder, reopen the last tabs. Earlier versions saved 'home' as the
   // default, so move that over once.
@@ -1571,6 +1571,18 @@
     } else {
       renderTabs();
     }
+  }
+
+  // Closing the window (it stays running, see keepRunning) starts over: one tab,
+  // in the folder the app opens at, so reopening it is like a fresh start.
+  async function resetTabs() {
+    const start = startupDir();
+    lastBg = null;
+    state = newTabState();
+    tabs.splice(0, tabs.length, state);
+    syncSearchUi();
+    if (!(await navigate(start, { root: start, animate: false }))) await navigate(HOME, { animate: false });
+    content.scrollTop = 0;
   }
 
   function cycleTab(step) {
@@ -3551,6 +3563,7 @@
         ['丟到資源回收筒前先確認', null, sw('confirmTrash')],
         api.checkUpdate && ['自動檢查更新', '啟動後在背景檢查一次', sw('autoUpdate')],
         api.setKeepRunning && ['關閉視窗後在背景執行', '按 × 只把視窗藏起來，程式留在通知區域，再打開就不用等待；要完全結束請在通知區域的圖示上按右鍵 →「結束」', sw('keepRunning')],
+        api.setKeepRunning && prefs.keepRunning && ['關閉視窗時清除分頁', '再打開時只有一個分頁，在「啟動時打開」設定的資料夾（設為「上次的所有分頁」時是「常用」）', sw('resetOnClose')],
         api.setRunAtLogin && ['登入 Windows 時在背景啟動', '開機後第一次打開也不用等待', sw('runAtLogin')],
       ] },
       { id: 'look', title: '外觀', rows: [
@@ -3627,7 +3640,7 @@
       let value = t.type === 'checkbox' ? t.checked !== !!t.dataset.invert : t.value;
       if (key === 'sizeBase' || key === 'uiScale') value = Number(value);
       setPref(key, value);
-      if (t.tagName === 'SELECT') renderSettings(w); // rows can depend on a choice
+      if (t.tagName === 'SELECT' || key === 'keepRunning') renderSettings(w); // rows can depend on a choice
     });
     w.addEventListener('click', async (ev) => {
       const sec = ev.target.closest('[data-sec]');
@@ -3698,7 +3711,10 @@
     if (prefs.runAtLogin) api.setRunAtLogin?.(true); // keeps the path right after the app moves or updates
     // Launching the app again shows this window; a folder it was given opens in a new tab.
     api.onOpenDir?.((dir) => openTab(dir || newTabDir()));
-    api.onHidden?.(() => { ql.close(); closeMenu(); document.body.classList.add('caption-idle'); });
+    api.onHidden?.(() => {
+      ql.close(); closeMenu(); document.body.classList.add('caption-idle');
+      if (prefs.resetOnClose) resetTabs();
+    });
     try {
       G.places = await api.places();
       // A folder passed in wins; otherwise the startup setting.
