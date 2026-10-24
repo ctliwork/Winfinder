@@ -87,9 +87,11 @@ def icon():
         paint(scene, SHADOW, shadow_of(m, 10, 8, 55))
         paint(scene, colour, m)
 
-    T = (40, 34, 472, 466)  # the tile, leaving room for its shadow below
+    # The tile fills nearly all of the canvas, as Windows icons do (the macOS
+    # margin made it look small on the taskbar), with a tight shadow below.
+    T = (6, 4, 506, 502)
     img = Image.new('RGBA', (W, W), (0, 0, 0, 0))
-    paint(img, (0, 30, 70), shadow_of(squircle(T[0] + 4, T[1], T[2] - 4, T[3]), 10, 9, 70))
+    paint(img, (0, 30, 70), shadow_of(squircle(T[0] + 4, T[1], T[2] - 4, T[3]), 4, 3, 70))
     paint(img, scene, squircle(*T))
     return img.resize((512, 512), Image.LANCZOS)
 
