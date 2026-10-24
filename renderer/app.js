@@ -1114,7 +1114,10 @@
       preview._key = key;
       nativeHide();
       preview.innerHTML = shown ? previewCard(shown) : multi ? multiCard(multi) : '';
-      if (shown) fillPreview($('.cp-media', preview), shown);
+      if (shown) {
+        fillPreview($('.cp-media', preview), shown);
+        addMediaInfo($('.pv-table', preview), shown, () => preview._key === key);
+      }
       preview.classList.toggle('empty', !shown && !multi);
       fillShellIcons(preview);
     }
@@ -1557,7 +1560,25 @@
     }
   }
 
+  // Closed tabs, newest last, for Ctrl+Shift+T.
+  const closedTabs = [];
+  function rememberClosed(t) {
+    if (t.cwd === HOME && !t.search.smart) return;
+    closedTabs.push({ dir: t.cwd || HOME, smart: t.search.smart || null, at: tabs.indexOf(t) });
+    if (closedTabs.length > 20) closedTabs.shift();
+  }
+  async function reopenTab() {
+    const c = closedTabs.pop();
+    if (!c) return;
+    await openTab(c.dir, { smart: c.smart && smartById(c.smart) });
+    // Back where it was in the row.
+    tabs.splice(tabs.indexOf(state), 1);
+    tabs.splice(Math.min(c.at, tabs.length), 0, state);
+    renderTabs();
+  }
+
   async function closeTab(t) {
+    rememberClosed(t);
     if (tabs.length === 1) { // keep the window open: the last tab becomes Home
       t.history = []; t.hIndex = -1;
       await navigate(HOME);
@@ -2670,7 +2691,9 @@
       { label: '複製分頁', action: () => openTab(t.cwd || HOME, { smart: smartById(t.search.smart) }) },
       '-',
       { label: '關閉分頁', kbd: '滑鼠中鍵', action: () => closeTab(t) },
-      { label: '關閉其他分頁', disabled: tabs.length < 2, action: async () => { tabs.splice(0, tabs.length, t); await switchTab(t); renderTabs(); } },
+      { label: '關閉其他分頁', disabled: tabs.length < 2, action: async () => { tabs.filter((x) => x !== t).reverse().forEach(rememberClosed); /* reopened first to last */ tabs.splice(0, tabs.length, t); await switchTab(t); renderTabs(); } },
+      '-',
+      { label: '重新打開關閉的分頁', kbd: 'Ctrl+Shift+T', disabled: !closedTabs.length, action: reopenTab },
     ], ev.clientX, ev.clientY);
   });
   $('#tab-new').addEventListener('click', () => openTab(newTabDir()));
@@ -3055,6 +3078,7 @@
     if ((ctrl && k.toLowerCase() === 'l') || (ev.altKey && k.toLowerCase() === 'd') || k === 'F4') { ev.preventDefault(); editPath(); return; }
     if (ctrl && ev.altKey && k.toLowerCase() === 'n') { ev.preventDefault(); newFile(); return; }
     if (ev.altKey && !ctrl && k.toLowerCase() === 'p') { ev.preventDefault(); togglePane(); return; }
+    if (ctrl && ev.shiftKey && k.toLowerCase() === 't') { ev.preventDefault(); reopenTab(); return; }
     if (ctrl && k.toLowerCase() === 't') { ev.preventDefault(); openTab(newTabDir()); return; }
     if (ctrl && k.toLowerCase() === 'w') { ev.preventDefault(); closeTab(state); return; }
     if (ctrl && k === 'Tab') { ev.preventDefault(); cycleTab(ev.shiftKey ? -1 : 1); return; }
@@ -3165,6 +3189,23 @@
     return `<div class="pv-table">${rows.filter(([, v]) => v != null && v !== '').map(([k, v]) => `<div><span>${k}</span><span>${esc(v)}</span></div>`).join('')}</div>`;
   }
 
+  // Photo, video and music details (size in pixels, date taken, camera, length…),
+  // as Explorer's details pane shows them; added under `after` once read, if
+  // `current()` still says the same file is shown.
+  const mediaCache = new Map();
+  async function addMediaInfo(after, e, current) {
+    if (!api.mediaInfo || e.isDir || !['image', 'video', 'audio'].includes(I.category(e.ext))) return;
+    const key = `${e.path}|${e.mtime}`;
+    let rows = mediaCache.get(key);
+    if (!rows) {
+      rows = await api.mediaInfo(e.path);
+      if (mediaCache.size > 300) mediaCache.clear();
+      mediaCache.set(key, rows);
+    }
+    if (!rows.length || !current() || !after.isConnected) return;
+    after.insertAdjacentHTML('afterend', infoRows(rows).replace('pv-table', 'pv-table pv-media-info'));
+  }
+
   async function renderPane() {
     const sel = selectedEntries();
     const media = $('#pv-media');
@@ -3192,6 +3233,7 @@
           : '<button class="pv-calc">計算</button>'}</span></div></div>` : ''}
         <button class="pv-open">${e.isDir ? '打開' : '以預設 App 打開'}</button>`;
       $('.pv-open', info).onclick = () => openEntry(e);
+      addMediaInfo($('.pv-table', info), e, () => paneShown === key);
       const calc = $('.pv-calc', info);
       if (calc) calc.onclick = () => { calc.disabled = true; calc.textContent = '計算中…'; calcSize(e); };
       return;
@@ -3542,7 +3584,7 @@
 
   let settingsSec = 'general';
   const SHORTCUTS = [
-    ['Ctrl+T／Ctrl+W', '新分頁／關閉分頁'], ['Ctrl+1～4', '圖像／列表／直欄／圖庫'], ['Ctrl+L、Alt+D、F4', '輸入路徑'],
+    ['Ctrl+T／Ctrl+W', '新分頁／關閉分頁'], ['Ctrl+Shift+T', '重新打開關閉的分頁'], ['Ctrl+1～4', '圖像／列表／直欄／圖庫'], ['Ctrl+L、Alt+D、F4', '輸入路徑'],
     ['Ctrl+Shift+N', '新增資料夾'], ['Ctrl+Alt+N', '新增文字文件'], ['F2', '重新命名（多選時批次重新命名）'],
     ['空白鍵', '快速查看'], ['Alt+P', '預覽窗格'], ['Ctrl+Shift+.', '顯示隱藏的項目'], ['Ctrl+F', '搜尋'],
     ['Ctrl+Alt+C', '拷貝路徑'], ['Alt+←／→／↑', '上一頁／下一頁／上層'], ['Ctrl+,', '設定'],
@@ -3670,6 +3712,14 @@
     if (b.dataset.act !== 'max') document.body.classList.add('caption-idle');
     ({ close: W.close, min: W.minimize, max: W.toggleMaximize })[b.dataset.act]();
   });
+  // Windows 11: resting on the maximize button shows the snap layouts, as on
+  // other windows (see snap_layouts in lib.rs).
+  if (W.snapLayouts) {
+    const max = $('#caption [data-act="max"]');
+    let timer = 0;
+    max.addEventListener('pointerenter', (ev) => { if (!ev.buttons) timer = setTimeout(W.snapLayouts, 450); });
+    for (const t of ['pointerleave', 'pointerdown']) max.addEventListener(t, () => clearTimeout(timer));
+  }
   window.addEventListener('pointermove', () => document.body.classList.remove('caption-idle'));
   W.onState((s) => document.body.classList.toggle('maximized', !!s.maximized));
   // Tauri drag regions already maximize on double-click.

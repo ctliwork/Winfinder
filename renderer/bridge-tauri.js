@@ -106,6 +106,7 @@
     restoreTrash: (paths) => invoke('restore_trash', { paths }).catch(() => paths),
     readText: (path) => invoke('read_text', { path }),
     richPreview: (path) => invoke('rich_preview', { path }),
+    mediaInfo: (path) => invoke('media_info', { path }).catch(() => []),
     setKeepRunning: (on) => invoke('set_keep_running', { on }).catch(() => {}),
     setRunAtLogin: (on) => invoke('set_run_at_login', { on }).then(() => '', (e) => String(e)),
     quit: () => invoke('quit'),
@@ -140,6 +141,7 @@
   window.winApi = {
     minimize: () => win.minimize(),
     toggleMaximize: () => win.toggleMaximize(),
+    snapLayouts: () => invoke('snap_layouts').catch(() => {}),
     close: () => win.close(),
     setTheme: (theme) => win.setTheme(theme === 'system' ? null : theme).catch(() => {}),
     onState: (cb) => {

@@ -93,6 +93,9 @@ async function preview(page, name) {
   return r;
 }
 
+// A photo with EXIF details (camera, exposure, date, GPS) for the media info step.
+fs.copyFileSync(path.resolve('src-tauri/tests/exif.jpg'), path.join(FILES, '相機.jpg'));
+
 let { browser, page } = {};
 await step('start', async () => {
   const t = Date.now();
@@ -121,6 +124,47 @@ await step('arrow keys', async () => {
   await page.keyboard.press('ArrowDown');
   await page.waitForFunction(() => document.querySelector('.cp-media')?.dataset.kind, null, { timeout: 8000 });
   return { ms: Date.now() - t, ...(await page.evaluate(PROBE)) };
+});
+
+await step('media info', async () => {
+  await page.locator('.col .crow', { hasText: '相機.jpg' }).first().click();
+  await page.waitForSelector('.col-preview .pv-media-info', { timeout: 8000 });
+  await page.evaluate(() => document.querySelector('.col-preview .pv-media-info').scrollIntoView());
+  desktop('media-info');
+  const rows = await page.$$eval('.col-preview .pv-media-info > div', (els) => els.map((e) => [...e.children].map((c) => c.textContent)));
+  await page.locator('.col .crow', { hasText: '照片.jpg' }).first().click();
+  await page.waitForFunction(() => document.querySelector('.col-preview .pv-name')?.textContent === '照片.jpg');
+  await sleep(1500);
+  const plain = await page.$$eval('.col-preview .pv-media-info > div', (els) => els.map((e) => [...e.children].map((c) => c.textContent)));
+  return { rows, plain };
+});
+
+await step('reopen closed tab', async () => {
+  const titles = () => page.$$eval('#tabs .tab', (els) => els.map((e) => e.textContent.trim()));
+  await page.locator('.col .crow', { hasText: '子資料夾' }).first().click({ button: 'middle' });
+  await sleep(800);
+  const opened = await titles();
+  await page.locator('#tabs .tab').last().click();
+  await page.keyboard.press('Control+W');
+  await sleep(500);
+  const closed = await titles();
+  await page.keyboard.press('Control+Shift+T');
+  await sleep(800);
+  const reopened = await titles();
+  await page.keyboard.press('Control+W');
+  await page.locator('#tabs .tab').first().click();
+  return { opened, closed, reopened };
+});
+
+await step('snap layouts', async () => {
+  const build = ps('(Get-ItemProperty "HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion").CurrentBuildNumber');
+  await page.hover('#caption [data-act="max"]');
+  await sleep(2000);
+  desktop('snap-layouts');
+  ps("Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('{ESC}')");
+  await page.mouse.move(400, 400);
+  await sleep(500);
+  return { build, ...windows() };
 });
 
 await step('big folder', async () => {
@@ -179,7 +223,9 @@ await step('open again', async () => {
   await sleep(2000);
   desktop('opened-again');
   const closeLit = await page.evaluate(() => getComputedStyle(document.querySelector('.cap.close')).backgroundColor);
-  return { ...r, ...windows(), closeButton: closeLit };
+  // Closing cleared the tabs: one tab, in the startup folder.
+  const tabs = await page.$$eval('#tabs .tab', (els) => els.map((e) => e.textContent.trim()));
+  return { ...r, ...windows(), closeButton: closeLit, tabs };
 });
 
 await step('quit', async () => {

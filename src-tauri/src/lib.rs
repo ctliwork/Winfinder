@@ -3,6 +3,7 @@ mod cloud;
 mod content;
 #[doc(hidden)]
 pub mod fsops;
+mod media;
 mod places;
 mod preview;
 mod recent;
@@ -375,6 +376,12 @@ async fn rich_preview(path: String) -> Result<preview::Preview, String> {
     blocking(move || preview::preview(&path)).await?
 }
 
+/// Photo, video and music details (size in pixels, date taken, camera, length...).
+#[tauri::command]
+async fn media_info(path: String) -> Vec<(String, String)> {
+    blocking(move || media::info(&path)).await.unwrap_or_default()
+}
+
 /// Searches inside files below `root` through the Windows Search index.
 #[tauri::command]
 async fn content_search(root: String, query: String, filter: Option<search::Filter>) -> Result<content::ContentResult, String> {
@@ -715,6 +722,54 @@ fn create_tray(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+/// Windows 11's snap layouts for our maximize button. Windows shows them when the
+/// pointer rests on a window's own maximize button, which this window doesn't
+/// have (the page draws its caption), so the page asks after a short hover and
+/// they open with Win+Z, as for any window. Only for this window while it's in
+/// front (Win+Z acts on the front window), and not when they're turned off in
+/// Settings > System > Multitasking.
+#[tauri::command]
+fn snap_layouts(window: tauri::WebviewWindow) {
+    #[cfg(windows)]
+    {
+        use windows::Win32::UI::Input::KeyboardAndMouse::{SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, VIRTUAL_KEY, VK_LWIN};
+        if !snap_layouts_on() || !window.is_focused().unwrap_or(false) {
+            return;
+        }
+        let key = |vk: VIRTUAL_KEY, flags: KEYBD_EVENT_FLAGS| INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: vk, wScan: 0, dwFlags: flags, time: 0, dwExtraInfo: 0 } },
+        };
+        let z = VIRTUAL_KEY(b'Z' as u16);
+        let none = KEYBD_EVENT_FLAGS(0);
+        let inputs = [key(VK_LWIN, none), key(z, none), key(z, KEYEVENTF_KEYUP), key(VK_LWIN, KEYEVENTF_KEYUP)];
+        unsafe { SendInput(&inputs, std::mem::size_of::<INPUT>() as i32) };
+    }
+    #[cfg(not(windows))]
+    let _ = window;
+}
+
+/// Windows 11 (build 22000 on) with snap layouts on the maximize button not turned off.
+#[cfg(windows)]
+fn snap_layouts_on() -> bool {
+    use windows::core::w;
+    use windows::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, RRF_RT_REG_DWORD, RRF_RT_REG_SZ};
+    let mut buf = [0u16; 32];
+    let mut size = (buf.len() * 2) as u32;
+    let r = unsafe { RegGetValueW(HKEY_LOCAL_MACHINE, w!("SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion"), w!("CurrentBuildNumber"), RRF_RT_REG_SZ, None, Some(buf.as_mut_ptr() as _), Some(&mut size)) };
+    let n = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+    let build: u32 = if r.is_ok() { String::from_utf16_lossy(&buf[..n]).trim().parse().unwrap_or(0) } else { 0 };
+    if build < 22000 {
+        return false;
+    }
+    let mut on = 1u32;
+    let mut size = 4u32;
+    let r = unsafe {
+        RegGetValueW(HKEY_CURRENT_USER, w!("Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced"), w!("EnableSnapAssistFlyout"), RRF_RT_REG_DWORD, None, Some(&mut on as *mut u32 as _), Some(&mut size))
+    };
+    r.is_err() || on != 0 // not set means on
+}
+
 /// Starts the app hidden when the user signs in to Windows (HKCU\...\Run).
 #[tauri::command]
 fn set_run_at_login(on: bool) -> Result<(), String> {
@@ -805,7 +860,7 @@ pub fn run() {
             places, pin_home, list_dir, list_many, cloud_pin, new_file, dir_size, cancel_dir_sizes, compress, extract, open_terminal, native_menu, properties,
             clipboard_write, clipboard_read, clipboard_clear, save_theme, set_ui_scale, preview_available, preview_show, preview_move, preview_hide, preview_warm, cancel_transfer, restore_trash,
             everything_available, everything, content_search, disk_free, disk_space, recent_files, resolve_link, folder_count, thumbnail, open_path, reveal, trash, rename, mkdir,
-            transfer, read_text, rich_preview, search, watch, check_update, install_update, set_keep_running, set_run_at_login, quit
+            transfer, read_text, rich_preview, media_info, search, watch, check_update, install_update, set_keep_running, set_run_at_login, snap_layouts, quit
         ])
         .run(tauri::generate_context!())
         .expect("error while running Winfinder");
