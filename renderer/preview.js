@@ -264,7 +264,7 @@
     if (!media && !doc) return;
     let z = 1; let x = 0; let y = 0;
     const bar = document.createElement('div');
-    bar.className = 'zbar';
+    bar.className = media?.tagName === 'VIDEO' ? 'zbar top' : 'zbar'; // a video's own controls are at the bottom
     bar.innerHTML = '<button data-z="-1" title="縮小 (Ctrl+-)">−</button><span>100%</span><button data-z="1" title="放大 (Ctrl+=)">+</button><button data-z="0" title="符合視窗 (Ctrl+0)">符合</button>';
     el.appendChild(bar);
     const apply = () => {
