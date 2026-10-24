@@ -22,9 +22,15 @@ const report = { exe: EXE };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const ps = (script) => spawnSync('powershell', ['-NoProfile', '-Command', script], { encoding: 'utf8' }).stdout.trim();
 let shots = 0;
-function desktop(name) {
+// `log`: also print a small JPEG of it into the job log (SHOT <name> <base64>),
+// for when the artifact can't be downloaded.
+function desktop(name, { log = false } = {}) {
   const file = path.join(OUT, `${String(++shots).padStart(2, '0')}-${name}.png`);
   ps(`Add-Type -AssemblyName System.Windows.Forms,System.Drawing; $b=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds; $bmp=New-Object System.Drawing.Bitmap $b.Width,$b.Height; $g=[System.Drawing.Graphics]::FromImage($bmp); $g.CopyFromScreen($b.Location,[System.Drawing.Point]::Empty,$b.Size); $bmp.Save('${file}')`);
+  if (!log) return;
+  const small = file.replace(/\.png$/, '.jpg');
+  ps(`Add-Type -AssemblyName System.Drawing; $i=[System.Drawing.Image]::FromFile('${file}'); $w=900; $h=[int]($i.Height*$w/$i.Width); $s=New-Object System.Drawing.Bitmap $i,$w,$h; $c=[System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | ? { $_.MimeType -eq 'image/jpeg' }; $p=New-Object System.Drawing.Imaging.EncoderParameters 1; $p.Param[0]=New-Object System.Drawing.Imaging.EncoderParameter ([System.Drawing.Imaging.Encoder]::Quality), 55L; $s.Save('${small}', $c, $p)`);
+  if (fs.existsSync(small)) console.log(`SHOT ${name} ${fs.readFileSync(small).toString('base64')}`);
 }
 // How many app processes run, and whether one shows its window.
 function windows() {
@@ -101,6 +107,8 @@ await step('start', async () => {
   const t = Date.now();
   launch([`--dir=${FILES}`]);
   ({ browser, page } = await connect());
+  // The first page may still be the webview's blank one, before the app loads.
+  await page.waitForSelector('#app', { timeout: 20000 });
   await page.evaluate(() => {
     const k = 'winfinder:prefs';
     const p = JSON.parse(localStorage.getItem(k) || '{}');
@@ -160,7 +168,7 @@ await step('snap layouts', async () => {
   const build = ps('(Get-ItemProperty "HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion").CurrentBuildNumber');
   await page.hover('#caption [data-act="max"]');
   await sleep(2000);
-  desktop('snap-layouts');
+  desktop('snap-layouts', { log: true });
   ps("Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('{ESC}')");
   await page.mouse.move(400, 400);
   await sleep(500);
@@ -168,6 +176,11 @@ await step('snap layouts', async () => {
 });
 
 await step('two panes', async () => {
+  try { return await twoPanes(); } finally {
+    if (await page.$eval('#pane2', (e) => !e.hidden).catch(() => false)) await page.evaluate(() => window.__finderMain.setDual(false));
+  }
+});
+async function twoPanes() {
   await page.locator('.col .crow', { hasText: '筆記.txt' }).first().click();
   await page.keyboard.press('Control+\\');
   let frame = null;
@@ -177,7 +190,7 @@ await step('two panes', async () => {
   const sub = path.join(FILES, '子資料夾');
   await frame.evaluate((dir) => window.__finderPane.go(dir), sub);
   await frame.waitForFunction(() => document.querySelector('#title')?.textContent === '子資料夾', null, { timeout: 8000 });
-  desktop('two-panes');
+  desktop('two-panes', { log: true });
   await page.locator('.col .crow', { hasText: '筆記.txt' }).first().click({ button: 'right' });
   const items = await page.$$eval('#menu .mi, #menu > *', (els) => els.map((e) => e.textContent.trim()).filter((t) => /到「/.test(t)));
   await page.locator('#menu >> text=/^拷貝到「子資料夾」/').first().click();
@@ -187,7 +200,7 @@ await step('two panes', async () => {
   await page.keyboard.press('Control+\\');
   await sleep(500);
   return { menu: items, copied: fs.existsSync(path.join(sub, '筆記.txt')), right, closed: await page.$eval('#pane2', (e) => e.hidden) };
-});
+}
 
 await step('big folder', async () => {
   const t = Date.now();
