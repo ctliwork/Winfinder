@@ -1,27 +1,11 @@
 // Maps the UI's fsApi / pathApi / winApi onto Tauri commands.
 // Under Electron the preload script provides these instead and this file does nothing.
 (() => {
-  // The right-hand pane (two panes side by side) is this page again in an
-  // iframe: it borrows the window's Tauri bridge and environment.
-  const PANE = window.parent !== window && (() => { try { return !!window.parent.__TAURI__; } catch { return false; } })();
-  if (PANE) {
-    const q = new URLSearchParams(location.search);
-    window.__TAURI__ = window.parent.__TAURI__;
-    window.__finderEnv = { ...window.parent.__finderEnv, dir: q.get('dir') || null, background: false, pane: q.get('pane') };
-  }
   const T = window.__TAURI__;
   if (!T) return;
   const { invoke, convertFileSrc, Channel } = T.core;
   const env = window.__finderEnv || {};
-  // Event listeners run in this page: the pane's go away with it.
-  const unlisten = [];
-  const listen = (name, cb) => { const p = T.event.listen(name, cb); unlisten.push(p); return p; };
-  if (PANE) {
-    window.addEventListener('pagehide', () => {
-      unlisten.forEach((p) => p.then((u) => u()).catch(() => {}));
-      invoke('watch', { dirs: [], pane: 2 }).catch(() => {});
-    });
-  }
+  const listen = (name, cb) => T.event.listen(name, cb);
   const sep = env.sep || '/';
   const isWin = sep === '\\';
 
@@ -111,8 +95,7 @@
       clipboardRead: () => invoke('clipboard_read').catch(() => null),
       clipboardClear: () => invoke('clipboard_clear').catch(() => {}),
     } : {}),
-    // One native preview window at a time: it belongs to the left pane.
-    ...(isWin && !PANE ? {
+    ...(isWin ? {
       previewAvailable: (ext) => invoke('preview_available', { ext }).catch(() => false),
       previewShow: (path, gen, host, inner, dark) => invoke('preview_show', { path, gen, host, inner, dark }).then(() => true, (e) => String(e)),
       previewMove: (host, inner) => invoke('preview_move', { host, inner }).catch(() => {}),
@@ -144,7 +127,7 @@
     everythingAvailable: () => invoke('everything_available').catch(() => false),
     everything: (query) => invoke('everything', { query }).catch(() => null),
     ...(isWin ? { contentSearch: (root, query, filter) => invoke('content_search', { root, query, filter }).catch((e) => ({ error: String(e) })) } : {}),
-    watch: (dirs) => { invoke('watch', { dirs, pane: PANE ? 2 : 1 }).catch(() => {}); },
+    watch: (dirs) => { invoke('watch', { dirs }).catch(() => {}); },
     onChanged: (cb) => listen('fs-changed', (e) => cb(e.payload)),
     // Resolves when the drag is over (dropped anywhere or cancelled).
     startDrag: (files) => {
@@ -165,15 +148,13 @@
     close: () => win.close(),
     setTheme: (theme) => win.setTheme(theme === 'system' ? null : theme).catch(() => {}),
     onState: (cb) => {
-      if (PANE) return; // the pane has no caption buttons
       const update = async () => cb({ maximized: await win.isMaximized() });
       win.onResized(update);
       update();
     },
   };
   // Started at sign-in: stay hidden until opened from the notification area or launched again.
-  window.__finderReady = () => { if (!env.background && !PANE) win.show(); };
-  if (PANE) return; // the window's drag regions and drops are the left pane's (it passes drops on)
+  window.__finderReady = () => { if (!env.background) win.show(); };
 
   // Native drag regions: Tauri only honours the attribute on the element itself.
   for (const sel of ['#sidebar', '.sb-top', '#tabbar', '#tabs', '.tb-drag', '#toolbar', '#title-wrap', '#title', '#toolbar .spacer']) {
@@ -181,26 +162,13 @@
   }
 
   // ---------- drops (OS files and our own drags) ----------
-  // Over the right-hand pane they go to that page, in its own coordinates.
-  const handler = (pos) => {
-    const f = document.getElementById('pane2');
-    if (f && !f.hidden && pos) {
-      const r = f.getBoundingClientRect();
-      const d = f.contentWindow?.__finderDnd;
-      if (d && pos.x >= r.left && pos.x < r.right && pos.y >= r.top && pos.y < r.bottom) return [d, { x: pos.x - r.left, y: pos.y - r.top }];
-    }
-    return [window.__finderDnd, pos];
-  };
-  let last = null;
   T.webview.getCurrentWebview().onDragDropEvent((event) => {
     const p = event.payload;
-    const pos = p.position ? { x: p.position.x / devicePixelRatio, y: p.position.y / devicePixelRatio } : null;
-    if (p.type === 'leave') { last?.leave(); last = null; return; }
-    const [d, at] = handler(pos);
+    const d = window.__finderDnd;
     if (!d) return;
-    if (last && last !== d) last.leave();
-    last = d;
-    if (p.type === 'enter' || p.type === 'over') d.over(at.x, at.y);
-    else if (p.type === 'drop') { d.drop(at.x, at.y, p.paths || []); last = null; }
+    if (p.type === 'leave') { d.leave(); return; }
+    const pos = p.position ? { x: p.position.x / devicePixelRatio, y: p.position.y / devicePixelRatio } : null;
+    if (p.type === 'enter' || p.type === 'over') d.over(pos.x, pos.y);
+    else if (p.type === 'drop') d.drop(pos.x, pos.y, p.paths || []);
   });
 })();

@@ -1,19 +1,12 @@
 (() => {
-  // Two panes side by side: the right one is this page again in an iframe
-  // (?pane=2), which borrows from the window's page whatever it lacks.
-  const host = window.parent !== window ? window.parent : null;
-  const api = window.fsApi || host?.fsApi;
-  const P = window.pathApi || host?.pathApi;
-  const W = window.winApi || host?.winApi;
+  const api = window.fsApi;
+  const P = window.pathApi;
+  const W = window.winApi;
   const I = window.Icons;
   const esc = I.esc;
 
   // Tauri injects __finderEnv; the Electron shell passes the same values as URL params.
-  const params = Object.fromEntries(new URLSearchParams(location.search));
-  const env = window.__finderEnv || (params.pane && host ? { ...Object.fromEntries(new URLSearchParams(host.location.search)), ...params } : params);
-  const PANE2 = env.pane === '2';
-  const main = () => (PANE2 ? host.__finderMain : null); // the left pane, seen from the right one
-  if (PANE2) document.body.classList.add('pane-mode');
+  const env = window.__finderEnv || Object.fromEntries(new URLSearchParams(location.search));
   const platform = env.platform;
   const isWin = platform === 'win32';
   const isTauri = !!window.__TAURI__;
@@ -1517,7 +1510,6 @@
   // Reopens the last session's tabs (Settings > 啟動時打開).
   function saveSession() {
     if (G.booting) return;
-    if (PANE2) { prefs.pane2Dir = state.cwd || HOME; savePrefs(); return; }
     prefs.session = {
       active: tabs.indexOf(state),
       tabs: tabs.map((t) => (t.search.smart ? { dir: t.cwd || HOME, smart: t.search.smart } : { dir: t.cwd || HOME })),
@@ -1546,7 +1538,6 @@
 
   let lastBg = null; // keeps background tabs in the order they were opened, like browsers
   async function openTab(dir = HOME, { activate = true, smart = null } = {}) {
-    if (PANE2) { main()?.openTab(dir, { activate, smart: smart?.id }); return; } // the tabs are the left pane's
     const t = newTabState();
     const go = (silent) => (smart ? openSmart(smart, { silent }) : navigate(dir, { root: dir, silent }));
     let at = tabs.indexOf(state) + 1;
@@ -1577,7 +1568,6 @@
     if (closedTabs.length > 20) closedTabs.shift();
   }
   async function reopenTab() {
-    if (PANE2) { main()?.reopenTab(); return; }
     const c = closedTabs.pop();
     if (!c) return;
     await openTab(c.dir, { smart: c.smart && smartById(c.smart) });
@@ -1588,7 +1578,6 @@
   }
 
   async function closeTab(t) {
-    if (PANE2) return;
     rememberClosed(t);
     if (tabs.length === 1) { // keep the window open: the last tab becomes Home
       t.history = []; t.hIndex = -1;
@@ -1618,7 +1607,6 @@
   }
 
   function cycleTab(step) {
-    if (PANE2) { main()?.cycleTab(step); return; }
     const i = tabs.indexOf(state);
     switchTab(tabs[(i + step + tabs.length) % tabs.length]);
   }
@@ -2437,7 +2425,6 @@
       { label: '拷貝', kbd: 'Ctrl+C', action: () => copySelected('copy') },
       { label: '剪下', kbd: 'Ctrl+X', disabled: virt, action: () => copySelected('move') },
       { label: '拷貝路徑', kbd: 'Ctrl+Alt+C', action: copyPath },
-      ...otherSideItems(entries),
       '-',
       ...(api.compress && !virt ? [{ label: '壓縮成 ZIP 檔', action: () => compressSelected(entries) }] : []),
       ...(one && ARCHIVES.has(one.ext) && api.extract ? [{ label: `解壓縮到「${archiveStem(one.name)}」`, action: () => extractZip(one) }] : []),
@@ -2490,7 +2477,6 @@
       { label: one ? '快速查看' : `快速查看 ${entries.length} 個項目`, action: () => ql.open() },
       entries.length > 1 && { label: `批次重新命名 ${entries.length} 個項目…`, action: () => batchRename(entries) },
       { label: '拷貝路徑', action: copyPath },
-      ...otherSideItems(entries),
       one?.isDir && api.dirSize && { label: '計算大小', action: () => calcSize(one) },
       one?.ext === 'lnk' && api.resolveLink && { label: '顯示原始項目', action: () => showOriginal(one) },
     ];
@@ -2597,8 +2583,7 @@
       ...sortItems(),
       '-',
       { label: '顯示隱藏的項目', kbd: 'Ctrl+Shift+.', check: prefs.showHidden, action: toggleHidden },
-      ...(PANE2 ? [] : [{ label: prefs.sidebarHidden ? '顯示側邊欄' : '隱藏側邊欄', kbd: 'Ctrl+Alt+S', action: toggleSidebar }]),
-      { label: '雙窗格', kbd: 'Ctrl+\\', check: isDual(), action: () => setDual(!isDual()) },
+      { label: prefs.sidebarHidden ? '顯示側邊欄' : '隱藏側邊欄', kbd: 'Ctrl+Alt+S', action: toggleSidebar },
       { label: inColumnsMode() ? '顯示預覽欄' : '預覽窗格', kbd: 'Alt+P', check: inColumnsMode() ? !!prefs.colPreview : !!prefs.previewPane, action: togglePane },
       ...(viewMode() === 'list' && api.dirSize ? [{ label: '計算所有大小', check: !!prefs.calcSizes, action: toggleCalcSizes }] : []),
       { label: '重新整理', kbd: 'F5', action: () => refresh(true) },
@@ -2620,11 +2605,9 @@
       return;
     }
     const p = ev.target.closest('.place');
-    const right = activePane === 2 ? pane2Page() : null; // two panes: the one last worked in
-    if (p?.dataset.smart) { if (right) right.smart(p.dataset.smart); else { const sf = smartById(p.dataset.smart); if (sf) openSmart(sf); } return; }
+    if (p?.dataset.smart) { const sf = smartById(p.dataset.smart); if (sf) openSmart(sf); return; }
     if (p?.dataset.path === PC) { toggleTree(PC); return; }
-    if (p && right) right.go(p.dataset.path);
-    else if (p) navigate(p.dataset.path, { root: p.dataset.path });
+    if (p) navigate(p.dataset.path, { root: p.dataset.path });
   });
   $('#places').addEventListener('dblclick', (ev) => {
     const p = ev.target.closest('.place');
@@ -2791,7 +2774,6 @@
     render();
   }
   function toggleSidebar() {
-    if (PANE2) return; // the sidebar is the window's
     prefs.sidebarHidden = !prefs.sidebarHidden;
     savePrefs();
     document.body.classList.toggle('sidebar-hidden', !!prefs.sidebarHidden);
@@ -3099,7 +3081,6 @@
     if (ctrl && ev.altKey && k.toLowerCase() === 'n') { ev.preventDefault(); newFile(); return; }
     if (ev.altKey && !ctrl && k.toLowerCase() === 'p') { ev.preventDefault(); togglePane(); return; }
     if (ctrl && ev.shiftKey && k.toLowerCase() === 't') { ev.preventDefault(); reopenTab(); return; }
-    if (ctrl && k === '\\') { ev.preventDefault(); setDual(!isDual()); return; }
     if (ctrl && k.toLowerCase() === 't') { ev.preventDefault(); openTab(newTabDir()); return; }
     if (ctrl && k.toLowerCase() === 'w') { ev.preventDefault(); closeTab(state); return; }
     if (ctrl && k === 'Tab') { ev.preventDefault(); cycleTab(ev.shiftKey ? -1 : 1); return; }
@@ -3610,7 +3591,7 @@
   const SHORTCUTS = [
     ['Ctrl+T／Ctrl+W', '新分頁／關閉分頁'], ['Ctrl+Shift+T', '重新打開關閉的分頁'], ['Ctrl+1～4', '圖像／列表／直欄／圖庫'], ['Ctrl+L、Alt+D、F4', '輸入路徑'],
     ['Ctrl+Shift+N', '新增資料夾'], ['Ctrl+Alt+N', '新增文字文件'], ['F2', '重新命名（多選時批次重新命名）'],
-    ['空白鍵', '快速查看'], ['Alt+P', '預覽窗格'], ['Ctrl+\\', '雙窗格'], ['Ctrl+Shift+.', '顯示隱藏的項目'], ['Ctrl+F', '搜尋'],
+    ['空白鍵', '快速查看'], ['Alt+P', '預覽窗格'], ['Ctrl+Shift+.', '顯示隱藏的項目'], ['Ctrl+F', '搜尋'],
     ['Ctrl+Alt+C', '拷貝路徑'], ['Alt+←／→／↑', '上一頁／下一頁／上層'], ['Ctrl+,', '設定'],
     ['Ctrl+Z', '復原'], ['Alt+Enter', '內容'], ['Shift+F10、Shift+右鍵', 'Windows 原生右鍵選單'],
   ];
@@ -3696,7 +3677,6 @@
     else if (['folderIcons', 'showHidden', 'showSystem', 'showExt', 'foldersFirst', 'sizeBase'].includes(key)) rerenderItems();
   }
   function openSettings(section) {
-    if (PANE2) { main()?.openSettings(section); return; } // over the whole window
     if (section) settingsSec = section;
     const w = openDialog('', { cls: 'settings' });
     renderSettings(w);
@@ -3749,9 +3729,7 @@
   W.onState((s) => document.body.classList.toggle('maximized', !!s.maximized));
   // Tauri drag regions already maximize on double-click.
   if (!isTauri) $('#toolbar').addEventListener('dblclick', (ev) => { if (!ev.target.closest('button, input')) W.toggleMaximize(); });
-  // Focus moving into the right-hand pane isn't the window losing it.
-  const checkFocus = () => setTimeout(() => document.body.classList.toggle('blurred', !document.hasFocus()));
-  window.addEventListener('blur', checkFocus);
+  window.addEventListener('blur', () => document.body.classList.add('blurred'));
   window.addEventListener('focus', () => document.body.classList.remove('blurred'));
 
   // sidebar resize
@@ -3773,120 +3751,6 @@
     window.addEventListener('mouseup', up);
   });
 
-  // ---------- two panes ----------
-  // Ctrl+\ or the toolbar button puts a second folder beside this one, as in
-  // Total Commander or Files. The right pane is this page again in an iframe
-  // (see PANE2): a whole folder view of its own, sharing the window's sidebar,
-  // tabs (the left pane's) and settings. The sidebar opens folders in the pane
-  // last worked in.
-  const pane2 = $('#pane2');
-  const pane2Page = () => (!PANE2 && !pane2.hidden ? pane2.contentWindow?.__finderPane : null);
-  let activePane = 1;
-  function paneActive(n) {
-    if (PANE2) { main()?.paneActive(2); return; }
-    if (pane2.hidden) n = 1;
-    activePane = n;
-    $('#pane1').classList.toggle('pane-inactive', n === 2);
-    try { pane2.contentDocument?.body.classList.toggle('pane-inactive', n === 1); } catch { /* not loaded */ }
-  }
-  function isDual() { return PANE2 || !pane2.hidden; }
-  function setDual(on) {
-    if (PANE2) { main()?.setDual(on); return; }
-    prefs.dualPane = on;
-    savePrefs();
-    document.body.classList.toggle('dual', on);
-    pane2.hidden = !on;
-    $('#split-resizer').hidden = !on;
-    $('#btn-dual').classList.toggle('on', on);
-    if (on) {
-      const dir = prefs.pane2Dir || state.cwd || HOME;
-      pane2.src = `index.html?${new URLSearchParams({ pane: '2', dir })}`;
-      pane2.onload = () => paneActive(activePane);
-    } else {
-      pane2.src = 'about:blank'; // unloads the right pane's page
-      paneActive(1);
-      content.focus();
-    }
-  }
-  // The other pane's folder, for 拷貝到另一側 / 搬移到另一側.
-  function otherDir() {
-    const d = PANE2 ? main()?.cwd() : pane2Page()?.cwd();
-    return d && d !== HOME ? d : null;
-  }
-  function otherSideItems(entries) {
-    const dest = isDual() && !entries.some(isVirtual) ? otherDir() : null;
-    if (!dest) return [];
-    const paths = entries.map((e) => e.path);
-    const here = paths.every((p) => norm(P.dirname(p)) === norm(dest));
-    return [
-      { label: `拷貝到「${displayName(dest)}」`, disabled: here, action: () => transfer('copy', paths, dest) },
-      { label: `搬移到「${displayName(dest)}」`, disabled: here, action: () => transfer('move', paths, dest) },
-    ];
-  }
-  if (PANE2) {
-    // What the left pane asks of this one.
-    window.__finderPane = {
-      go: (dir) => navigate(dir, { root: dir }),
-      smart: (id) => { const sf = smartById(id); if (sf) openSmart(sf); },
-      cwd: () => (state.search.results ? null : state.cwd),
-    };
-    for (const t of ['pointerdown', 'focusin']) document.addEventListener(t, () => paneActive(2), true);
-    window.addEventListener('blur', () => main()?.checkFocus());
-  } else {
-    window.__finderMain = {
-      openTab: (dir, o) => openTab(dir, { ...o, smart: smartById(o.smart) }),
-      reopenTab: () => reopenTab(),
-      cycleTab: (step) => cycleTab(step),
-      openSettings: (section) => openSettings(section),
-      paneActive: (n) => paneActive(n),
-      setDual: (on) => setDual(on),
-      cwd: () => (state.search.results ? null : state.cwd),
-      checkFocus: () => checkFocus(),
-    };
-    for (const t of ['pointerdown', 'focusin']) $('#pane1').addEventListener(t, () => paneActive(1), true);
-    $('#btn-dual').addEventListener('click', () => setDual(pane2.hidden));
-    // Drag the line between the panes.
-    $('#split-resizer').addEventListener('pointerdown', (ev) => {
-      const bar = ev.currentTarget;
-      const box = $('#panes').getBoundingClientRect();
-      bar.setPointerCapture(ev.pointerId); // the pointer may cross the other page
-      bar.classList.add('dragging');
-      const set = (f) => {
-        prefs.dualSplit = Math.max(0.2, Math.min(0.8, f));
-        $('#panes').style.setProperty('--split1', prefs.dualSplit);
-        $('#panes').style.setProperty('--split2', 1 - prefs.dualSplit);
-      };
-      bar.onpointermove = (e) => set((e.clientX - box.left) / box.width);
-      bar.onpointerup = () => { bar.onpointermove = null; bar.classList.remove('dragging'); savePrefs(); };
-    });
-    $('#split-resizer').addEventListener('dblclick', () => {
-      prefs.dualSplit = 0.5;
-      $('#panes').style.setProperty('--split1', 0.5);
-      $('#panes').style.setProperty('--split2', 0.5);
-      savePrefs();
-    });
-  }
-  if (PANE2) $('#btn-dual').addEventListener('click', () => setDual(false));
-  if (PANE2) $('#btn-dual').classList.add('on');
-
-  // Both panes keep the settings in sync: take what the other one saved.
-  window.addEventListener('storage', (ev) => {
-    if (ev.key !== PREF_KEY || !ev.newValue) return;
-    let next;
-    try { next = JSON.parse(ev.newValue); } catch { return; }
-    const LOOK = ['theme', 'accent', 'density', 'icon', 'showHidden', 'showSystem', 'showExt', 'foldersFirst', 'sizeBase', 'folderIcons', 'menuStyle', 'calcSizes', 'previewPane', 'colPreview', 'paneW'];
-    const changed = LOOK.filter((k) => JSON.stringify(prefs[k]) !== JSON.stringify(next[k]));
-    Object.assign(prefs, next);
-    if (!changed.length) return;
-    applyAccent();
-    applyTheme(true);
-    applyDensity();
-    document.documentElement.style.setProperty('--icon', `${prefs.icon}px`);
-    document.documentElement.style.setProperty('--pane-w', `${prefs.paneW || 320}px`);
-    rerenderItems();
-    updatePane();
-  });
-
   // ---------- boot ----------
   (async function boot() {
     applyAccent();
@@ -3897,14 +3761,6 @@
     document.documentElement.style.setProperty('--pane-w', `${prefs.paneW || 320}px`);
     document.body.classList.toggle('sidebar-hidden', !!prefs.sidebarHidden);
     $('#zoom').value = prefs.icon;
-    if (PANE2) {
-      // The right-hand pane: the window and the app belong to the left one.
-      G.places = await api.places();
-      const start = env.dir || prefs.pane2Dir || HOME;
-      if (!(await navigate(start, { root: start }))) await navigate(HOME);
-      saveSession();
-      return;
-    }
     api.setUiScale?.(prefs.uiScale); // the window opens at the saved size already (lib.rs); this keeps the two in step
     api.setKeepRunning?.(prefs.keepRunning);
     if (prefs.runAtLogin) api.setRunAtLogin?.(true); // keeps the path right after the app moves or updates
@@ -3923,8 +3779,6 @@
       const start = env.dir || startupDir();
       if (!restored && !(await navigate(start, { root: start }))) await navigate(HOME);
       saveSession();
-      if (prefs.dualSplit) { $('#panes').style.setProperty('--split1', prefs.dualSplit); $('#panes').style.setProperty('--split2', 1 - prefs.dualSplit); }
-      if (prefs.dualPane) setDual(true);
       content.focus();
     } finally {
       window.__finderReady?.();

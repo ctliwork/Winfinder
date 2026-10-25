@@ -175,33 +175,6 @@ await step('snap layouts', async () => {
   return { build, ...windows() };
 });
 
-await step('two panes', async () => {
-  try { return await twoPanes(); } finally {
-    if (await page.$eval('#pane2', (e) => !e.hidden).catch(() => false)) await page.evaluate(() => window.__finderMain.setDual(false));
-  }
-});
-async function twoPanes() {
-  await page.locator('.col .crow', { hasText: '筆記.txt' }).first().click();
-  await page.keyboard.press('Control+\\');
-  let frame = null;
-  for (let i = 0; i < 40 && !frame; i++) { await sleep(250); frame = page.frames().find((f) => f.url().includes('pane=2')); }
-  if (!frame) throw new Error('no right-hand pane');
-  await frame.waitForSelector('.crow', { timeout: 15000 });
-  const sub = path.join(FILES, '子資料夾');
-  await frame.evaluate((dir) => window.__finderPane.go(dir), sub);
-  await frame.waitForFunction(() => document.querySelector('#title')?.textContent === '子資料夾', null, { timeout: 8000 });
-  desktop('two-panes', { log: true });
-  await page.locator('.col .crow', { hasText: '筆記.txt' }).first().click({ button: 'right' });
-  const items = await page.$$eval('#menu .mi, #menu > *', (els) => els.map((e) => e.textContent.trim()).filter((t) => /到「/.test(t)));
-  await page.locator('#menu >> text=/^拷貝到「子資料夾」/').first().click();
-  await sleep(2000);
-  const right = await frame.$$eval('.crow .nm', (els) => els.map((e) => e.textContent));
-  desktop('two-panes-copied');
-  await page.keyboard.press('Control+\\');
-  await sleep(500);
-  return { menu: items, copied: fs.existsSync(path.join(sub, '筆記.txt')), right, closed: await page.$eval('#pane2', (e) => e.hidden) };
-}
-
 await step('big folder', async () => {
   const t = Date.now();
   await page.locator('.col .crow', { hasText: '大資料夾' }).first().click();

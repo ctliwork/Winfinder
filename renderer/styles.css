@@ -162,16 +162,8 @@ body.sidebar-hidden #sidebar { width: 0; margin-left: 0; opacity: 0; border-widt
 }
 body.material-none #main { border-radius: 0; }
 
-/* ---------- two panes ---------- */
 #panes { flex: 1; min-height: 0; display: flex; }
-#pane1 { flex: var(--split1, 1) 1 0; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
-#pane2 { flex: var(--split2, 1) 1 0; min-width: 0; border: 0; background: var(--content-bg); }
-#split-resizer { width: 5px; flex: none; cursor: col-resize; background: var(--hairline); background-clip: content-box; padding: 0 2px; }
-#split-resizer:hover, #split-resizer.dragging { background: rgba(var(--accent-rgb), 0.6); padding: 0 1px; }
-/* The right-hand pane's page: just the folder, without the window's chrome. */
-body.pane-mode #sidebar, body.pane-mode #sidebar-resizer, body.pane-mode #tabbar { display: none; }
-/* The pane not being worked in: its title fades, as its selection does. */
-.pane-inactive #title, .pane-inactive #pathbar { color: var(--text3); }
+#pane1 { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
 
 /* ---------- tabs & caption ---------- */
 #tabbar {
@@ -286,7 +278,7 @@ body.blurred .cap { color: var(--text3); }
   .search:focus-within, .search.has-text { width: 170px; }
 }
 @container (max-width: 470px) { #view-seg { display: none; } }
-@container (max-width: 360px) { #btn-newfolder, #btn-dual { display: none; } }
+@container (max-width: 360px) { #btn-newfolder { display: none; } }
 
 #search-scope {
   display: flex; align-items: center; gap: 6px; padding: 6px 16px;
