@@ -187,6 +187,8 @@
   }
   function curView() { return state.view || prefs.view; }
   function curSort() { return (!state.search.results && folderPref()?.sort) || prefs.sort; }
+  // A folder's own sort: each column of the column view is in its folder's.
+  function sortOf(dir) { return folderPref(dir)?.sort || prefs.sort; }
   function rememberFolder(patch) {
     const k = norm(state.cwd);
     const next = { ...prefs.folderViews[k], ...patch };
@@ -227,8 +229,8 @@
     }
   }
 
-  function sortEntries(list) {
-    const { key, dir } = curSort();
+  function sortEntries(list, sort = curSort()) {
+    const { key, dir } = sort;
     const cmp = {
       name: (a, b) => collator.compare(a.name, b.name),
       date: (a, b) => (a.mtime || 0) - (b.mtime || 0),
@@ -254,9 +256,9 @@
     return prefs.showHidden || !e.hidden;
   }
 
-  function visibleOf(entries) {
+  function visibleOf(entries, sort) {
     const list = entries.filter(isShown);
-    return sortEntries(list);
+    return sortEntries(list, sort);
   }
 
   function computeEntries() {
@@ -600,7 +602,7 @@
   function subdirs(p) {
     const c = dirCache.get(p);
     if (!c || c.error) return null;
-    return sortEntries(c.entries.filter((e) => e.isDir && isShown(e)));
+    return sortEntries(c.entries.filter((e) => e.isDir && isShown(e)), { key: 'name', dir: 1 }); // the tree is by name, wherever you are
   }
 
   // Explorer-style navigation tree: Home, pinned folders, drives; folders expand in place.
@@ -1040,7 +1042,7 @@
   async function renderColumns() {
     const chain = ancestors(state.cwd, state.colRoot);
     await Promise.all(chain.map((d) => listDir(d)));
-    state.colLists = chain.map((d) => visibleOf(dirCache.get(d)?.entries || []));
+    state.colLists = chain.map((d) => visibleOf(dirCache.get(d)?.entries || [], sortOf(d)));
     const n = chain.length - 1;
     const fresh = view._colsTab !== state.id || !view.classList.contains('columns') || !$('.col-preview', view);
     if (fresh) { view.innerHTML = '<div class="col-preview"></div>'; view._colsTab = state.id; }

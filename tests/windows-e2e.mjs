@@ -175,6 +175,144 @@ await step('snap layouts', async () => {
   return { build, ...windows() };
 });
 
+// Settings changed for one step: written to the page's storage, then a reload.
+async function withPrefs(patch) {
+  await page.evaluate((patch) => {
+    const k = 'winfinder:prefs';
+    localStorage.setItem(k, JSON.stringify({ ...JSON.parse(localStorage.getItem(k) || '{}'), ...patch }));
+  }, patch);
+  await page.reload();
+  await page.waitForSelector('.col .crow, #view .item', { timeout: 20000 });
+  await sleep(500);
+}
+const names = () => page.$$eval('#view .nm', (els) => els.map((e) => e.textContent));
+const titleIs = (t) => page.waitForFunction((t) => document.querySelector('#title')?.textContent === t, t, { timeout: 8000 });
+
+// Each column keeps its own folder's order: a folder that remembers another
+// sort must not reorder the columns to its left (they used to jump).
+await step('column sort', async () => {
+  await withPrefs({ rememberView: true, folderViews: { [path.join(FILES, '子資料夾').toLowerCase()]: { sort: { key: 'date', dir: -1 } } } });
+  const first = () => page.$eval('.col', (c) => [...c.querySelectorAll('.crow .nm')].map((e) => e.textContent).join('|'));
+  const orders = [await first()];
+  for (const name of ['子資料夾', '大資料夾', '子資料夾', '筆記.txt']) {
+    await page.locator('.col').first().locator('.crow', { hasText: name }).first().click();
+    await sleep(700);
+    orders.push(await first());
+  }
+  const sub = await page.$$eval('.col', (cs) => cs.length);
+  await withPrefs({ rememberView: false, folderViews: {} });
+  return { stable: new Set(orders).size === 1, orders: [...new Set(orders)].map((o) => o.slice(0, 160)), columns: sub };
+});
+
+await step('file operations', async () => {
+  const sub = path.join(FILES, '子資料夾');
+  const has = (...p) => fs.existsSync(path.join(sub, ...p));
+  const r = {};
+  await page.keyboard.press('Control+2');
+  await page.locator('#view .lrow', { hasText: '子資料夾' }).first().dblclick();
+  await titleIs('子資料夾');
+  await page.keyboard.press('Control+Shift+N');
+  await page.waitForSelector('input.rename');
+  await page.keyboard.type('新資料夾A');
+  await page.keyboard.press('Enter');
+  await sleep(1000);
+  r.newFolder = has('新資料夾A');
+  await page.locator('#view .lrow', { hasText: 'inner.txt' }).first().click();
+  await page.keyboard.press('F2');
+  await page.waitForSelector('input.rename');
+  await page.keyboard.type('改名');
+  await page.keyboard.press('Enter');
+  await sleep(1000);
+  r.renamed = has('改名.txt') && !has('inner.txt');
+  await page.keyboard.press('Control+Z');
+  await sleep(1000);
+  r.renameUndone = has('inner.txt') && !has('改名.txt');
+  await page.locator('#view .lrow', { hasText: 'inner.txt' }).first().click();
+  await page.keyboard.press('Control+C');
+  await sleep(300);
+  await page.locator('#view .lrow', { hasText: '新資料夾A' }).first().dblclick();
+  await titleIs('新資料夾A');
+  await page.keyboard.press('Control+V');
+  await sleep(1500);
+  r.pasted = has('新資料夾A', 'inner.txt');
+  r.listedAfterPaste = await names();
+  await page.keyboard.press('Control+Z');
+  await sleep(1500);
+  r.pasteUndone = !has('新資料夾A', 'inner.txt');
+  await page.keyboard.press('Alt+ArrowUp');
+  await titleIs('子資料夾');
+  await page.locator('#view .lrow', { hasText: '新資料夾A' }).first().click();
+  await page.keyboard.press('Delete');
+  await sleep(2000);
+  r.trashed = !has('新資料夾A');
+  await page.keyboard.press('Control+Z');
+  await sleep(2000);
+  r.restored = has('新資料夾A');
+  r.listed = await names();
+  await page.keyboard.press('Alt+ArrowUp');
+  await page.keyboard.press('Control+3');
+  await sleep(800);
+  return r;
+});
+
+await step('views', async () => {
+  const r = {};
+  for (const [k, v] of [['1', 'icons'], ['2', 'list'], ['4', 'gallery'], ['3', 'columns']]) {
+    await page.keyboard.press(`Control+${k}`);
+    await sleep(800);
+    r[v] = await page.evaluate(() => ({ cls: document.querySelector('#view').className, items: document.querySelectorAll('#view [data-i]').length }));
+  }
+  return r;
+});
+
+await step('search in folder', async () => {
+  await page.keyboard.press('Control+F');
+  await page.keyboard.type('筆記');
+  await sleep(1200);
+  const found = await names();
+  await page.keyboard.press('Escape');
+  await sleep(500);
+  return { found, after: (await names()).length };
+});
+
+await step('quick look', async () => {
+  await page.locator('.col .crow', { hasText: '筆記.txt' }).first().click();
+  await page.keyboard.press('Space');
+  await page.waitForSelector('#ql:not([hidden])', { timeout: 5000 });
+  await sleep(600);
+  const r = { title: await page.$eval('#ql-title', (e) => e.textContent), text: await page.$eval('#ql-body', (e) => e.innerText.slice(0, 40)) };
+  desktop('quick-look');
+  await page.keyboard.press('Space');
+  await sleep(600);
+  return { ...r, closed: await page.$eval('#ql', (e) => e.hidden) };
+});
+
+await step('settings', async () => {
+  await page.keyboard.press('Control+,');
+  await page.waitForSelector('#dlg:not([hidden])', { timeout: 5000 });
+  const sections = await page.$$eval('#dlg [data-sec]', (els) => els.map((e) => e.textContent.trim()));
+  desktop('settings');
+  await page.keyboard.press('Escape');
+  await sleep(400);
+  return { sections, closed: await page.$eval('#dlg', (e) => e.hidden) };
+});
+
+await step('tabs', async () => {
+  const count = () => page.$$eval('#tabs .tab', (e) => e.length);
+  const r = { before: await count() };
+  await page.keyboard.press('Control+T');
+  await sleep(600);
+  r.afterNew = await count();
+  await page.keyboard.press('Control+Tab');
+  await sleep(400);
+  r.active = await page.$eval('#tabs .tab.active', (e) => e.textContent.trim());
+  await page.locator('#tabs .tab').last().click();
+  await page.keyboard.press('Control+W');
+  await sleep(400);
+  r.afterClose = await count();
+  return r;
+});
+
 await step('big folder', async () => {
   const t = Date.now();
   await page.locator('.col .crow', { hasText: '大資料夾' }).first().click();
