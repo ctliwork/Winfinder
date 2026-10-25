@@ -185,23 +185,27 @@ async function withPrefs(patch) {
   await page.waitForSelector('.col .crow, #view .item', { timeout: 20000 });
   await sleep(500);
 }
-const names = () => page.$$eval('#view .nm', (els) => els.map((e) => e.textContent));
+// The names shown, whatever the view (list rows, icons, columns).
+const names = () => page.$$eval('#view [data-i] .nm, #view [data-i] .label', (els) => els.map((e) => e.textContent.trim()));
 const titleIs = (t) => page.waitForFunction((t) => document.querySelector('#title')?.textContent === t, t, { timeout: 8000 });
 
 // Each column keeps its own folder's order: a folder that remembers another
 // sort must not reorder the columns to its left (they used to jump).
+// 大資料夾 remembers "by name, Z to A": its own column follows that, the
+// column to its left keeps the folder's own order.
 await step('column sort', async () => {
-  await withPrefs({ rememberView: true, folderViews: { [path.join(FILES, '子資料夾').toLowerCase()]: { sort: { key: 'date', dir: -1 } } } });
-  const first = () => page.$eval('.col', (c) => [...c.querySelectorAll('.crow .nm')].map((e) => e.textContent).join('|'));
-  const orders = [await first()];
-  for (const name of ['子資料夾', '大資料夾', '子資料夾', '筆記.txt']) {
+  await withPrefs({ rememberView: true, folderViews: { [path.join(FILES, '大資料夾').toLowerCase()]: { sort: { key: 'name', dir: -1 } } } });
+  const col = (i) => page.$$eval('.col', (cs, i) => [...(cs[i]?.querySelectorAll('.crow .nm') || [])].map((e) => e.textContent).join('|'), i);
+  const orders = [await col(0)];
+  let big = '';
+  for (const name of ['大資料夾', '子資料夾', '大資料夾', '筆記.txt']) {
     await page.locator('.col').first().locator('.crow', { hasText: name }).first().click();
-    await sleep(700);
-    orders.push(await first());
+    await sleep(900);
+    orders.push(await col(0));
+    if (name === '大資料夾') big = (await col(1)).split('|')[0];
   }
-  const sub = await page.$$eval('.col', (cs) => cs.length);
   await withPrefs({ rememberView: false, folderViews: {} });
-  return { stable: new Set(orders).size === 1, orders: [...new Set(orders)].map((o) => o.slice(0, 160)), columns: sub };
+  return { stable: new Set(orders).size === 1, ownOrder: big === 'file 02999.txt', bigFirst: big, orders: [...new Set(orders)].map((o) => o.slice(0, 160)) };
 });
 
 await step('file operations', async () => {
@@ -265,14 +269,23 @@ await step('views', async () => {
   return r;
 });
 
+// In every view, typing in the search box leaves only what matches.
 await step('search in folder', async () => {
-  await page.keyboard.press('Control+F');
-  await page.keyboard.type('筆記');
-  await sleep(1200);
-  const found = await names();
-  await page.keyboard.press('Escape');
-  await sleep(500);
-  return { found, after: (await names()).length };
+  const r = {};
+  for (const [k, v] of [['3', 'columns'], ['2', 'list'], ['1', 'icons']]) {
+    await page.keyboard.press(`Control+${k}`);
+    await sleep(600);
+    await page.keyboard.press('Control+F');
+    await page.keyboard.type('筆記');
+    await sleep(1200);
+    const found = await names();
+    await page.keyboard.press('Escape');
+    await sleep(600);
+    r[v] = { found, ok: found.length === 1 && found[0] === '筆記.txt', after: (await names()).length, view: await page.$eval('#view', (e) => e.className) };
+  }
+  await page.keyboard.press('Control+3');
+  await sleep(600);
+  return r;
 });
 
 await step('quick look', async () => {

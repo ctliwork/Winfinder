@@ -436,7 +436,8 @@
   // What the content area shows: Home has its own page, search results never use columns.
   function viewMode() {
     if (state.cwd === HOME && !state.search.results) return 'home';
-    if (state.search.results && curView() === 'columns') return 'list';
+    // Searching shows a list of what matches, as in Finder: columns would show the whole folders.
+    if ((state.search.results || state.search.query.trim() || filtersOn()) && curView() === 'columns') return 'list';
     return curView();
   }
   function inColumnsMode() { return viewMode() === 'columns'; }
@@ -2968,7 +2969,7 @@
   }
 
   function clearSearch(rerender, silent = false) {
-    const had = state.search.query || state.search.results;
+    const had = state.search.query || state.search.results || filtersOn();
     state.search = { query: '', scope: 'folder', results: null, busy: false, filters: {} };
     if (silent) return; // background tab: leave the visible search box alone
     syncSearchUi();
