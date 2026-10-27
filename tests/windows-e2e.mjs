@@ -516,9 +516,13 @@ for ($k = 1; $k -lt $p.Count; $k++) { $a = $p[$k - 1]; $b = $p[$k]; $n = 25
   await until(() => (button = ps(`Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes
 $A = [System.Windows.Automation.AutomationElement]
 $bar = $A::RootElement.FindFirst('Children', (New-Object System.Windows.Automation.PropertyCondition($A::ClassNameProperty, 'Shell_TrayWnd')))
-$b = $bar.FindAll('Descendants', [System.Windows.Automation.Condition]::TrueCondition) | ? { $_.Current.Name -like '*Minimized*' } | select -First 1
-if ($b) { $r = $b.Current.BoundingRectangle; "$([int]($r.X + $r.Width / 2)) $([int]($r.Y + $r.Height / 2)) $($b.Current.Name)" }`)) !== '', 10000);
-  r.taskbarButton = button || null;
+$all = @($bar.FindAll('Descendants', [System.Windows.Automation.Condition]::TrueCondition))
+$b = $all | ? { $_.Current.Name -like '*Minimized*' -or $_.Current.Name -like '*PowerShell*' } | select -First 1
+if ($b) { $r = $b.Current.BoundingRectangle; "$([int]($r.X + $r.Width / 2)) $([int]($r.Y + $r.Height / 2)) $($b.Current.Name)" }
+else { 'none: ' + (($all | ? { $_.Current.Name } | % { $_.Current.Name }) -join ' / ') }`)) !== '' && !button.startsWith('none'), 10000);
+  // The button is named after the app (Windows PowerShell), not the window.
+  r.taskbarButton = button.startsWith('none') ? null : button;
+  if (!r.taskbarButton) r.taskbarNames = button;
   if (button) {
     const [bx, by] = button.split(' ').map(Number);
     fs.rmSync(log, { force: true });
