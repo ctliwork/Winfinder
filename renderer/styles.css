@@ -168,11 +168,11 @@ body.material-none #main { border-radius: 0; }
 /* ---------- tabs & caption ---------- */
 #tabbar {
   height: 42px; flex: none; display: flex; align-items: flex-end;
-  padding-left: 8px; background: rgba(0, 0, 0, 0.035);
+  padding-left: 8px; background: rgba(0, 0, 0, 0.08);
   -webkit-app-region: drag;
 }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) #tabbar { background: rgba(0, 0, 0, 0.22); } }
-:root[data-theme="dark"] #tabbar { background: rgba(0, 0, 0, 0.22); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) #tabbar { background: rgba(0, 0, 0, 0.4); } }
+:root[data-theme="dark"] #tabbar { background: rgba(0, 0, 0, 0.4); }
 #tabs { display: flex; align-items: flex-end; min-width: 0; height: 100%; overflow: hidden; }
 .tab {
   position: relative; height: 34px; flex: 0 1 210px; min-width: 96px;
@@ -185,7 +185,10 @@ body.material-none #main { border-radius: 0; }
 .tab span { overflow: hidden; text-overflow: ellipsis; }
 .tab .ico { width: 17px; height: 15px; flex: none; }
 .tab:hover { background: var(--hover); color: var(--text); }
-.tab.active { background: var(--content-bg); color: var(--text); box-shadow: 0 -0.5px 0 var(--hairline), 0.5px 0 0 var(--hairline), -0.5px 0 0 var(--hairline); }
+/* Background tabs sit back on the darker strip; the one in use joins the page,
+   in bold, with an accent line on top. */
+.tab:not(.active) .ico, .tab:not(.active) img.fico { opacity: 0.7; }
+.tab.active { background: var(--content-bg); color: var(--text); font-weight: 600; box-shadow: inset 0 2px 0 var(--accent), 0.5px 0 0 var(--hairline), -0.5px 0 0 var(--hairline); }
 .tab.active::before, .tab.active::after {
   content: ""; position: absolute; bottom: 0; width: 10px; height: 10px; pointer-events: none;
 }
