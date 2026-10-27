@@ -843,6 +843,33 @@ fn set_run_at_login(on: bool) -> Result<(), String> {
 
 #[cfg(all(test, windows))]
 mod tests {
+    /// Deleting goes to the Recycle Bin (read-only files too) and comes back.
+    #[test]
+    fn recycle_and_restore() {
+        let d = std::env::temp_dir().join(format!("winfinder-recycle-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let plain = d.join("一般.txt");
+        let ro = d.join("唯讀.txt");
+        std::fs::write(&plain, "a").unwrap();
+        std::fs::write(&ro, "b").unwrap();
+        let mut perm = std::fs::metadata(&ro).unwrap().permissions();
+        perm.set_readonly(true);
+        std::fs::set_permissions(&ro, perm).unwrap();
+        let paths = vec![plain.to_string_lossy().into_owned(), ro.to_string_lossy().into_owned()];
+        let left = crate::winshell::recycle(windows::Win32::Foundation::HWND::default(), &paths);
+        assert!(left.is_empty(), "not deleted: {left:?}");
+        assert!(!plain.exists() && !ro.exists());
+        let missing = crate::fsops::restore_trash(&paths);
+        assert!(missing.is_empty(), "not restored: {missing:?}");
+        assert!(plain.exists() && ro.exists());
+        let mut perm = std::fs::metadata(&ro).unwrap().permissions();
+        #[allow(clippy::permissions_set_readonly_false)]
+        perm.set_readonly(false);
+        std::fs::set_permissions(&ro, perm).unwrap();
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
     /// The sign-in entry is written with --background and removed again.
     #[test]
     fn run_at_login_round_trip() {

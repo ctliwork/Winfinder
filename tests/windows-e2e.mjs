@@ -382,12 +382,14 @@ await step('delete a shift selection', async () => {
     for (const n of names) fs.writeFileSync(path.join(FILES, n), n);
     await sleep(1500); // the folder watcher shows them
     const row = (n) => page.locator('.col').first().locator('.crow', { hasText: n }).first();
-    await row(names[0]).click();
-    await row(names[2]).click({ modifiers: ['Shift'] });
+    // In the order shown: Shift-click from the first to the last, right-click the middle one.
+    const shown = (await page.locator('.col').first().evaluate((c) => [...c.querySelectorAll('.crow .nm')].map((x) => x.textContent))).filter((n) => names.includes(n));
+    await row(shown[0]).click();
+    await row(shown[2]).click({ modifiers: ['Shift'] });
     await sleep(400);
     const selected = await page.$$eval('.col .crow.sel .nm', (e) => e.map((x) => x.textContent));
     if (how === 'right-click') {
-      await row(names[1]).click({ button: 'right' });
+      await row(shown[1]).click({ button: 'right' });
       await page.locator('#menu .mi', { hasText: '丟到資源回收筒' }).first().click();
     } else {
       await page.keyboard.press('Delete');
@@ -409,23 +411,25 @@ await step('delete a shift selection', async () => {
 // instead of the delete failing silently.
 await step('delete special files', async () => {
   await backToTop();
-  const ro = path.join(FILES, '唯讀檔.txt');
-  const busy = path.join(FILES, '使用中.txt');
+  const ro = path.join(FILES, 'readonly.txt');
+  const busy = path.join(FILES, 'inuse.txt');
   fs.writeFileSync(ro, 'ro');
   fs.chmodSync(ro, 0o444);
   fs.writeFileSync(busy, 'busy');
   const holder = spawn('powershell', ['-NoProfile', '-Command', `$f=[System.IO.File]::Open('${busy}','Open','Read','None'); Start-Sleep 25; $f.Close()`], { detached: true, stdio: 'ignore' });
   await sleep(2500);
+  let locked = false;
+  try { fs.closeSync(fs.openSync(busy, 'r+')); } catch { locked = true; }
   const row = (n) => page.locator('.col').first().locator('.crow', { hasText: n }).first();
-  await row('唯讀檔.txt').click();
+  await row('readonly.txt').click();
   await page.keyboard.press('Delete');
   await sleep(2500);
-  const r = { readOnlyGone: !fs.existsSync(ro) };
+  const r = { locked, readOnlyGone: !fs.existsSync(ro) };
   await page.keyboard.press('Control+Z');
   await sleep(2000);
   r.readOnlyBack = fs.existsSync(ro);
   if (fs.existsSync(ro)) { fs.chmodSync(ro, 0o666); fs.rmSync(ro); }
-  await row('使用中.txt').click();
+  await row('inuse.txt').click();
   await page.keyboard.press('Delete');
   await sleep(4000);
   desktop('file-in-use', { log: true });
