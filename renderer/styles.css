@@ -569,7 +569,7 @@ body.view-icons #zoom { display: block; }
 
 /* ---------- menu ---------- */
 #menu {
-  position: fixed; z-index: 100; min-width: 220px; padding: 5px;
+  position: fixed; z-index: 100; min-width: 220px; padding: 5px; max-height: calc(100vh - 16px); overflow-y: auto;
   border-radius: 12px; background: var(--glass-strong); backdrop-filter: blur(40px) saturate(180%);
   box-shadow: var(--shadow-lg); font-size: 13px;
   transform-origin: top left; animation: menuIn 0.16s cubic-bezier(.2, .8, .2, 1);

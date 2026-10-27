@@ -231,10 +231,22 @@ await step('no blue folders', async () => {
   await page.keyboard.press('Control+T');
   await sleep(800);
   await page.keyboard.press('Control+W');
+  await sleep(500);
+  await page.locator('.col').first().locator('.crow', { hasText: '筆記.txt' }).first().click(); // back in the top folder
+  await sleep(500);
   return page.evaluate(() => { window.__blueObserver.disconnect(); return { seen: [...new Set(window.__blue)], learnt: Object.keys(JSON.parse(localStorage.getItem('winfinder:folder-icon') || '{}')) }; });
 });
 
+// The column view, at the top folder (a step may have left it elsewhere).
+async function backToTop() {
+  await page.keyboard.press('Control+3');
+  await sleep(500);
+  await page.locator('.col').first().locator('.crow', { hasText: '筆記.txt' }).first().click();
+  await sleep(500);
+}
+
 await step('file operations', async () => {
+  await backToTop();
   const sub = path.join(FILES, '子資料夾');
   const has = (...p) => fs.existsSync(path.join(sub, ...p));
   const r = {};
@@ -288,6 +300,7 @@ await step('file operations', async () => {
 // Column view: the sort menu names the folder it sorts (the column worked in),
 // sorts only that column, either way, with or without folders first.
 await step('sort menu', async () => {
+  await backToTop();
   await withPrefs({ rememberView: true, folderViews: {} });
   const col = (i) => page.$$eval('.col', (cs, i) => [...(cs[i]?.querySelectorAll('.crow .nm') || [])].map((e) => e.textContent), i);
   const pick = async (re) => { await page.locator('#menu .mi', { hasText: re }).first().click(); await sleep(700); };
@@ -316,6 +329,7 @@ await step('sort menu', async () => {
 
 // The up button goes to the parent folder (Back goes to the previous one).
 await step('up button', async () => {
+  await backToTop();
   await page.locator('.col').first().locator('.crow', { hasText: '子資料夾' }).first().click();
   await sleep(600);
   await page.locator('.col').nth(1).locator('.crow', { hasText: '新的甲' }).first().click();
@@ -336,6 +350,7 @@ await step('up button', async () => {
 // A new folder keeps its name box, also after a file with a native (Windows)
 // preview was selected; typing names it.
 await step('new folder name box', async () => {
+  await backToTop();
   const r = {};
   for (const before of ['說明.rtf', '報告.docx', '筆記.txt']) {
     await page.locator('.col').first().locator('.crow', { hasText: before }).first().click();

@@ -2479,6 +2479,13 @@
   // Sort menu (toolbar button, ⋯ menu, right-click): says which folder it
   // sorts (in the column view, which column), what by and which way.
   const SORTS = [['name', '名稱'], ['kind', '類型'], ['date', '修改日期'], ['created', '建立日期'], ['size', '大小']];
+  // One line in the longer menus (⋯, right-click), opening the sort menu there.
+  function sortEntry(x, y, colDir = null) {
+    const dir = sortTarget(colDir);
+    const cur = dir ? sortOf(dir) : curSort();
+    const by = SORTS.find(([k]) => k === cur.key)?.[1] || '名稱';
+    return { label: `排序方式：依${by}，${cur.dir === 1 ? '升冪' : '降冪'}…`, action: () => openMenu(sortItems(colDir), x, y) };
+  }
   function sortItems(colDir = null) {
     const dir = sortTarget(colDir);
     const cur = dir ? sortOf(dir) : curSort();
@@ -2639,7 +2646,7 @@
       '-',
       ...viewItems(),
       '-',
-      ...sortItems(colDir),
+      sortEntry(x, y, colDir),
       '-',
       { label: '顯示隱藏的項目', kbd: 'Ctrl+Shift+.', check: prefs.showHidden, action: toggleHidden },
       ...(api.openTerminal ? [{ label: '在終端機中開啟', action: () => openTerminal(state.cwd) }] : []),
@@ -2672,7 +2679,7 @@
     openMenu([
       ...viewItems(),
       '-',
-      ...sortItems(),
+      sortEntry(r.right - 230, r.bottom + 6),
       '-',
       { label: '顯示隱藏的項目', kbd: 'Ctrl+Shift+.', check: prefs.showHidden, action: toggleHidden },
       { label: prefs.sidebarHidden ? '顯示側邊欄' : '隱藏側邊欄', kbd: 'Ctrl+Alt+S', action: toggleSidebar },
