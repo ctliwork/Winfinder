@@ -486,7 +486,8 @@ $p = @(${points.map((q) => `@(${q.join(',')})`).join(',')})
 [M]::mouse_event(2, 0, 0, 0, 0); Start-Sleep -Milliseconds 100
 for ($k = 1; $k -lt $p.Count; $k++) { $a = $p[$k - 1]; $b = $p[$k]; $n = 25
   for ($i = 1; $i -le $n; $i++) { [M]::SetCursorPos([int]($a[0] + ($b[0] - $a[0]) * $i / $n), [int]($a[1] + ($b[1] - $a[1]) * $i / $n)); Start-Sleep -Milliseconds ([int]($b[2] / $n)) }
-  Start-Sleep -Milliseconds $b[3] }
+  # rest there, moving a pixel back and forth as a hand does
+  for ($t = 0; $t -lt $b[3]; $t += 100) { [M]::SetCursorPos($b[0] + ($t / 100) % 2, $b[1]); Start-Sleep -Milliseconds 100 } }
 [M]::mouse_event(4, 0, 0, 0, 0)`);
   const fileAt = () => page.locator('.col').first().locator('.crow', { hasText: '筆記.txt' }).first().evaluate((el) => {
     const b = el.getBoundingClientRect();
@@ -512,29 +513,57 @@ for ($k = 1; $k -lt $p.Count; $k++) { $a = $p[$k - 1]; $b = $p[$k]; $n = 25
   const open2 = form('Minimized', true);
   r.minimizedShown = await shown('Minimized');
   if (!r.minimizedShown) r.minimizedHelper = backgroundLog('Minimized');
-  let button = '';
-  await until(() => (button = ps(`Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes
+  const findButton = async () => {
+    let button = '';
+    await until(() => (button = ps(`Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes
 $A = [System.Windows.Automation.AutomationElement]
 $bar = $A::RootElement.FindFirst('Children', (New-Object System.Windows.Automation.PropertyCondition($A::ClassNameProperty, 'Shell_TrayWnd')))
 $all = @($bar.FindAll('Descendants', [System.Windows.Automation.Condition]::TrueCondition))
 $b = $all | ? { $_.Current.Name -like '*Minimized*' -or $_.Current.Name -like '*PowerShell*' } | select -First 1
 if ($b) { $r = $b.Current.BoundingRectangle; "$([int]($r.X + $r.Width / 2)) $([int]($r.Y + $r.Height / 2)) $($b.Current.Name)" }
 else { 'none: ' + (($all | ? { $_.Current.Name } | % { $_.Current.Name }) -join ' / ') }`)) !== '' && !button.startsWith('none'), 10000);
+    return button;
+  };
   // The button is named after the app (Windows PowerShell), not the window.
+  const button = await findButton();
   r.taskbarButton = button.startsWith('none') ? null : button;
   if (!r.taskbarButton) r.taskbarNames = button;
-  if (button) {
-    const [bx, by] = button.split(' ').map(Number);
+  // From `start` to the button, rest there (Windows brings the window up), then into the window.
+  const viaTaskbar = (start, at) => {
+    const [bx, by] = at.split(' ').map(Number);
     fs.rmSync(log, { force: true });
-    const start = await fileAt();
-    // to the button, rest there (Windows brings the window up), then into the window
-    const res = mouse([start, [bx, by, 1200, 2500], [...into, 800, 600]]);
+    mouse([start, [bx, by, 1200, 3000], [...into, 800, 600]]);
+  };
+  if (r.taskbarButton) {
+    viaTaskbar(await fileAt(), r.taskbarButton);
     await sleep(1500);
     r.taskbar = got();
   }
   desktop('drag-out', { log: true });
   open2.kill();
   ps("Get-Process powershell -ErrorAction SilentlyContinue | ? { $_.MainWindowTitle -eq 'Minimized' } | Stop-Process -Force");
+  // The same from Explorer, to tell what this Windows' taskbar does at all.
+  const open3 = form('Minimized', true);
+  await shown('Minimized');
+  spawn('explorer.exe', [FILES], { detached: true, stdio: 'ignore' }).unref();
+  let item = '';
+  await until(() => (item = ps(`Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes
+$A = [System.Windows.Automation.AutomationElement]
+$n = [string][char]0x7B46 + [char]0x8A18
+$w = $A::RootElement.FindAll('Children', (New-Object System.Windows.Automation.PropertyCondition($A::ClassNameProperty, 'CabinetWClass')))
+$i = $w | % { $_.FindAll('Descendants', (New-Object System.Windows.Automation.PropertyCondition($A::ControlTypeProperty, [System.Windows.Automation.ControlType]::ListItem))) } | ? { $_.Current.Name -eq $n -or $_.Current.Name -eq "$n.txt" } | select -First 1
+if ($i) { $r = $i.Current.BoundingRectangle; "$([int]($r.X + 30)) $([int]($r.Y + $r.Height / 2))" }`)) !== '', 15000);
+  const button3 = await findButton();
+  r.explorer = { item: item || null, button: button3.startsWith('none') ? null : button3 };
+  if (item && r.explorer.button) {
+    viaTaskbar([...item.split(' ').map(Number), 0, 0], r.explorer.button);
+    await sleep(1500);
+    r.explorer.got = got();
+  }
+  desktop('drag-out-explorer', { log: true });
+  open3.kill();
+  ps("Get-Process powershell -ErrorAction SilentlyContinue | ? { $_.MainWindowTitle -eq 'Minimized' } | Stop-Process -Force");
+  ps("(New-Object -ComObject Shell.Application).Windows() | % { $_.Quit() }");
   return r;
 });
 
