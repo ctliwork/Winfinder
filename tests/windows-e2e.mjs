@@ -445,44 +445,75 @@ await step('delete special files', async () => {
   return r;
 });
 
-// Drag a file out to another app with the real mouse: a small window that
-// accepts dropped files and writes down what it got. Slow and quick drags.
+// Drag a file out to another app with the real mouse: small windows that
+// accept dropped files and write down what they got. A slow and a quick drag
+// straight into one; and one onto the taskbar button of a minimized one, which
+// should bring it up to drop into (as from Explorer).
 await step('drag to another app', async () => {
   await backToTop();
   const log = path.join(OUT, 'dropped.txt');
-  const script = path.join(OUT, 'droptarget.ps1');
   const { width, height } = JSON.parse(ps('Add-Type -AssemblyName System.Windows.Forms; $b=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds; "{""width"":$($b.Width),""height"":$($b.Height)}"'));
-  const target = { x: width - 330, y: Math.round(height / 2) - 150 };
-  fs.writeFileSync(script, `Add-Type -AssemblyName System.Windows.Forms
+  const target = { x: width - 330, y: Math.round(height / 2) - 200 };
+  const form = (title, minimized) => {
+    const script = path.join(OUT, `${title}.ps1`);
+    fs.writeFileSync(script, `Add-Type -AssemblyName System.Windows.Forms
 $f = New-Object Windows.Forms.Form
-$f.Text = 'DropTarget'; $f.StartPosition = 'Manual'; $f.Left = ${target.x}; $f.Top = ${target.y}; $f.Width = 300; $f.Height = 300; $f.TopMost = $true; $f.AllowDrop = $true
+$f.Text = '${title}'; $f.StartPosition = 'Manual'; $f.Left = ${target.x}; $f.Top = ${target.y}; $f.Width = 300; $f.Height = 300; $f.AllowDrop = $true
+${minimized ? "$f.WindowState = 'Minimized'" : '$f.TopMost = $true'}
 $f.Add_DragEnter({ $_.Effect = 'Copy' })
 $f.Add_DragOver({ $_.Effect = 'Copy' })
-$f.Add_DragDrop({ Add-Content -Path '${log}' -Value (($_.Data.GetData('FileDrop')) -join '|') -Encoding UTF8 })
+$f.Add_DragDrop({ Add-Content -Path '${log}' -Value ('${title}:' + (($_.Data.GetData('FileDrop')) -join '|')) -Encoding UTF8 })
 [Windows.Forms.Application]::Run($f)
 `, 'utf8');
-  const form = spawn('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script], { detached: true, stdio: 'ignore' });
-  await sleep(3000);
-  const mouse = (from, to, ms) => ps(`Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class M { [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y); [DllImport("user32.dll")] public static extern void mouse_event(int f, int x, int y, int d, int e); }'
-[M]::SetCursorPos(${from.x}, ${from.y}); Start-Sleep -Milliseconds 300
+    return spawn('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script], { detached: true, stdio: 'ignore' });
+  };
+  // Real mouse input along `points` ([x, y, ms to get there, ms to rest]), button held.
+  const mouse = (points) => ps(`Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class M { [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y); [DllImport("user32.dll")] public static extern void mouse_event(int f, int x, int y, int d, int e); }'
+$p = @(${points.map((q) => `@(${q.join(',')})`).join(',')})
+[M]::SetCursorPos($p[0][0], $p[0][1]); Start-Sleep -Milliseconds 300
 [M]::mouse_event(2, 0, 0, 0, 0); Start-Sleep -Milliseconds 100
-$n = 30; for ($i = 1; $i -le $n; $i++) { [M]::SetCursorPos([int](${from.x} + (${to.x} - ${from.x}) * $i / $n), [int](${from.y} + (${to.y} - ${from.y}) * $i / $n)); Start-Sleep -Milliseconds ${Math.round(ms / 30)} }
-Start-Sleep -Milliseconds 400
+for ($k = 1; $k -lt $p.Count; $k++) { $a = $p[$k - 1]; $b = $p[$k]; $n = 25
+  for ($i = 1; $i -le $n; $i++) { [M]::SetCursorPos([int]($a[0] + ($b[0] - $a[0]) * $i / $n), [int]($a[1] + ($b[1] - $a[1]) * $i / $n)); Start-Sleep -Milliseconds ([int]($b[2] / $n)) }
+  Start-Sleep -Milliseconds $b[3] }
 [M]::mouse_event(4, 0, 0, 0, 0)`);
+  const fileAt = () => page.locator('.col').first().locator('.crow', { hasText: '筆記.txt' }).first().evaluate((el) => {
+    const b = el.getBoundingClientRect();
+    return [Math.round((window.screenX + b.left + 40) * devicePixelRatio), Math.round((window.screenY + b.top + b.height / 2) * devicePixelRatio), 0, 0];
+  });
+  const got = () => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim() : null);
+  const into = [target.x + 150, target.y + 150];
   const r = {};
+  const open1 = form('DropTarget', false);
+  await sleep(3000);
   for (const [name, ms] of [['slow', 1500], ['quick', 250]]) {
     fs.rmSync(log, { force: true });
-    const from = await page.locator('.col').first().locator('.crow', { hasText: '筆記.txt' }).first().evaluate((el) => {
-      const b = el.getBoundingClientRect();
-      return { x: Math.round((window.screenX + b.left + 40) * devicePixelRatio), y: Math.round((window.screenY + b.top + b.height / 2) * devicePixelRatio) };
-    });
-    mouse(from, { x: target.x + 150, y: target.y + 150 }, ms);
+    mouse([await fileAt(), [...into, ms, 400]]);
     await sleep(1500);
-    r[name] = { from, got: fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim() : null };
+    r[name] = got();
+  }
+  open1.kill();
+  ps("Get-Process powershell -ErrorAction SilentlyContinue | ? { $_.MainWindowTitle -eq 'DropTarget' } | Stop-Process -Force");
+  // The taskbar: the minimized window's button.
+  const open2 = form('Minimized', true);
+  await sleep(3000);
+  const button = ps(`Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes
+$A = [System.Windows.Automation.AutomationElement]
+$bar = $A::RootElement.FindFirst('Children', (New-Object System.Windows.Automation.PropertyCondition($A::ClassNameProperty, 'Shell_TrayWnd')))
+$b = $bar.FindAll('Descendants', [System.Windows.Automation.Condition]::TrueCondition) | ? { $_.Current.Name -like '*Minimized*' } | select -First 1
+if ($b) { $r = $b.Current.BoundingRectangle; "$([int]($r.X + $r.Width / 2)) $([int]($r.Y + $r.Height / 2)) $($b.Current.Name)" }`);
+  r.taskbarButton = button || null;
+  if (button) {
+    const [bx, by] = button.split(' ').map(Number);
+    fs.rmSync(log, { force: true });
+    const start = await fileAt();
+    // to the button, rest there (Windows brings the window up), then into the window
+    const res = mouse([start, [bx, by, 1200, 2500], [...into, 800, 600]]);
+    await sleep(1500);
+    r.taskbar = got();
   }
   desktop('drag-out', { log: true });
-  form.kill();
-  ps("Get-Process powershell -ErrorAction SilentlyContinue | ? { $_.MainWindowTitle -eq 'DropTarget' } | Stop-Process -Force");
+  open2.kill();
+  ps("Get-Process powershell -ErrorAction SilentlyContinue | ? { $_.MainWindowTitle -eq 'Minimized' } | Stop-Process -Force");
   return r;
 });
 

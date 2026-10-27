@@ -249,6 +249,19 @@ async fn on_ui<T: Send + 'static>(
     blocking(move || rx.recv().map_err(|e| e.to_string())).await?
 }
 
+/// Drags files out to other apps (and Explorer) the way Explorer does; returns
+/// when they are dropped or the drag is cancelled.
+#[tauri::command]
+async fn drag_files(window: tauri::WebviewWindow, paths: Vec<String>) -> Result<(), String> {
+    #[cfg(windows)]
+    return on_ui(window, move |h| winshell::drag_files(h, &paths)).await?;
+    #[cfg(not(windows))]
+    {
+        let _ = (window, paths);
+        Err("unsupported".into())
+    }
+}
+
 /// Shows Explorer's context menu; returns a verb the UI handles itself.
 #[tauri::command]
 async fn native_menu(
@@ -929,7 +942,7 @@ pub fn run() {
             places, pin_home, list_dir, list_many, cloud_pin, new_file, dir_size, cancel_dir_sizes, compress, extract, open_terminal, native_menu, properties,
             clipboard_write, clipboard_read, clipboard_clear, save_theme, set_ui_scale, preview_available, preview_show, preview_move, preview_hide, preview_warm, cancel_transfer, restore_trash,
             everything_available, everything, content_search, disk_free, disk_space, recent_files, resolve_link, folder_count, thumbnail, open_path, reveal, trash, rename, mkdir,
-            transfer, read_text, rich_preview, media_info, folder_icon, reclaim_focus, search, watch, check_update, install_update, set_keep_running, set_run_at_login, snap_layouts, quit
+            transfer, read_text, rich_preview, media_info, folder_icon, reclaim_focus, drag_files, search, watch, check_update, install_update, set_keep_running, set_run_at_login, snap_layouts, quit
         ])
         .run(tauri::generate_context!())
         .expect("error while running Winfinder");

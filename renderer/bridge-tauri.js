@@ -132,6 +132,8 @@
     onChanged: (cb) => listen('fs-changed', (e) => cb(e.payload)),
     // Resolves when the drag is over (dropped anywhere or cancelled).
     startDrag: (files) => {
+      // Windows: as Explorer drags (file icons, taskbar buttons open their window).
+      if (isWin) return invoke('drag_files', { paths: files }).catch((e) => console.warn('drag failed', e));
       dragImage ||= makeDragImage();
       return invoke('plugin:drag|start_drag', { item: files, image: dragImage, options: { mode: 'copy' }, onEvent: new Channel() })
         .catch((e) => console.warn('drag failed', e));

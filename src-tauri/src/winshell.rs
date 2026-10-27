@@ -350,3 +350,32 @@ pub fn recycle(hwnd: HWND, paths: &[String]) -> Vec<String> {
     }
     paths.iter().filter(|p| std::path::Path::new(p.as_str()).symlink_metadata().is_ok()).cloned().collect()
 }
+
+/// Drags files out as Explorer does: SHDoDragDrop with the shell's own data
+/// object, so the drag shows the files' icons and "Copy to …", and resting on a
+/// taskbar button brings that app's window forward to drop into. Copy, move or
+/// link, as the target chooses. UI thread; returns once dropped or cancelled.
+pub fn drag_files(hwnd: HWND, paths: &[String]) -> Result<(), String> {
+    use windows::core::HSTRING;
+    use windows::Win32::System::Com::IDataObject;
+    use windows::Win32::System::Ole::{IDropSource, DROPEFFECT_COPY, DROPEFFECT_LINK, DROPEFFECT_MOVE};
+    use windows::Win32::UI::Shell::{ILCreateFromPathW, ILFree, SHCreateShellItemArrayFromIDLists, SHDoDragDrop, BHID_DataObject};
+    unsafe {
+        let pidls: Vec<*mut ITEMIDLIST> =
+            paths.iter().map(|p| ILCreateFromPathW(&HSTRING::from(p.as_str()))).filter(|p| !p.is_null()).collect();
+        if pidls.is_empty() {
+            return Err("ENOENT".into());
+        }
+        let list: Vec<*const ITEMIDLIST> = pidls.iter().map(|p| p.cast_const()).collect();
+        let res = (|| -> windows::core::Result<()> {
+            let items = SHCreateShellItemArrayFromIDLists(&list)?;
+            let data: IDataObject = items.BindToHandler(None, &BHID_DataObject)?;
+            SHDoDragDrop(Some(hwnd), &data, None::<&IDropSource>, DROPEFFECT_COPY | DROPEFFECT_MOVE | DROPEFFECT_LINK)?;
+            Ok(())
+        })();
+        for p in pidls {
+            ILFree(Some(p));
+        }
+        res.map_err(|e| e.message())
+    }
+}

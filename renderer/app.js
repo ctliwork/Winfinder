@@ -2004,15 +2004,19 @@
   });
 
   // While Windows runs a drag the app gets no answers from its back end until
-  // the drop, so spring-loaded folders couldn't list what they open. Read the
-  // visible folders (and the level below) first, then drag from that cache.
+  // the drop, so spring-loaded folders couldn't list what they open: the visible
+  // folders (and the levels below) are read ahead when the mouse goes down on an
+  // item. The drag itself starts at once (waiting for that read let the mouse
+  // come up before it began, and the drag went nowhere).
+  let readAheadAt = 0;
+  content.addEventListener('pointerdown', (ev) => {
+    if (ev.button !== 0 || !api.listMany || !itemFromEl(ev.target) || Date.now() - readAheadAt < 3000) return;
+    readAheadAt = Date.now();
+    const shown = inColumnsMode() ? state.colLists.flat() : state.entries;
+    const dirs = [...new Set(shown.filter((e) => e.isDir && !isVirtual(e)).map((e) => e.path))].slice(0, 300);
+    if (dirs.length) api.listMany(dirs, 3).then((ahead) => { for (const [dir, entries] of ahead) dirCache.set(dir, { entries }); });
+  });
   async function startNativeDrag(paths) {
-    if (api.listMany) {
-      const shown = inColumnsMode() ? state.colLists.flat() : state.entries;
-      const dirs = [...new Set(shown.filter((e) => e.isDir && !isVirtual(e)).map((e) => e.path))].slice(0, 300);
-      const ahead = await Promise.race([api.listMany(dirs, 3), new Promise((r) => setTimeout(() => r([]), 400))]);
-      for (const [dir, entries] of ahead) dirCache.set(dir, { entries });
-    }
     G.dragActive = true;
     try { await api.startDrag(paths); } finally { G.dragActive = false; }
   }
