@@ -78,6 +78,7 @@
     thumb: (path, size) => invoke('thumbnail', { path, size: Math.round(size) }).catch(() => null),
     nativeIcon: (path) => invoke('thumbnail', { path, size: 96 }).catch(() => null),
     shellIcon: (path, size) => invoke('thumbnail', { path, size: Math.round(size), icon: true }).catch(() => null),
+    ...(isWin ? { folderIcon: (size) => invoke('folder_icon', { size: Math.round(size) }).catch(() => null) } : {}),
     open: (path) => invoke('open_path', { path }).then(() => '', (e) => String(e)),
     reveal: (path) => invoke('reveal', { path }),
     trash: (paths) => invoke('trash', { paths }),
@@ -145,6 +146,7 @@
     minimize: () => win.minimize(),
     toggleMaximize: () => win.toggleMaximize(),
     snapLayouts: () => invoke('snap_layouts').catch(() => {}),
+    reclaimFocus: () => invoke('reclaim_focus').catch(() => false),
     close: () => win.close(),
     setTheme: (theme) => win.setTheme(theme === 'system' ? null : theme).catch(() => {}),
     onState: (cb) => {

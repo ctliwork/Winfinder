@@ -23,6 +23,10 @@ pub struct Entry {
     /// be opened). Shown only when that is asked for separately.
     pub system: bool,
     pub link: bool,
+    /// A folder that may have an icon of its own: Explorer reads a folder's
+    /// desktop.ini (special folders, custom icons) only when it is read-only or
+    /// system; links get an arrow. Any other folder shows the usual folder icon.
+    pub own_icon: bool,
     /// Cloud sync status (see cloud::state); absent outside synced folders.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cloud: Option<&'static str>,
@@ -56,6 +60,7 @@ pub fn hidden_by_name(name: &str) -> bool {
     name.starts_with('.') || lower.starts_with("ntuser.") || SYSTEM_NAMES.contains(&lower.as_str())
 }
 
+const READONLY: u32 = 0x1;
 const HIDDEN: u32 = 0x2;
 const SYSTEM: u32 = 0x4;
 
@@ -107,6 +112,7 @@ pub fn entry_from(path: &Path, lmeta: Option<fs::Metadata>) -> Entry {
         hidden,
         system,
         link,
+        own_icon: is_dir && (link || a & (READONLY | SYSTEM) != 0),
         cloud: crate::cloud::state(a, is_dir),
     }
 }

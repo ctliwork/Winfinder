@@ -87,6 +87,28 @@ async fn thumbnail(path: String, size: i32, icon: Option<bool>) -> Option<String
     blocking(move || thumb::thumbnail(&path, size.clamp(16, 1024), icon.unwrap_or(false))).await.ok().flatten()
 }
 
+/// The page lost the keyboard while the window is still in front (Windows: a
+/// preview handler's window was hidden and took the focus with it): give it
+/// back. Not when another app is in front.
+#[tauri::command]
+fn reclaim_focus(window: tauri::WebviewWindow) -> bool {
+    window.is_focused().unwrap_or(false) && window.set_focus().is_ok()
+}
+
+/// Windows' usual folder icon, as `thumbnail` gives it for a folder: that of an
+/// empty folder of our own with no attributes, so nothing can change it.
+#[tauri::command]
+async fn folder_icon(size: i32) -> Option<String> {
+    blocking(move || {
+        let dir = std::env::temp_dir().join("Winfinder folder icon");
+        std::fs::create_dir_all(&dir).ok()?;
+        thumb::thumbnail(&dir.to_string_lossy(), size.clamp(16, 1024), true)
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
 #[tauri::command]
 fn open_path(path: String) -> Result<(), String> {
     tauri_plugin_opener::open_path(path, None::<&str>).map_err(|e| e.to_string())
@@ -870,7 +892,7 @@ pub fn run() {
             places, pin_home, list_dir, list_many, cloud_pin, new_file, dir_size, cancel_dir_sizes, compress, extract, open_terminal, native_menu, properties,
             clipboard_write, clipboard_read, clipboard_clear, save_theme, set_ui_scale, preview_available, preview_show, preview_move, preview_hide, preview_warm, cancel_transfer, restore_trash,
             everything_available, everything, content_search, disk_free, disk_space, recent_files, resolve_link, folder_count, thumbnail, open_path, reveal, trash, rename, mkdir,
-            transfer, read_text, rich_preview, media_info, search, watch, check_update, install_update, set_keep_running, set_run_at_login, snap_layouts, quit
+            transfer, read_text, rich_preview, media_info, folder_icon, reclaim_focus, search, watch, check_update, install_update, set_keep_running, set_run_at_login, snap_layouts, quit
         ])
         .run(tauri::generate_context!())
         .expect("error while running Winfinder");

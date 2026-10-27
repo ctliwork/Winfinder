@@ -189,16 +189,25 @@
   function curSort() { return (!state.search.results && folderPref()?.sort) || prefs.sort; }
   // A folder's own sort: each column of the column view is in its folder's.
   function sortOf(dir) { return folderPref(dir)?.sort || prefs.sort; }
-  function rememberFolder(patch) {
-    const k = norm(state.cwd);
+  function rememberFolder(patch, dir = state.cwd) {
+    const k = norm(dir);
     const next = { ...prefs.folderViews[k], ...patch };
     delete prefs.folderViews[k];
     prefs.folderViews[k] = next; // most recent last
     const keys = Object.keys(prefs.folderViews);
     if (keys.length > 500) delete prefs.folderViews[keys[0]];
   }
-  function setSort(sort) {
-    if (folderPref() !== null && !state.search.results) rememberFolder({ sort }); else prefs.sort = sort;
+  // The folder a sort applies to: in the column view the column being worked in
+  // (or right-clicked), elsewhere the folder shown; null for a search's results.
+  function sortTarget(colDir = null) {
+    if (state.search.results) return null;
+    if (colDir) return colDir;
+    if (inColumnsMode()) return ancestors(state.cwd, state.colRoot)[state.colActive] || state.cwd;
+    return state.cwd === HOME ? null : state.cwd;
+  }
+  function setSort(sort, dir = sortTarget()) {
+    sort = { ...(dir ? sortOf(dir) : curSort()), ...sort }; // keeps the folder's 資料夾排在前面
+    if (dir && folderPref(dir) !== null) rememberFolder({ sort }, dir); else prefs.sort = sort;
     savePrefs();
     flipIcons(async () => { computeEntries(); await render(); });
   }
@@ -239,8 +248,9 @@
       created: (a, b) => (a.birth || 0) - (b.birth || 0),
       ext: (a, b) => collator.compare(a.ext || '', b.ext || ''),
     }[key] || ((a, b) => collator.compare(a.name, b.name));
+    const foldersFirst = sort.foldersFirst ?? prefs.foldersFirst; // a folder's own choice, else Settings'
     return list.slice().sort((a, b) => {
-      if (prefs.foldersFirst && a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+      if (foldersFirst && a.isDir !== b.isDir) return a.isDir ? -1 : 1;
       return (cmp(a, b) || collator.compare(a.name, b.name)) * dir;
     });
   }
@@ -592,6 +602,7 @@
     document.title = text;
     $('#btn-back').disabled = state.hIndex <= 0;
     $('#btn-fwd').disabled = state.hIndex >= state.history.length - 1;
+    $('#btn-up').disabled = state.cwd === HOME || !!state.search.results;
     const buttons = $$('#view-seg [data-view]');
     buttons.forEach((b, i) => {
       const on = b.dataset.view === curView();
@@ -676,31 +687,40 @@
     if (hit === null) return fallback;
     return `<span class="fpend" data-ficon="${esc(p)}" data-px="${px}" data-ext="${esc(ext)}">${ext ? fallback : pendingFolder(p, px, fallback)}</span>`;
   }
-  // Until a folder's own icon arrives it shows Windows' usual folder icon (most
-  // folders have that one), not the blue Finder folder, which flashed. That icon
-  // is learnt from the ones that come back and kept for the next start; before
-  // it's known, and for special folders and drives, nothing shows meanwhile.
+  // Windows' usual folder icon, per size (folder_icon in lib.rs): plain folders
+  // show it without asking for their own (see ownIcon), and any folder shows it
+  // while its own icon loads, rather than the blue Finder folder (which flashed).
+  // Kept for the next start, and asked for once per run in case Windows changed it.
   const GENERIC_KEY = 'winfinder:folder-icon';
   const genericFolder = (() => { try { return JSON.parse(localStorage.getItem(GENERIC_KEY)) || {}; } catch { return {}; } })();
-  const folderSeen = new Map(); // `${px}|${url}` -> how many plain folders came back with it
-  function plainFolder(p) { return !p.startsWith('shell:') && !specialBadge(p) && norm(P.root(p)) !== norm(p); }
-  function pendingFolder(p, px, fallback) {
-    const url = plainFolder(p) && genericFolder[px];
-    return url ? `<img class="fico" src="${url}" draggable="false">` : fallback.replace('<svg', '<svg style="visibility:hidden"');
+  const genericAsked = new Map(); // px -> promise of the data URL
+  function genericFolderUrl(px) {
+    if (!api.folderIcon) return Promise.resolve(null);
+    if (!genericAsked.has(px)) {
+      genericAsked.set(px, api.folderIcon(Math.min(256, px * 2)).then((url) => {
+        if (url && genericFolder[px] !== url) {
+          delete genericFolder[px];
+          genericFolder[px] = url;
+          for (const old of Object.keys(genericFolder).slice(0, -8)) delete genericFolder[old]; // the 8 sizes used last
+          try { localStorage.setItem(GENERIC_KEY, JSON.stringify(genericFolder)); } catch { /* storage unavailable */ }
+        }
+        return url || genericFolder[px] || null;
+      }));
+    }
+    return genericAsked.get(px);
   }
+  // Not a special folder, drive or shell place: Windows' usual icon is right for it.
+  function plainFolder(p) { return !p.startsWith('shell:') && !specialBadge(p) && norm(P.root(p)) !== norm(p); }
+  function genericImg(px) { return genericFolder[px] ? `<img class="fico" src="${genericFolder[px]}" draggable="false">` : ''; }
+  // Shown until a folder's own icon arrives; nothing at all for special folders,
+  // or before the usual icon is known.
+  function pendingFolder(p, px, fallback) {
+    genericFolderUrl(px);
+    return (plainFolder(p) && genericImg(px)) || hideIcon(fallback);
+  }
+  function hideIcon(svg) { return svg.replace('<svg', '<svg style="visibility:hidden"'); }
   // Windows had no icon after all: show the Finder one held back meanwhile.
   function showFallback(el) { el.querySelector('svg[style*="visibility"]')?.style.removeProperty('visibility'); }
-  function learnFolderIcon(p, px, url) {
-    if (!url || !plainFolder(p) || genericFolder[px] === url) return;
-    const k = `${px}|${url}`;
-    const n = (folderSeen.get(k) || 0) + 1;
-    folderSeen.set(k, n);
-    if (n < 3) return;
-    delete genericFolder[px];
-    genericFolder[px] = url;
-    for (const old of Object.keys(genericFolder).slice(0, -8)) delete genericFolder[old]; // the 8 sizes used last
-    try { localStorage.setItem(GENERIC_KEY, JSON.stringify(genericFolder)); } catch { /* storage unavailable */ }
-  }
   function folderIco(p, px, badge = specialBadge(p)) {
     return shellIco(p === HOME ? SHELL_HOME : p, px, p === HOME ? I.sidebar('home') : I.folder(badge));
   }
@@ -715,7 +735,6 @@
       shellPending.set(k, api.shellIcon(p, Math.min(256, px * 2)).then((u) => {
         shellCache.set(k, u || null);
         shellPending.delete(k);
-        if (!ext) learnFolderIcon(p, px, u);
         return u || null;
       }));
     }
@@ -737,6 +756,12 @@
     if (!winIcons()) {
       if (e.isDir) return `<span class="tw">${I.folder(specialBadge(e.path))}</span>`;
     } else if (e.isDir || px <= 48 || !canThumb(e)) {
+      // A folder that can't have an icon of its own shows Windows' usual one without asking.
+      if (e.isDir && e.ownIcon === false && api.folderIcon && plainFolder(e.path)) {
+        const img = genericImg(px);
+        if (img) return `<span class="tw">${img}</span>`;
+        return `<span class="tw" data-thumb="${esc(e.path)}" data-px="${px}" data-generic="1">${hideIcon(I.folder(null))}</span>`;
+      }
       const ext = e.isDir ? '' : e.ext || '.';
       const hit = shellCache.get(shellKey(e.path, px, ext));
       if (typeof hit === 'string') return `<span class="tw"><img class="fico" src="${hit}" draggable="false"></span>`;
@@ -764,6 +789,12 @@
   async function loadThumb(el) {
     const p = el.dataset.thumb;
     const px = Number(el.dataset.px);
+    if (el.dataset.generic) {
+      const url = await genericFolderUrl(px);
+      if (url && el.isConnected) el.innerHTML = `<img class="fico" src="${url}" draggable="false">`;
+      else showFallback(el);
+      return;
+    }
     if (el.dataset.icon != null) {
       const url = await shellIconUrl(p, px, el.dataset.icon);
       if (url && el.isConnected) el.innerHTML = `<img class="fico" src="${url}" draggable="false">`;
@@ -2391,7 +2422,16 @@
       if (ev.key === 'Enter') finish(true);
       else if (ev.key === 'Escape') finish(false);
     });
-    input.addEventListener('blur', () => finish(true));
+    // Clicking elsewhere in the page names it. Focus leaving the page isn't the
+    // user being done: on Windows a preview window being hidden takes it along
+    // (the box then vanished under the default name), so take it back; when
+    // another app comes to the front, carry on once this window is back.
+    input.addEventListener('blur', () => setTimeout(async () => {
+      if (done || !input.isConnected) return;
+      if (document.hasFocus()) { if (document.activeElement !== input) finish(true); return; }
+      if (await W.reclaimFocus?.()) input.focus();
+      else window.addEventListener('focus', () => { if (!done && input.isConnected) input.focus(); }, { once: true });
+    }));
     input.addEventListener('mousedown', (ev) => ev.stopPropagation());
     input.addEventListener('dblclick', (ev) => ev.stopPropagation());
   }
@@ -2436,10 +2476,30 @@
     { label: '以直欄顯示', kbd: 'Ctrl+3', check: curView() === 'columns', action: () => setView('columns') },
     { label: '以圖庫顯示', kbd: 'Ctrl+4', check: curView() === 'gallery', action: () => setView('gallery') },
   ];
-  const sortItems = () => [['name', '名稱'], ['kind', '類型'], ['date', '修改日期'], ['size', '大小']].map(([k, l]) => ({
-    label: `依${l}排序`, check: curSort().key === k,
-    action: () => setSort({ key: k, dir: k === 'name' || k === 'kind' ? 1 : -1 }),
-  }));
+  // Sort menu (toolbar button, ⋯ menu, right-click): says which folder it
+  // sorts (in the column view, which column), what by and which way.
+  const SORTS = [['name', '名稱'], ['kind', '類型'], ['date', '修改日期'], ['created', '建立日期'], ['size', '大小']];
+  function sortItems(colDir = null) {
+    const dir = sortTarget(colDir);
+    const cur = dir ? sortOf(dir) : curSort();
+    const set = (sort) => setSort(sort, dir);
+    const title = state.search.results ? '搜尋結果的排序方式'
+      : dir && folderPref(dir) !== null ? `「${displayName(dir)}」的排序方式` : '所有資料夾的排序方式';
+    return [
+      { label: title, disabled: true },
+      ...SORTS.map(([k, l]) => ({
+        label: `依${l}`, check: cur.key === k,
+        action: () => set({ key: k, dir: cur.key === k ? cur.dir : k === 'name' || k === 'kind' ? 1 : -1 }),
+      })),
+      '-',
+      { label: '升冪（A→Z、舊→新、小→大）', check: cur.dir === 1, action: () => set({ key: cur.key, dir: 1 }) },
+      { label: '降冪（Z→A、新→舊、大→小）', check: cur.dir === -1, action: () => set({ key: cur.key, dir: -1 }) },
+      '-',
+      // Per folder like the order (Finder has one switch for all, in its settings).
+      { label: '資料夾排在前面', check: cur.foldersFirst ?? prefs.foldersFirst, action: () => (dir && folderPref(dir) !== null
+        ? set({ foldersFirst: !(cur.foldersFirst ?? prefs.foldersFirst) }) : setPref('foldersFirst', !prefs.foldersFirst)) },
+    ];
+  }
 
   function itemMenu(entries, x, y) {
     const one = entries.length === 1 ? entries[0] : null;
@@ -2513,13 +2573,12 @@
       one?.ext === 'lnk' && api.resolveLink && { label: '顯示原始項目', action: () => showOriginal(one) },
     ];
   }
-  function appItemsForBackground() {
+  function appItemsForBackground(colDir = null) {
     const views = [['icons', '圖像'], ['list', '列表'], ['columns', '直欄'], ['gallery', '圖庫']];
-    const sorts = [['name', '名稱'], ['date', '修改日期'], ['size', '大小'], ['kind', '類型']];
     const groups = [['none', '（無）'], ['kind', '類型'], ['date', '修改日期'], ['size', '大小']];
     return [
       { label: '檢視', children: views.map(([v, l]) => ({ label: l, check: curView() === v, action: () => setView(v) })) },
-      { label: '排序方式', children: sorts.map(([k, l]) => ({ label: l, check: curSort().key === k, action: () => setSort({ key: k, dir: k === 'name' || k === 'kind' ? 1 : -1 }) })) },
+      { label: '排序方式', children: sortItems(colDir) },
       ['list', 'icons'].includes(viewMode()) && { label: '分組依據', children: groups.map(([g, l]) => ({ label: l, check: curGroup() === g, action: () => setGroup(g) })) },
       { label: '重新整理', action: () => refresh(true) },
       '-',
@@ -2563,7 +2622,7 @@
     try { await api.properties(paths.filter((p) => norm(P.dirname(p)) === dir)); } catch (err) { toast(`無法顯示內容：${err}`); }
   }
 
-  async function backgroundMenu(x, y) {
+  async function backgroundMenu(x, y, colDir = null) {
     const clip = state.cwd === HOME ? null : await clipboardFiles();
     if (state.cwd === HOME) {
       openMenu([
@@ -2580,7 +2639,7 @@
       '-',
       ...viewItems(),
       '-',
-      ...sortItems(),
+      ...sortItems(colDir),
       '-',
       { label: '顯示隱藏的項目', kbd: 'Ctrl+Shift+.', check: prefs.showHidden, action: toggleHidden },
       ...(api.openTerminal ? [{ label: '在終端機中開啟', action: () => openTerminal(state.cwd) }] : []),
@@ -2602,8 +2661,9 @@
       else if (!state.sel.has(it.entry.path)) { state.anchor = it.entry.path; setSelection([it.entry.path]); }
       const entries = it.col != null ? [it.entry] : selectedEntries();
       if (!(native && await nativeMenu(entries, { shift: ev.shiftKey, items: appItemsFor(entries) }))) itemMenu(entries, ev.clientX, ev.clientY);
-    } else if (!(native && await nativeMenu([], { background: true, shift: ev.shiftKey, items: appItemsForBackground() }))) {
-      backgroundMenu(ev.clientX, ev.clientY);
+    } else {
+      const colDir = inColumnsMode() ? ev.target.closest('.col')?.dataset.dir || null : null; // that column's folder
+      if (!(native && await nativeMenu([], { background: true, shift: ev.shiftKey, items: appItemsForBackground(colDir) }))) backgroundMenu(ev.clientX, ev.clientY, colDir);
     }
   });
 
@@ -2833,6 +2893,11 @@
   $('#view-seg').addEventListener('click', (ev) => { const b = ev.target.closest('[data-view]'); if (b) setView(b.dataset.view); });
   $('#btn-back').addEventListener('click', goBack);
   $('#btn-fwd').addEventListener('click', goForward);
+  $('#btn-up').addEventListener('click', goUp);
+  $('#btn-sort').addEventListener('click', (ev) => {
+    const r = ev.currentTarget.getBoundingClientRect();
+    openMenu(sortItems(), r.left, r.bottom + 6);
+  });
   $('#btn-newfolder').addEventListener('click', newFolder);
   $('#zoom').addEventListener('input', (ev) => setIconSize(Number(ev.target.value)));
 
@@ -3660,7 +3725,7 @@
         ['顯示隱藏的項目', null, sw('showHidden')],
         ['顯示受保護的作業系統檔案', '例如「Application Data」「My Documents」這類無法打開的相容性捷徑（檔案總管預設也隱藏）', sw('showSystem')],
         ['顯示副檔名', null, sw('showExt')],
-        ['資料夾排在檔案前面', null, sw('foldersFirst')],
+        ['資料夾排在檔案前面', '預設值；個別資料夾可在排序選單（工具列的排序按鈕）另外設定', sw('foldersFirst')],
         api.dirSize && ['計算所有大小', '列表檢視在背景算出每個資料夾的大小（Finder 的「計算所有大小」）', sw('calcSizes')],
         ['檔案大小單位', null, sel('sizeBase', [[1000, '1 KB = 1000 位元組（macOS）'], [1024, '1 KB = 1024 位元組（Windows）']])],
         ['直欄寬度', '目前記住了 ' + Object.keys(prefs.colWidths || {}).length + ' 個資料夾的欄寬', '<button data-act="reset-cols">全部還原為預設寬度</button>'],

@@ -285,6 +285,78 @@ await step('file operations', async () => {
   return r;
 });
 
+// Column view: the sort menu names the folder it sorts (the column worked in),
+// sorts only that column, either way, with or without folders first.
+await step('sort menu', async () => {
+  await withPrefs({ rememberView: true, folderViews: {} });
+  const col = (i) => page.$$eval('.col', (cs, i) => [...(cs[i]?.querySelectorAll('.crow .nm') || [])].map((e) => e.textContent), i);
+  const pick = async (re) => { await page.locator('#menu .mi', { hasText: re }).first().click(); await sleep(700); };
+  await page.locator('.col').first().locator('.crow', { hasText: '子資料夾' }).first().click();
+  await sleep(700);
+  await page.locator('.col').nth(1).locator('.crow', { hasText: 'inner.txt' }).first().click();
+  await sleep(500);
+  const root = await col(0);
+  const before = await col(1);
+  await page.click('#btn-sort');
+  const title = await page.$eval('#menu .mi', (e) => e.textContent.trim());
+  await pick(/^降冪/);
+  const desc = await col(1);
+  await page.click('#btn-sort');
+  await pick(/資料夾排在前面/);
+  const mixed = await col(1);
+  await page.click('#btn-sort');
+  await pick(/資料夾排在前面/);
+  await page.click('#btn-sort');
+  await pick(/^升冪/);
+  const after = await col(1);
+  const rootAfter = await col(0);
+  await withPrefs({ rememberView: false, folderViews: {} });
+  return { title, before, desc, mixed, after, rootUnchanged: JSON.stringify(root) === JSON.stringify(rootAfter) };
+});
+
+// The up button goes to the parent folder (Back goes to the previous one).
+await step('up button', async () => {
+  await page.locator('.col').first().locator('.crow', { hasText: '子資料夾' }).first().click();
+  await sleep(600);
+  await page.locator('.col').nth(1).locator('.crow', { hasText: '新的甲' }).first().click();
+  await sleep(600);
+  const r = { at: await page.$eval('#title', (e) => e.textContent) };
+  await page.click('#btn-up');
+  await sleep(600);
+  r.up1 = await page.$eval('#title', (e) => e.textContent);
+  await page.click('#btn-up');
+  await sleep(600);
+  r.up2 = await page.$eval('#title', (e) => e.textContent);
+  await page.click('#btn-back');
+  await sleep(600);
+  r.back = await page.$eval('#title', (e) => e.textContent);
+  return r;
+});
+
+// A new folder keeps its name box, also after a file with a native (Windows)
+// preview was selected; typing names it.
+await step('new folder name box', async () => {
+  const r = {};
+  for (const before of ['說明.rtf', '報告.docx', '筆記.txt']) {
+    await page.locator('.col').first().locator('.crow', { hasText: before }).first().click();
+    await sleep(2500);
+    await page.keyboard.press('Control+Shift+N');
+    await sleep(2500);
+    const box = await page.evaluate(() => { const i = document.querySelector('input.rename'); return i ? (document.activeElement === i ? 'focused' : 'not focused') : 'gone'; });
+    const name = `直接命名${before.split('.')[1]}`;
+    await page.keyboard.type(name);
+    await page.keyboard.press('Enter');
+    await sleep(1200);
+    r[before] = { box, named: fs.existsSync(path.join(FILES, name)) };
+    await page.keyboard.press('Control+Z'); // rename back
+    await sleep(800);
+    await page.keyboard.press('Control+Z'); // and the new folder
+    await sleep(1200);
+  }
+  desktop('new-folder');
+  return r;
+});
+
 await step('views', async () => {
   const r = {};
   for (const [k, v] of [['1', 'icons'], ['2', 'list'], ['4', 'gallery'], ['3', 'columns']]) {

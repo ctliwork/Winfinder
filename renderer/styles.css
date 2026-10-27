@@ -277,8 +277,8 @@ body.blurred .cap { color: var(--text3); }
   .search:not(:focus-within):not(.has-text) { width: 34px; padding: 0 0 0 9px; cursor: pointer; }
   .search:focus-within, .search.has-text { width: 170px; }
 }
-@container (max-width: 470px) { #view-seg { display: none; } }
-@container (max-width: 360px) { #btn-newfolder { display: none; } }
+@container (max-width: 540px) { #view-seg { display: none; } }
+@container (max-width: 400px) { #btn-newfolder { display: none; } }
 
 #search-scope {
   display: flex; align-items: center; gap: 6px; padding: 6px 16px;
