@@ -120,10 +120,20 @@ fn reveal(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn trash(paths: Vec<String>) -> Vec<String> {
-    blocking(move || paths.into_iter().filter(|p| trash::delete(p).is_err()).collect())
-        .await
-        .unwrap_or_default()
+async fn trash(window: tauri::WebviewWindow, paths: Vec<String>) -> Vec<String> {
+    // Windows: through the shell, so its dialogs can ask for administrator
+    // permission or say a file is in use instead of the delete just failing.
+    #[cfg(windows)]
+    {
+        let Ok(hwnd) = window.hwnd() else { return paths };
+        let hwnd = hwnd.0 as isize;
+        blocking(move || winshell::recycle(windows::Win32::Foundation::HWND(hwnd as _), &paths)).await.unwrap_or_default()
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = window;
+        blocking(move || paths.into_iter().filter(|p| trash::delete(p).is_err()).collect()).await.unwrap_or_default()
+    }
 }
 
 #[tauri::command]

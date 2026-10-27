@@ -404,6 +404,43 @@ await step('delete a shift selection', async () => {
   return r;
 });
 
+// Deleting goes through Windows' own file operation: a read-only file goes to
+// the Recycle Bin, and a file in use brings up Windows' dialog (here cancelled)
+// instead of the delete failing silently.
+await step('delete special files', async () => {
+  await backToTop();
+  const ro = path.join(FILES, '唯讀檔.txt');
+  const busy = path.join(FILES, '使用中.txt');
+  fs.writeFileSync(ro, 'ro');
+  fs.chmodSync(ro, 0o444);
+  fs.writeFileSync(busy, 'busy');
+  const holder = spawn('powershell', ['-NoProfile', '-Command', `$f=[System.IO.File]::Open('${busy}','Open','Read','None'); Start-Sleep 25; $f.Close()`], { detached: true, stdio: 'ignore' });
+  await sleep(2500);
+  const row = (n) => page.locator('.col').first().locator('.crow', { hasText: n }).first();
+  await row('唯讀檔.txt').click();
+  await page.keyboard.press('Delete');
+  await sleep(2500);
+  const r = { readOnlyGone: !fs.existsSync(ro) };
+  await page.keyboard.press('Control+Z');
+  await sleep(2000);
+  r.readOnlyBack = fs.existsSync(ro);
+  if (fs.existsSync(ro)) { fs.chmodSync(ro, 0o666); fs.rmSync(ro); }
+  await row('使用中.txt').click();
+  await page.keyboard.press('Delete');
+  await sleep(4000);
+  desktop('file-in-use', { log: true });
+  r.dialogs = ps(`Get-Process ${PROC} | % { $_.MainWindowTitle }`);
+  ps("Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('{ESC}')");
+  await sleep(2000);
+  r.busyStillThere = fs.existsSync(busy);
+  r.toast = await page.evaluate(() => document.querySelector('#toast')?.textContent);
+  r.responsive = await page.evaluate(() => document.querySelector('#title').textContent);
+  holder.kill();
+  await sleep(500);
+  fs.rmSync(busy, { force: true });
+  return r;
+});
+
 await step('views', async () => {
   const r = {};
   for (const [k, v] of [['1', 'icons'], ['2', 'list'], ['4', 'gallery'], ['3', 'columns']]) {

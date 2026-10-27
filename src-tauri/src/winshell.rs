@@ -1,6 +1,7 @@
 //! Windows shell integration that must run on the UI thread: the native
 //! Explorer context menu, the Properties dialog and the file clipboard shared
-//! with Explorer (CF_HDROP + "Preferred DropEffect").
+//! with Explorer (CF_HDROP + "Preferred DropEffect"). Also deleting to the
+//! Recycle Bin with Explorer's dialogs (any thread).
 
 use std::cell::RefCell;
 use windows::core::{Interface, PCSTR, PCWSTR};
@@ -319,4 +320,33 @@ pub fn clipboard_clear(hwnd: HWND) {
             let _ = CloseClipboard();
         }
     }
+}
+
+/// Moves `paths` to the Recycle Bin as Explorer does, Windows' own dialogs
+/// included, over `hwnd`: administrator permission (Continue, then UAC), a file
+/// in use (Try Again), too big for the Recycle Bin (delete it for good?).
+/// Asking first is the app's own setting, so Windows' confirmations are
+/// answered yes. Runs on any thread (its own STA); returns the paths still there.
+pub fn recycle(hwnd: HWND, paths: &[String]) -> Vec<String> {
+    use windows::core::HSTRING;
+    use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_APARTMENTTHREADED};
+    use windows::Win32::UI::Shell::{
+        FileOperation, IFileOperation, IShellItem, SHCreateItemFromParsingName, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_WANTNUKEWARNING,
+    };
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        let run = || -> windows::core::Result<()> {
+            let op: IFileOperation = CoCreateInstance(&FileOperation, None, CLSCTX_ALL)?;
+            op.SetOwnerWindow(hwnd)?;
+            op.SetOperationFlags(FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_WANTNUKEWARNING)?;
+            for p in paths {
+                if let Ok(item) = SHCreateItemFromParsingName::<_, _, IShellItem>(&HSTRING::from(p.as_str()), None) {
+                    op.DeleteItem(&item, None)?;
+                }
+            }
+            op.PerformOperations() // fails when cancelled; what went is checked below
+        };
+        let _ = run();
+    }
+    paths.iter().filter(|p| std::path::Path::new(p.as_str()).symlink_metadata().is_ok()).cloned().collect()
 }
