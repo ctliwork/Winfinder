@@ -372,6 +372,38 @@ await step('new folder name box', async () => {
   return r;
 });
 
+// Shift-select files in the column view, then delete them with the right-click
+// menu (it used to act on the clicked file only) and with the Delete key.
+await step('delete a shift selection', async () => {
+  await backToTop();
+  const names = ['刪除甲.txt', '刪除乙.txt', '刪除丙.txt'];
+  const r = {};
+  for (const how of ['right-click', 'Delete key']) {
+    for (const n of names) fs.writeFileSync(path.join(FILES, n), n);
+    await sleep(1500); // the folder watcher shows them
+    const row = (n) => page.locator('.col').first().locator('.crow', { hasText: n }).first();
+    await row(names[0]).click();
+    await row(names[2]).click({ modifiers: ['Shift'] });
+    await sleep(400);
+    const selected = await page.$$eval('.col .crow.sel .nm', (e) => e.map((x) => x.textContent));
+    if (how === 'right-click') {
+      await row(names[1]).click({ button: 'right' });
+      await page.locator('#menu .mi', { hasText: '丟到資源回收筒' }).first().click();
+    } else {
+      await page.keyboard.press('Delete');
+    }
+    await sleep(2000);
+    const gone = names.filter((n) => !fs.existsSync(path.join(FILES, n)));
+    await page.keyboard.press('Control+Z');
+    await sleep(2000);
+    const back = names.filter((n) => fs.existsSync(path.join(FILES, n)));
+    r[how] = { selected, gone, back };
+    for (const n of names) fs.rmSync(path.join(FILES, n), { force: true });
+    await sleep(800);
+  }
+  return r;
+});
+
 await step('views', async () => {
   const r = {};
   for (const [k, v] of [['1', 'icons'], ['2', 'list'], ['4', 'gallery'], ['3', 'columns']]) {

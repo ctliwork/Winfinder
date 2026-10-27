@@ -2664,9 +2664,12 @@
     // Windows: Explorer's menu (Shift adds its extended items); otherwise ours.
     const native = useWinMenu() || (ev.shiftKey && api.nativeMenu);
     if (it?.entry) {
-      if (it.col != null) await columnClick(it.entry, it.col);
-      else if (!state.sel.has(it.entry.path)) { state.anchor = it.entry.path; setSelection([it.entry.path]); }
-      const entries = it.col != null ? [it.entry] : selectedEntries();
+      // Right-clicking inside the selection keeps it, so the menu acts on all of
+      // it (as in Finder and Explorer); elsewhere it selects just that item.
+      const inSel = state.sel.has(it.entry.path) && (it.col == null || it.col === state.colActive);
+      if (it.col != null && !inSel) await columnClick(it.entry, it.col);
+      else if (!inSel) { state.anchor = it.entry.path; setSelection([it.entry.path]); }
+      const entries = it.col != null && !inSel ? [it.entry] : selectedEntries();
       if (!(native && await nativeMenu(entries, { shift: ev.shiftKey, items: appItemsFor(entries) }))) itemMenu(entries, ev.clientX, ev.clientY);
     } else {
       const colDir = inColumnsMode() ? ev.target.closest('.col')?.dataset.dir || null : null; // that column's folder
