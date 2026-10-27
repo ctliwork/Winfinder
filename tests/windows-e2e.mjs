@@ -311,8 +311,8 @@ await step('sort menu', async () => {
   const root = await col(0);
   const before = await col(1);
   await page.click('#btn-sort');
-  const title = await page.$eval('#menu .mi', (e) => e.textContent.trim());
-  await pick(/^降冪/);
+  const title = await page.$eval('#menu .mi', (e) => e.textContent.replace(/\s+/g, ' ').trim());
+  await pick(/降冪/);
   const desc = await col(1);
   await page.click('#btn-sort');
   await pick(/資料夾排在前面/);
@@ -320,7 +320,7 @@ await step('sort menu', async () => {
   await page.click('#btn-sort');
   await pick(/資料夾排在前面/);
   await page.click('#btn-sort');
-  await pick(/^升冪/);
+  await pick(/升冪/);
   const after = await col(1);
   const rootAfter = await col(0);
   await withPrefs({ rememberView: false, folderViews: {} });
