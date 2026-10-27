@@ -874,7 +874,13 @@ mod tests {
         assert!(left.is_empty(), "not deleted: {left:?}");
         assert!(!plain.exists() && !ro.exists());
         let missing = crate::fsops::restore_trash(&paths);
-        assert!(missing.is_empty(), "not restored: {missing:?}");
+        let seen: Vec<String> = trash::os_limited::list()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|t| t.original_parent.to_string_lossy().contains("winfinder-recycle"))
+            .map(|t| format!("{} | {}", t.original_parent.display(), t.name.to_string_lossy()))
+            .collect();
+        assert!(missing.is_empty(), "not restored: {missing:?}; in the Recycle Bin: {seen:?}");
         assert!(plain.exists() && ro.exists());
         let mut perm = std::fs::metadata(&ro).unwrap().permissions();
         #[allow(clippy::permissions_set_readonly_false)]

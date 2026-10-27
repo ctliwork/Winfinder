@@ -490,10 +490,12 @@ pub fn restore_trash(paths: &[String]) -> Vec<String> {
             missing.push(p.clone());
             continue;
         };
+        // The Recycle Bin records full long paths; the given one may be a short (8.3) or relative form.
+        let long = long_path(parent);
         // The most recent deletion of that name from that folder.
         let hit = items
             .iter()
-            .filter(|t| same(&t.original_parent, parent) && t.name.to_string_lossy().eq_ignore_ascii_case(&name.to_string_lossy()))
+            .filter(|t| (same(&t.original_parent, parent) || same(&t.original_parent, &long)) && t.name.to_string_lossy().eq_ignore_ascii_case(&name.to_string_lossy()))
             .max_by_key(|t| t.time_deleted);
         match hit {
             Some(t) => picked.push(t.clone()),
@@ -505,6 +507,20 @@ pub fn restore_trash(paths: &[String]) -> Vec<String> {
         missing.extend(picked.iter().map(|t| t.original_parent.join(&t.name)).filter(|p| !p.exists()).map(|p| p.to_string_lossy().into_owned()));
     }
     missing
+}
+
+/// The folder's full path with long names, without the `\\?\` prefix canonicalize adds on Windows.
+#[cfg(any(windows, all(unix, not(target_os = "macos"))))]
+fn long_path(p: &Path) -> PathBuf {
+    let Ok(c) = fs::canonicalize(p) else { return p.to_path_buf() };
+    let s = c.to_string_lossy();
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        PathBuf::from(format!(r"\\{rest}"))
+    } else if let Some(rest) = s.strip_prefix(r"\\?\") {
+        PathBuf::from(rest)
+    } else {
+        c
+    }
 }
 
 #[cfg(not(any(windows, all(unix, not(target_os = "macos")))))]

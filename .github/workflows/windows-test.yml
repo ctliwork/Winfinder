@@ -27,14 +27,17 @@ jobs:
         run: cargo test
 
       - name: Build the app (debug)
+        if: ${{ !cancelled() }}
         run: npx tauri build --debug --no-bundle
 
       - name: Test files
+        if: ${{ !cancelled() }}
         run: |
           pip install python-docx python-pptx openpyxl fpdf2 pillow
           python tests/make_fixtures.py e2e-files
 
       - name: End to end
+        if: ${{ !cancelled() }}
         run: |
           npm install --no-save playwright-core@1.58.2
           node tests/windows-e2e.mjs e2e-files
