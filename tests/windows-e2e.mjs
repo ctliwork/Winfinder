@@ -208,6 +208,32 @@ await step('column sort', async () => {
   return { stable: new Set(orders).size === 1, ownOrder: big === 'file 02999.txt', bigFirst: big, orders: [...new Set(orders)].map((o) => o.slice(0, 160)) };
 });
 
+// With Windows icons (the default), a folder never shows the blue Finder
+// folder while its own icon loads (it used to flash).
+await step('no blue folders', async () => {
+  await page.evaluate(() => {
+    window.__blue = [];
+    const check = () => {
+      for (const svg of document.querySelectorAll('#view svg.folder, #places svg.folder, #tabs svg.folder, #pathbar svg.folder')) {
+        if (getComputedStyle(svg).visibility === 'visible' && svg.getBoundingClientRect().width > 0) window.__blue.push((svg.closest('[data-i], .place, .tab, .crumb')?.textContent || '?').trim().slice(0, 30));
+      }
+    };
+    window.__blueObserver = new MutationObserver(check);
+    window.__blueObserver.observe(document, { childList: true, subtree: true, attributes: true });
+  });
+  // Folders never shown before, so their icons have to load.
+  for (const n of ['甲', '乙', '丙', '丁']) fs.mkdirSync(path.join(FILES, '子資料夾', `新的${n}`), { recursive: true });
+  for (const name of ['子資料夾', '大資料夾', '子資料夾']) {
+    await page.locator('.col').first().locator('.crow', { hasText: name }).first().click();
+    await sleep(800);
+  }
+  for (const k of ['2', '1', '3']) { await page.keyboard.press(`Control+${k}`); await sleep(800); }
+  await page.keyboard.press('Control+T');
+  await sleep(800);
+  await page.keyboard.press('Control+W');
+  return page.evaluate(() => { window.__blueObserver.disconnect(); return { seen: [...new Set(window.__blue)], learnt: Object.keys(JSON.parse(localStorage.getItem('winfinder:folder-icon') || '{}')) }; });
+});
+
 await step('file operations', async () => {
   const sub = path.join(FILES, '子資料夾');
   const has = (...p) => fs.existsSync(path.join(sub, ...p));

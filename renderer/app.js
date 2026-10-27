@@ -674,7 +674,32 @@
     const hit = shellCache.get(shellKey(p, px, ext));
     if (hit) return `<img class="fico" src="${hit}" draggable="false">`;
     if (hit === null) return fallback;
-    return `<span class="fpend" data-ficon="${esc(p)}" data-px="${px}" data-ext="${esc(ext)}">${fallback}</span>`;
+    return `<span class="fpend" data-ficon="${esc(p)}" data-px="${px}" data-ext="${esc(ext)}">${ext ? fallback : pendingFolder(p, px, fallback)}</span>`;
+  }
+  // Until a folder's own icon arrives it shows Windows' usual folder icon (most
+  // folders have that one), not the blue Finder folder, which flashed. That icon
+  // is learnt from the ones that come back and kept for the next start; before
+  // it's known, and for special folders and drives, nothing shows meanwhile.
+  const GENERIC_KEY = 'winfinder:folder-icon';
+  const genericFolder = (() => { try { return JSON.parse(localStorage.getItem(GENERIC_KEY)) || {}; } catch { return {}; } })();
+  const folderSeen = new Map(); // `${px}|${url}` -> how many plain folders came back with it
+  function plainFolder(p) { return !p.startsWith('shell:') && !specialBadge(p) && norm(P.root(p)) !== norm(p); }
+  function pendingFolder(p, px, fallback) {
+    const url = plainFolder(p) && genericFolder[px];
+    return url ? `<img class="fico" src="${url}" draggable="false">` : fallback.replace('<svg', '<svg style="visibility:hidden"');
+  }
+  // Windows had no icon after all: show the Finder one held back meanwhile.
+  function showFallback(el) { el.querySelector('svg[style*="visibility"]')?.style.removeProperty('visibility'); }
+  function learnFolderIcon(p, px, url) {
+    if (!url || !plainFolder(p) || genericFolder[px] === url) return;
+    const k = `${px}|${url}`;
+    const n = (folderSeen.get(k) || 0) + 1;
+    folderSeen.set(k, n);
+    if (n < 3) return;
+    delete genericFolder[px];
+    genericFolder[px] = url;
+    for (const old of Object.keys(genericFolder).slice(0, -8)) delete genericFolder[old]; // the 8 sizes used last
+    try { localStorage.setItem(GENERIC_KEY, JSON.stringify(genericFolder)); } catch { /* storage unavailable */ }
   }
   function folderIco(p, px, badge = specialBadge(p)) {
     return shellIco(p === HOME ? SHELL_HOME : p, px, p === HOME ? I.sidebar('home') : I.folder(badge));
@@ -690,6 +715,7 @@
       shellPending.set(k, api.shellIcon(p, Math.min(256, px * 2)).then((u) => {
         shellCache.set(k, u || null);
         shellPending.delete(k);
+        if (!ext) learnFolderIcon(p, px, u);
         return u || null;
       }));
     }
@@ -702,6 +728,7 @@
       el.removeAttribute('data-ficon');
       shellIconUrl(p, Number(el.dataset.px), el.dataset.ext).then((url) => {
         if (url && el.isConnected) el.outerHTML = `<img class="fico" src="${url}" draggable="false">`;
+        else showFallback(el);
       });
     }
   }
@@ -714,7 +741,8 @@
       const hit = shellCache.get(shellKey(e.path, px, ext));
       if (typeof hit === 'string') return `<span class="tw"><img class="fico" src="${hit}" draggable="false"></span>`;
       const fallback = e.isDir ? I.folder(specialBadge(e.path)) : I.file(e.ext);
-      return `<span class="tw"${hit === null ? '' : ` data-thumb="${esc(e.path)}" data-px="${px}" data-icon="${esc(ext)}"`}>${fallback}</span>`;
+      if (hit === null) return `<span class="tw">${fallback}</span>`;
+      return `<span class="tw" data-thumb="${esc(e.path)}" data-px="${px}" data-icon="${esc(ext)}">${e.isDir ? pendingFolder(e.path, px, fallback) : fallback}</span>`;
     }
     const key = thumbKey(e, px);
     const cached = thumbCache.get(key);
@@ -739,6 +767,7 @@
     if (el.dataset.icon != null) {
       const url = await shellIconUrl(p, px, el.dataset.icon);
       if (url && el.isConnected) el.innerHTML = `<img class="fico" src="${url}" draggable="false">`;
+      else showFallback(el);
       return;
     }
     const e = entryOf(p);
