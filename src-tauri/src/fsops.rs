@@ -492,13 +492,23 @@ pub fn restore_trash(paths: &[String]) -> Vec<String> {
         };
         // The Recycle Bin records full long paths; the given one may be a short (8.3) or relative form.
         let long = long_path(parent);
+        // Windows lists the name as shown, without the extension when known extensions are hidden.
+        let full = name.to_string_lossy();
+        let stem = path.file_stem().map(|s| s.to_string_lossy()).unwrap_or_default();
+        // The item's file in the Recycle Bin ($R….ext) keeps the extension, telling a.txt from a.jpg.
+        let ext = |p: &Path| p.extension().map(|e| e.to_string_lossy().to_lowercase());
+        let named = |t: &trash::TrashItem| {
+            let n = t.name.to_string_lossy();
+            n.eq_ignore_ascii_case(&full) || (cfg!(windows) && n.eq_ignore_ascii_case(&stem) && ext(Path::new(&t.id)) == ext(path))
+        };
         // The most recent deletion of that name from that folder.
         let hit = items
             .iter()
-            .filter(|t| (same(&t.original_parent, parent) || same(&t.original_parent, &long)) && t.name.to_string_lossy().eq_ignore_ascii_case(&name.to_string_lossy()))
+            .filter(|t| (same(&t.original_parent, parent) || same(&t.original_parent, &long)) && named(t))
             .max_by_key(|t| t.time_deleted);
         match hit {
-            Some(t) => picked.push(t.clone()),
+            // Restored under its real name (the listed one may lack the extension).
+            Some(t) => picked.push(trash::TrashItem { name: name.to_os_string(), ..t.clone() }),
             None => missing.push(p.clone()),
         }
     }

@@ -37,6 +37,20 @@ function windows() {
   const [n, visible] = ps(`$p=@(Get-Process ${PROC} -ErrorAction SilentlyContinue); "$($p.Count) $(@($p | ? { $_.MainWindowHandle -ne 0 }).Count)"`).split(' ').map(Number);
   return { processes: n, visible: visible > 0 };
 }
+// A PowerShell script running alongside the test (holding a file open, a window
+// to drop into); what it prints goes to OUT/<name>.log.
+const background = (name, script) => {
+  const file = path.join(OUT, `${name}.ps1`);
+  fs.writeFileSync(file, `\ufeff${script}`, 'utf8');
+  const out = fs.openSync(path.join(OUT, `${name}.log`), 'w');
+  return spawn('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', file], { stdio: ['ignore', out, out] });
+};
+const backgroundLog = (name) => (fs.existsSync(path.join(OUT, `${name}.log`)) ? fs.readFileSync(path.join(OUT, `${name}.log`), 'utf8').trim() : '');
+// Waits up to `ms` for `fn` to come true (PowerShell can take seconds to start on the runner).
+const until = async (fn, ms = 20000) => {
+  for (const end = Date.now() + ms; Date.now() < end; await sleep(250)) if (await fn()) return true;
+  return false;
+};
 const launch = (args) => spawn(EXE, args, { env, detached: true, stdio: 'ignore' }).unref();
 function again(args = []) {
   const t = Date.now();
@@ -416,15 +430,15 @@ await step('delete special files', async () => {
   fs.writeFileSync(ro, 'ro');
   fs.chmodSync(ro, 0o444);
   fs.writeFileSync(busy, 'busy');
-  const holder = spawn('powershell', ['-NoProfile', '-Command', `$f=[System.IO.File]::Open('${busy}','Open','Read','None'); Start-Sleep 25; $f.Close()`], { detached: true, stdio: 'ignore' });
-  await sleep(2500);
-  let locked = false;
-  try { fs.closeSync(fs.openSync(busy, 'r+')); } catch { locked = true; }
+  const holder = background('holder', `$f = [System.IO.File]::Open('${busy}', 'Open', 'Read', 'None'); 'locked'; Start-Sleep 60; $f.Close()`);
+  const locked = await until(() => {
+    try { fs.closeSync(fs.openSync(busy, 'r+')); return false; } catch { return true; }
+  });
   const row = (n) => page.locator('.col').first().locator('.crow', { hasText: n }).first();
   await row('readonly.txt').click();
   await page.keyboard.press('Delete');
   await sleep(2500);
-  const r = { locked, readOnlyGone: !fs.existsSync(ro) };
+  const r = { locked, ...(locked ? {} : { holder: backgroundLog('holder') }), readOnlyGone: !fs.existsSync(ro) };
   await page.keyboard.press('Control+Z');
   await sleep(2000);
   r.readOnlyBack = fs.existsSync(ro);
@@ -454,9 +468,8 @@ await step('drag to another app', async () => {
   const log = path.join(OUT, 'dropped.txt');
   const { width, height } = JSON.parse(ps('Add-Type -AssemblyName System.Windows.Forms; $b=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds; "{""width"":$($b.Width),""height"":$($b.Height)}"'));
   const target = { x: width - 330, y: Math.round(height / 2) - 200 };
-  const form = (title, minimized) => {
-    const script = path.join(OUT, `${title}.ps1`);
-    fs.writeFileSync(script, `Add-Type -AssemblyName System.Windows.Forms
+  const form = (title, minimized) =>
+    background(title, `Add-Type -AssemblyName System.Windows.Forms
 $f = New-Object Windows.Forms.Form
 $f.Text = '${title}'; $f.StartPosition = 'Manual'; $f.Left = ${target.x}; $f.Top = ${target.y}; $f.Width = 300; $f.Height = 300; $f.AllowDrop = $true
 ${minimized ? "$f.WindowState = 'Minimized'" : '$f.TopMost = $true'}
@@ -464,9 +477,8 @@ $f.Add_DragEnter({ $_.Effect = 'Copy' })
 $f.Add_DragOver({ $_.Effect = 'Copy' })
 $f.Add_DragDrop({ Add-Content -Path '${log}' -Value ('${title}:' + (($_.Data.GetData('FileDrop')) -join '|')) -Encoding UTF8 })
 [Windows.Forms.Application]::Run($f)
-`, 'utf8');
-    return spawn('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script], { detached: true, stdio: 'ignore' });
-  };
+`);
+  const shown = (title) => until(() => ps(`Get-Process powershell -ErrorAction SilentlyContinue | ? { $_.MainWindowTitle -eq '${title}' } | % { $_.Id }`) !== '', 30000);
   // Real mouse input along `points` ([x, y, ms to get there, ms to rest]), button held.
   const mouse = (points) => ps(`Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class M { [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y); [DllImport("user32.dll")] public static extern void mouse_event(int f, int x, int y, int d, int e); }'
 $p = @(${points.map((q) => `@(${q.join(',')})`).join(',')})
@@ -484,23 +496,28 @@ for ($k = 1; $k -lt $p.Count; $k++) { $a = $p[$k - 1]; $b = $p[$k]; $n = 25
   const into = [target.x + 150, target.y + 150];
   const r = {};
   const open1 = form('DropTarget', false);
-  await sleep(3000);
+  r.shown = await shown('DropTarget');
+  if (!r.shown) r.helper = backgroundLog('DropTarget');
+  await sleep(500);
   for (const [name, ms] of [['slow', 1500], ['quick', 250]]) {
     fs.rmSync(log, { force: true });
     mouse([await fileAt(), [...into, ms, 400]]);
     await sleep(1500);
     r[name] = got();
   }
+  desktop('drag-in-window', { log: true });
   open1.kill();
   ps("Get-Process powershell -ErrorAction SilentlyContinue | ? { $_.MainWindowTitle -eq 'DropTarget' } | Stop-Process -Force");
   // The taskbar: the minimized window's button.
   const open2 = form('Minimized', true);
-  await sleep(3000);
-  const button = ps(`Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes
+  r.minimizedShown = await shown('Minimized');
+  if (!r.minimizedShown) r.minimizedHelper = backgroundLog('Minimized');
+  let button = '';
+  await until(() => (button = ps(`Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes
 $A = [System.Windows.Automation.AutomationElement]
 $bar = $A::RootElement.FindFirst('Children', (New-Object System.Windows.Automation.PropertyCondition($A::ClassNameProperty, 'Shell_TrayWnd')))
 $b = $bar.FindAll('Descendants', [System.Windows.Automation.Condition]::TrueCondition) | ? { $_.Current.Name -like '*Minimized*' } | select -First 1
-if ($b) { $r = $b.Current.BoundingRectangle; "$([int]($r.X + $r.Width / 2)) $([int]($r.Y + $r.Height / 2)) $($b.Current.Name)" }`);
+if ($b) { $r = $b.Current.BoundingRectangle; "$([int]($r.X + $r.Width / 2)) $([int]($r.Y + $r.Height / 2)) $($b.Current.Name)" }`)) !== '', 10000);
   r.taskbarButton = button || null;
   if (button) {
     const [bx, by] = button.split(' ').map(Number);
