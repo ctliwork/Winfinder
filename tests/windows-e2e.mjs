@@ -441,6 +441,47 @@ await step('delete special files', async () => {
   return r;
 });
 
+// Drag a file out to another app with the real mouse: a small window that
+// accepts dropped files and writes down what it got. Slow and quick drags.
+await step('drag to another app', async () => {
+  await backToTop();
+  const log = path.join(OUT, 'dropped.txt');
+  const script = path.join(OUT, 'droptarget.ps1');
+  const { width, height } = JSON.parse(ps('Add-Type -AssemblyName System.Windows.Forms; $b=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds; "{""width"":$($b.Width),""height"":$($b.Height)}"'));
+  const target = { x: width - 330, y: Math.round(height / 2) - 150 };
+  fs.writeFileSync(script, `Add-Type -AssemblyName System.Windows.Forms
+$f = New-Object Windows.Forms.Form
+$f.Text = 'DropTarget'; $f.StartPosition = 'Manual'; $f.Left = ${target.x}; $f.Top = ${target.y}; $f.Width = 300; $f.Height = 300; $f.TopMost = $true; $f.AllowDrop = $true
+$f.Add_DragEnter({ $_.Effect = 'Copy' })
+$f.Add_DragOver({ $_.Effect = 'Copy' })
+$f.Add_DragDrop({ Add-Content -Path '${log}' -Value (($_.Data.GetData('FileDrop')) -join '|') -Encoding UTF8 })
+[Windows.Forms.Application]::Run($f)
+`, 'utf8');
+  const form = spawn('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script], { detached: true, stdio: 'ignore' });
+  await sleep(3000);
+  const mouse = (from, to, ms) => ps(`Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class M { [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y); [DllImport("user32.dll")] public static extern void mouse_event(int f, int x, int y, int d, int e); }'
+[M]::SetCursorPos(${from.x}, ${from.y}); Start-Sleep -Milliseconds 300
+[M]::mouse_event(2, 0, 0, 0, 0); Start-Sleep -Milliseconds 100
+$n = 30; for ($i = 1; $i -le $n; $i++) { [M]::SetCursorPos([int](${from.x} + (${to.x} - ${from.x}) * $i / $n), [int](${from.y} + (${to.y} - ${from.y}) * $i / $n)); Start-Sleep -Milliseconds ${Math.round(ms / 30)} }
+Start-Sleep -Milliseconds 400
+[M]::mouse_event(4, 0, 0, 0, 0)`);
+  const r = {};
+  for (const [name, ms] of [['slow', 1500], ['quick', 250]]) {
+    fs.rmSync(log, { force: true });
+    const from = await page.locator('.col').first().locator('.crow', { hasText: '筆記.txt' }).first().evaluate((el) => {
+      const b = el.getBoundingClientRect();
+      return { x: Math.round((window.screenX + b.left + 40) * devicePixelRatio), y: Math.round((window.screenY + b.top + b.height / 2) * devicePixelRatio) };
+    });
+    mouse(from, { x: target.x + 150, y: target.y + 150 }, ms);
+    await sleep(1500);
+    r[name] = { from, got: fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim() : null };
+  }
+  desktop('drag-out', { log: true });
+  form.kill();
+  ps("Get-Process powershell -ErrorAction SilentlyContinue | ? { $_.MainWindowTitle -eq 'DropTarget' } | Stop-Process -Force");
+  return r;
+});
+
 await step('views', async () => {
   const r = {};
   for (const [k, v] of [['1', 'icons'], ['2', 'list'], ['4', 'gallery'], ['3', 'columns']]) {
