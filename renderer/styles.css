@@ -465,7 +465,10 @@ body.pane-open #preview-pane {
 .col-grip::after { content: ""; position: absolute; left: 3px; top: 0; bottom: 0; width: 2px; background: var(--accent); opacity: 0; transition: opacity 0.12s; }
 .col-grip:hover::after, body.col-resizing .col-grip:active::after { opacity: 0.6; }
 body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-select: none; }
-@keyframes colIn { from { opacity: 0; transform: translateX(-12px); } }
+/* A column that opens fades in from the one before it. */
+.colw.enter > .col { animation: colIn 0.24s cubic-bezier(.2, .8, .2, 1); }
+@keyframes colIn { from { opacity: 0; transform: translateX(-8px); } }
+.col-preview > * { animation: fadeIn 0.22s ease-out; }
 .crow { height: 26px; display: flex; align-items: center; gap: 7px; padding: 0 8px; border-radius: 6px; white-space: nowrap; }
 .crow .ico { width: 18px; height: 18px; flex: none; }
 .crow .ico.folder { height: 15px; }
@@ -618,6 +621,26 @@ body.view-icons #zoom { display: block; }
 }
 @keyframes toastIn { from { opacity: 0; transform: translate(-50%, 12px) scale(0.95); } }
 
+/* ---------- motion ---------- */
+/* Things leave as they came: menus, dialogs and the toast fade out
+   (app.js takes them down afterwards), a closed tab folds away. */
+@keyframes fadeOut { to { opacity: 0; } }
+#menu.closing { animation: menuOut 0.12s ease-in forwards; pointer-events: none; }
+@keyframes menuOut { to { opacity: 0; transform: scale(0.97); } }
+#dlg.closing { pointer-events: none; }
+#dlg.closing #dlg-backdrop { animation: fadeOut 0.16s ease-in forwards; }
+#dlg.closing #dlg-window { animation: dlgOut 0.16s ease-in forwards; }
+@keyframes dlgOut { to { opacity: 0; transform: translateY(6px) scale(0.97); } }
+#toast.closing { animation: toastOut 0.2s ease-in forwards; }
+@keyframes toastOut { to { opacity: 0; transform: translate(-50%, 8px) scale(0.97); } }
+.tab.closing { animation: tabOut 0.15s ease-in forwards; pointer-events: none; overflow: hidden; }
+@keyframes tabOut { to { opacity: 0; flex-basis: 0; min-width: 0; padding-left: 0; padding-right: 0; } }
+/* Opening a folder in the list view: the rows rise in, one after another. */
+.list.animate .lrow { animation: rowIn 0.28s cubic-bezier(.2, .8, .2, 1) backwards; animation-delay: calc(var(--i, 0) * 9ms); }
+@keyframes rowIn { from { opacity: 0; transform: translateY(5px); } }
+/* The selection eases in and out instead of snapping. */
+.crow, .lrow, .gi .label { transition: background-color 0.1s ease-out, color 0.1s ease-out; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
@@ -675,8 +698,9 @@ body.density-roomy .lrow { height: 34px; }
 #dlg-backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.25); animation: fadeIn 0.15s; }
 #dlg-window {
   position: relative; outline: none; border-radius: 14px; box-shadow: var(--shadow-lg); background: var(--glass-strong);
-  padding: 20px 22px 16px; width: min(380px, 90vw); animation: popIn 0.2s cubic-bezier(.2, .8, .2, 1);
+  padding: 20px 22px 16px; width: min(380px, 90vw); animation: dlgIn 0.26s cubic-bezier(.2, .9, .3, 1.05);
 }
+@keyframes dlgIn { from { opacity: 0; transform: translateY(10px) scale(0.96); } }
 #dlg-window.wide { width: min(640px, 92vw); }
 .dlg-title { font-size: 15px; font-weight: 650; margin-bottom: 12px; }
 .dlg-msg { font-size: 13.5px; line-height: 1.5; margin-bottom: 18px; word-break: break-word; }

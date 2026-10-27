@@ -166,9 +166,13 @@
     const t = $('#toast');
     t.textContent = msg;
     t.hidden = false;
+    t.classList.remove('closing');
     t.style.animation = 'none'; void t.offsetWidth; t.style.animation = '';
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => { t.hidden = true; }, 2600);
+    toastTimer = setTimeout(() => {
+      t.classList.add('closing'); // fades out (styles.css), then goes
+      toastTimer = setTimeout(() => { t.hidden = true; t.classList.remove('closing'); }, 200);
+    }, 2600);
   }
 
   // ---------- data ----------
@@ -662,6 +666,7 @@
         <span class="twisty none"></span>${I.sidebar('smart')}<span>${esc(sf.name)}</span></div>`).join('');
     const pcOpen = !prefs.pcCollapsed;
     const drives = pcOpen ? G.places.locations.map((l) => row(l.path, l.label, 'drive', 1)).join('') : '';
+    const before = new Set($$('.place', nav).map((el) => el.dataset.path || el.dataset.smart));
     nav.innerHTML = `
       <div class="place home-row${state.cwd === HOME ? ' active' : ''}" data-path="${HOME}">
         <span class="twisty none"></span>${folderIco(HOME, 16)}<span>常用</span></div>
@@ -672,6 +677,11 @@
       <div class="place" data-path="${PC}"><span class="twisty${pcOpen ? ' open' : ''}" data-twisty="${PC}">${chev}</span>${shellIco(SHELL_PC, 16, I.sidebar('pc'))}<span>本機</span></div>
       ${drives}`;
     nav.scrollTop = scroll;
+    // Rows that weren't there (a folder opened in the tree) slide in under their parent.
+    if (before.size && !calm.matches) {
+      const fresh = $$('.place', nav).filter((el) => !before.has(el.dataset.path || el.dataset.smart));
+      if (fresh.length < 60) fresh.forEach((el, k) => el.animate([{ opacity: 0, transform: 'translateY(-4px)' }, { opacity: 1, transform: 'none' }], { duration: 220, delay: k * 14, easing: 'cubic-bezier(.2,.8,.2,1)', fill: 'backwards' }));
+    }
     fillShellIcons(nav);
     if (missing.length) Promise.all(missing.map((p) => listDir(p))).then(renderSidebar);
   }
@@ -1083,7 +1093,7 @@
           <div class="label">${esc(shownName(e))}${cloudBadge(e)}</div>
         </div>`);
     } else if (mode === 'list') {
-      view.className = 'list';
+      view.className = `list${animate ? ' animate' : ''}`;
       view.style.setProperty('--lcols', listTemplate());
       const { key, dir } = curSort();
       const cols = listCols();
@@ -1091,7 +1101,7 @@
       const header = `<div class="lhead">${head('name', '名稱')}${cols.map((k) => head(k, LIST_COLS[k].label)).join('')}</div>`;
       const counts = groupCounts(items);
       renderRows(view, items, (e, i) => `${groupHead(items, i, counts, 'lgroup')}
-        <div class="lrow item${state.sel.has(e.path) ? ' sel' : ''}${cut.has(e.path) ? ' cut' : ''}" data-i="${i}" draggable="true">
+        <div class="lrow item${state.sel.has(e.path) ? ' sel' : ''}${cut.has(e.path) ? ' cut' : ''}" data-i="${i}" style="--i:${Math.min(i, 30)}" draggable="true">
           <div class="name">${iconHtml(e, 40)}<span class="nm">${esc(shownName(e))}</span>${cloudBadge(e)}</div>
           ${cols.map((k) => `<div>${LIST_COLS[k].cell(e)}</div>`).join('')}
         </div>`, header);
@@ -1144,7 +1154,7 @@
       if (w && norm(w.dataset.dir) !== norm(dir)) { wraps.slice(j).forEach((x) => x.remove()); wraps.length = j; w = null; }
       if (!w) {
         w = document.createElement('div');
-        w.className = 'colw';
+        w.className = 'colw enter'; // fades in once (styles.css)
         w.dataset.dir = dir;
         w.innerHTML = `<div class="col" data-dir="${esc(dir)}"></div><div class="col-grip" title="拖曳調整欄寬（Alt：全部欄），按兩下自動調整"></div>`;
         view.insertBefore(w, preview);
@@ -1665,6 +1675,13 @@
       t.history = []; t.hIndex = -1;
       await navigate(HOME);
       return;
+    }
+    // The tab folds away first, and the others close up.
+    const el = $(`#tabs .tab[data-tab="${t.id}"]`);
+    if (el && !calm.matches && !el.classList.contains('closing')) {
+      el.classList.add('closing');
+      await new Promise((r) => setTimeout(r, 150));
+      if (!tabs.includes(t)) return;
     }
     const i = tabs.indexOf(t);
     tabs.splice(i, 1);
@@ -2341,6 +2358,7 @@
     const failed = await api.trash(items.map((e) => e.path));
     const ok = items.length - failed.length;
     const gone = items.map((e) => e.path).filter((p) => !failed.includes(p));
+    await vanish(gone);
     if (gone.length && api.restoreTrash) pushUndo('丟到資源回收筒', async () => (await api.restoreTrash(gone)).length === 0);
     if (ok) toast(`已將 ${ok} 個項目丟到資源回收筒`);
     if (failed.length) toast(`有 ${failed.length} 個項目無法刪除`);
@@ -2350,6 +2368,16 @@
     }
     state.sel.clear();
     await refresh();
+  }
+
+  // What was deleted shrinks away before the folder is drawn without it.
+  async function vanish(paths) {
+    if (calm.matches || !paths.length) return;
+    const els = paths.slice(0, 200).map(elForPath).filter(Boolean);
+    await Promise.all(els.map((el) => el.animate(
+      [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'scale(0.9)' }],
+      { duration: 180, easing: 'cubic-bezier(.4,0,1,1)', fill: 'forwards' },
+    ).finished.catch(() => {})));
   }
 
   function copySelected(op) {
@@ -2474,15 +2502,25 @@
         <span class="check">${it.check ? '✓' : ''}</span><span>${esc(it.label)}</span>${it.kbd ? `<span class="kbd">${it.kbd}</span>` : ''}
       </div>`;
     }).join('');
+    clearTimeout(menuEl._closing);
+    if (menuEl.classList.contains('closing')) { menuEl.classList.remove('closing'); menuEl.style.animation = 'none'; void menuEl.offsetWidth; menuEl.style.animation = ''; }
     menuEl.hidden = false;
-    const r = menuEl.getBoundingClientRect();
+    // Its laid-out size: the opening animation scales the box down at first.
+    const r = { width: menuEl.offsetWidth, height: menuEl.offsetHeight };
     const left = Math.min(x, innerWidth - r.width - 8);
     const top = Math.min(y, innerHeight - r.height - 8);
     menuEl.style.left = `${Math.max(8, left)}px`;
     menuEl.style.top = `${Math.max(8, top)}px`;
     menuEl.style.transformOrigin = `${x - left}px ${y - top}px`;
   }
-  function closeMenu() { menuEl.hidden = true; }
+  // Fades out (styles.css), already counting as closed.
+  function closeMenu() {
+    if (menuEl.hidden || menuEl.classList.contains('closing')) return;
+    if (calm.matches) { menuEl.hidden = true; return; }
+    menuEl.classList.add('closing');
+    menuEl._closing = setTimeout(() => { menuEl.hidden = true; menuEl.classList.remove('closing'); }, 120);
+  }
+  function menuOpen() { return !menuEl.hidden && !menuEl.classList.contains('closing'); }
   menuEl.addEventListener('mousedown', (ev) => ev.stopPropagation());
   menuEl.addEventListener('click', (ev) => {
     const sw = ev.target.closest('[data-accent]');
@@ -2894,7 +2932,8 @@
     }
     if (v === 'columns' && state.cwd !== HOME) state.colActive = ancestors(state.cwd, state.colRoot).length - 1;
     computeEntries();
-    render({ animate: true });
+    // The new view fades in (the icon view's icons also pop in, see styles.css).
+    render({ animate: true }).then(() => { if (!calm.matches) view.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 180, easing: 'ease-out' }); });
     watchCurrent();
   }
   function toggleHidden() {
@@ -3202,10 +3241,11 @@
     const inInput = ev.target.matches?.('input, textarea, select');
     const ctrl = ev.ctrlKey || ev.metaKey;
     const k = ev.key;
-    if (!dlg.el.hidden) { if (k === 'Escape') closeDialog(); return; } // dialogs handle their own keys
+    // Dialogs handle their own keys (also the one that closes them, while it fades out).
+    if (dialogOpen() || ev.target.closest?.('#dlg')) { if (k === 'Escape') closeDialog(); return; }
 
     if (k === 'Escape') {
-      if (!menuEl.hidden) { closeMenu(); return; }
+      if (menuOpen()) { closeMenu(); return; }
       if (ql.isOpen) { ql.close(); return; }
       if (state.search.query) { clearSearch(true); return; }
       return;
@@ -3552,6 +3592,8 @@
     dlg.win.replaceWith(fresh);
     dlg.win = fresh;
     dlg.win.className = `glass ${cls}`;
+    clearTimeout(dlg.closing);
+    dlg.el.classList.remove('closing');
     dlg.win.innerHTML = html;
     dlg.el.hidden = false;
     closeMenu();
@@ -3562,14 +3604,18 @@
     return dlg.win;
   }
   function closeDialog() {
-    if (dlg.el.hidden) return;
-    dlg.el.hidden = true;
-    dlg.win.innerHTML = '';
+    if (!dialogOpen()) return;
+    // It fades out (styles.css) and is taken down after, unless another opens meanwhile.
+    if (calm.matches) { dlg.el.hidden = true; dlg.win.innerHTML = ''; } else {
+      dlg.el.classList.add('closing');
+      dlg.closing = setTimeout(() => { dlg.el.hidden = true; dlg.el.classList.remove('closing'); dlg.win.innerHTML = ''; }, 160);
+    }
     const f = dlg.onClose;
     dlg.onClose = null;
     f?.();
     content.focus();
   }
+  function dialogOpen() { return !dlg.el.hidden && !dlg.el.classList.contains('closing'); }
   $('#dlg-backdrop').addEventListener('mousedown', closeDialog);
 
   function confirmDialog(message, okLabel) {
