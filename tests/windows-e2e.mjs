@@ -341,6 +341,38 @@ await step('sort menu', async () => {
   return { title, before, desc, mixed, after, rootUnchanged: JSON.stringify(root) === JSON.stringify(rootAfter) };
 });
 
+// Grouping (Explorer's 分組依據) from the sort menu: the column view's column
+// gets a header per kind; the list view too, and clicking one selects its group.
+await step('group by', async () => {
+  await backToTop();
+  await withPrefs({ rememberView: true, folderViews: {} });
+  const shown = (sel) => page.$$eval(sel, (els) => els.map((e) => (/group/.test(e.className) ? `[${e.firstChild.textContent}]` : e.querySelector('.nm, .label')?.textContent)));
+  const pick = async (re) => { await page.locator('#menu .mi', { hasText: re }).first().click(); await sleep(700); };
+  await page.locator('.col').first().locator('.crow', { hasText: '筆記.txt' }).first().click();
+  await sleep(400);
+  await page.click('#btn-sort');
+  const menu = await page.$$eval('#menu .mi, #menu .mlabel', (e) => e.map((x) => x.textContent.trim()));
+  await page.locator('#menu .mi').filter({ hasText: /^\s*類型\s*$/ }).first().click();
+  await sleep(700);
+  const column = (await shown('.colw:first-child .col > *')).slice(0, 12);
+  await page.locator('.col').first().locator('.crow', { hasText: '報告.docx' }).first().click();
+  await sleep(500);
+  const selected = await page.$$eval('.crow.sel .nm', (e) => e.map((x) => x.textContent));
+  await page.keyboard.press('Control+2');
+  await sleep(800);
+  const list = (await shown('#view > .lgroup, #view > .lrow')).slice(0, 12);
+  await page.locator('.lgroup').nth(1).click();
+  await sleep(300);
+  const groupSelected = await page.$$eval('.lrow.sel .nm', (e) => e.map((x) => x.textContent));
+  await page.click('#btn-sort');
+  await pick(/^\s*無\s*$/);
+  const ungrouped = await page.$$eval('.lgroup', (e) => e.length);
+  await page.keyboard.press('Control+3');
+  await sleep(500);
+  await withPrefs({ rememberView: false, folderViews: {} });
+  return { menuHasGroups: menu.includes('分組依據'), column, selected, list, groupSelected, ungrouped };
+});
+
 // The up button goes to the parent folder (Back goes to the previous one).
 await step('up button', async () => {
   await backToTop();

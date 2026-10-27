@@ -282,12 +282,8 @@
       if (q) list = list.filter((e) => e.name.toLowerCase().includes(q));
       state.entries = list.filter(passesFilters);
     }
-    // Grouped views list each group together (stable, so the sort holds inside).
-    if (state.cwd !== HOME && curGroup() !== 'none' && ['list', 'icons'].includes(viewMode())) {
-      const keyed = state.entries.map((e) => [groupOf(e), e]);
-      keyed.sort((a, b) => a[0].order - b[0].order || collator.compare(a[0].label, b[0].label));
-      state.entries = keyed.map(([, e]) => e);
-    }
+    // In groups (the column view's last column is these, in the same order; the gallery has none).
+    if (state.cwd !== HOME && viewMode() !== 'gallery') state.entries = groupItems(state.entries, curGroup());
   }
 
   // Search filters (type, size, modified date) from the bar under the toolbar.
@@ -313,15 +309,25 @@
   function filtersOn() { return Object.values(state.search.filters || {}).some(Boolean); }
 
   // ---------- grouping (like Explorer's 分組依據) ----------
-  function curGroup() { return (!state.search.results && folderPref()?.group) || prefs.groupBy || 'none'; }
-  function setGroup(group) {
-    if (folderPref() !== null && !state.search.results) rememberFolder({ group }); else prefs.groupBy = group;
+  // Per folder like the sort: the list and icon views, and each column of the
+  // column view, show their items in groups under a header with the count.
+  const GROUPS = [['none', '無'], ['kind', '類型'], ['date', '修改日期'], ['created', '建立日期'], ['size', '大小']];
+  function groupFor(dir) { return (dir && folderPref(dir)?.group) || prefs.groupBy || 'none'; }
+  function curGroup() { return state.search.results ? prefs.groupBy || 'none' : groupFor(state.cwd); }
+  function setGroup(group, dir = sortTarget()) {
+    if (dir && folderPref(dir) !== null) rememberFolder({ group }, dir); else prefs.groupBy = group;
     savePrefs();
     flipIcons(async () => { computeEntries(); await render(); });
   }
+  // Each group together, in the groups' order (stable, so the sort holds inside).
+  function groupItems(list, g) {
+    if (g === 'none') return list;
+    const keyed = list.map((e) => [groupOf(e, g), e]);
+    keyed.sort((a, b) => a[0].order - b[0].order || collator.compare(a[0].label, b[0].label));
+    return keyed.map(([, e]) => e);
+  }
   const DAY = 86400000;
-  function groupOf(e) {
-    const g = curGroup();
+  function groupOf(e, g = curGroup()) {
     if (g === 'kind') return e.isDir ? { order: 0, label: '資料夾' } : { order: 1, label: I.kindLabel(e) };
     if (g === 'size') {
       if (e.isDir) return { order: 0, label: '資料夾' };
@@ -330,8 +336,8 @@
       const i = tiers.findIndex(([max]) => n <= max);
       return i < 0 ? { order: 7, label: '超大（超過 4 GB）' } : { order: i + 1, label: tiers[i][1] };
     }
-    // date: newest first, Explorer's buckets
-    const t = e.mtime || 0;
+    // modified or created date: newest first, Explorer's buckets
+    const t = (g === 'created' ? e.birth : e.mtime) || 0;
     const today = new Date(); today.setHours(0, 0, 0, 0);
     const t0 = today.getTime();
     const weekStart = t0 - ((today.getDay() + 6) % 7) * DAY; // Monday
@@ -345,17 +351,28 @@
     const i = buckets.findIndex(([hit]) => hit);
     return i < 0 ? { order: 9, label: '很久以前' } : { order: i, label: buckets[i][1] };
   }
-  // Group header markup to put before item i (empty when the group continues).
-  function groupHead(items, i, counts, cls) {
-    if (curGroup() === 'none' || state.cwd === HOME) return '';
-    const g = groupOf(items[i]);
-    if (i > 0 && groupOf(items[i - 1]).label === g.label) return '';
-    return `<div class="${cls}">${esc(g.label)}<span>${counts.get(g.label)}</span></div>`;
+  // Group header markup to put before item i (empty when the group continues);
+  // data-g is the group's first item.
+  function groupHead(items, i, counts, cls, g = curGroup()) {
+    if (g === 'none' || state.cwd === HOME) return '';
+    const label = groupOf(items[i], g).label;
+    if (i > 0 && groupOf(items[i - 1], g).label === label) return '';
+    return `<div class="${cls}" data-g="${i}">${esc(label)}<span>${counts.get(label)}</span></div>`;
   }
-  function groupCounts(items) {
+  function groupCounts(items, g = curGroup()) {
     const m = new Map();
-    if (curGroup() !== 'none') for (const e of items) { const l = groupOf(e).label; m.set(l, (m.get(l) || 0) + 1); }
+    if (g !== 'none') for (const e of items) { const l = groupOf(e, g).label; m.set(l, (m.get(l) || 0) + 1); }
     return m;
+  }
+  // Clicking a group's header selects the group, as in Explorer.
+  function selectGroup(start) {
+    const g = curGroup();
+    const label = groupOf(state.entries[start], g).label;
+    let end = start;
+    while (end < state.entries.length && groupOf(state.entries[end], g).label === label) end++;
+    const paths = state.entries.slice(start, end).map((e) => e.path);
+    state.anchor = paths[0];
+    setSelection(paths);
   }
 
   // ---------- list columns ----------
@@ -378,14 +395,13 @@
     render();
   }
   function listHeaderMenu(x, y) {
-    const groups = [['none', '無'], ['kind', '類型'], ['date', '修改日期'], ['size', '大小']];
     openMenu([
       ...(api.dirSize ? [{ label: '計算所有大小', check: !!prefs.calcSizes, action: toggleCalcSizes }, '-'] : []),
       { html: '<div class="mlabel">顯示的欄位</div>' },
       ...Object.entries(LIST_COLS).map(([k, c]) => ({ label: c.label, check: listCols().includes(k), action: () => toggleListCol(k) })),
       '-',
       { html: '<div class="mlabel">分組依據</div>' },
-      ...groups.map(([g, l]) => ({ label: l, check: curGroup() === g, action: () => setGroup(g) })),
+      ...GROUPS.map(([g, l]) => ({ label: l, check: curGroup() === g, action: () => setGroup(g) })),
       '-',
       { label: '還原欄寬', action: () => { prefs.listW = {}; savePrefs(); render(); } },
     ], x, y);
@@ -1103,7 +1119,7 @@
   async function renderColumns() {
     const chain = ancestors(state.cwd, state.colRoot);
     await Promise.all(chain.map((d) => listDir(d)));
-    state.colLists = chain.map((d) => visibleOf(dirCache.get(d)?.entries || [], sortOf(d)));
+    state.colLists = chain.map((d) => groupItems(visibleOf(dirCache.get(d)?.entries || [], sortOf(d)), groupFor(d)));
     const n = chain.length - 1;
     const fresh = view._colsTab !== state.id || !view.classList.contains('columns') || !$('.col-preview', view);
     if (fresh) { view.innerHTML = '<div class="col-preview"></div>'; view._colsTab = state.id; }
@@ -1122,7 +1138,8 @@
       });
       // Thumbnails are left out of the key so a late-loading thumbnail
       // doesn't force the column to be rebuilt.
-      const rowsKey = `${j}|${list.map((e) => `${e.path}|${e.mtime}|${e.isDir}|${e.cloud || ''}`).join('\n')}`;
+      const g = groupFor(dir);
+      const rowsKey = `${j}|${g}|${list.map((e) => `${e.path}|${e.mtime}|${e.isDir}|${e.cloud || ''}`).join('\n')}`;
       let w = wraps[j];
       if (w && norm(w.dataset.dir) !== norm(dir)) { wraps.slice(j).forEach((x) => x.remove()); wraps.length = j; w = null; }
       if (!w) {
@@ -1141,7 +1158,8 @@
         </div>`;
       const big = list.length >= VIRTUAL_MIN;
       if (big) {
-        // Big folder: only the rows near the visible part (see setStrip).
+        // Big folder: only the rows near the visible part (see setStrip). Its
+        // rows must all be the same height, so groups keep their order but get no headers.
         const top = col.scrollTop;
         if (col._rows !== rowsKey || !col._strip) {
           setStrip(col, { n: list.length, pitch: 0, lead: parseFloat(getComputedStyle(col).paddingTop) || 0, gap: 0 });
@@ -1155,12 +1173,13 @@
       } else if (col._rows !== rowsKey || col._strip) {
         col._strip = null;
         const top = col.scrollTop;
-        col.innerHTML = list.map((_, i) => rowHtml(i)).join('');
+        const counts = groupCounts(list, g);
+        col.innerHTML = list.map((_, i) => groupHead(list, i, counts, 'cgroup', g) + rowHtml(i)).join('');
         col._rows = rowsKey;
         col.scrollTop = top;
       } else {
         // Same rows: only the highlight changed.
-        const els = col.children;
+        const els = col.querySelectorAll('.crow');
         for (let i = 0; i < els.length; i++) if (els[i].className !== classes[i]) els[i].className = classes[i];
       }
     });
@@ -1935,6 +1954,8 @@
     if (it?.entry) openEntry(it.entry);
   });
   content.addEventListener('click', (ev) => {
+    const gh = ev.target.closest('.lgroup, .ggroup');
+    if (gh && !ev.ctrlKey && !ev.shiftKey) { selectGroup(Number(gh.dataset.g)); return; }
     const h = ev.target.closest('.lhead [data-sort]');
     if (!h || ev.target.closest('.lgrip')) return;
     const k = h.dataset.sort;
@@ -2488,7 +2509,8 @@
     const dir = sortTarget(colDir);
     const cur = dir ? sortOf(dir) : curSort();
     const by = SORTS.find(([k]) => k === cur.key)?.[1] || '名稱';
-    return { label: `排序方式：依${by}，${cur.dir === 1 ? '升冪' : '降冪'}…`, action: () => openMenu(sortItems(colDir), x, y) };
+    const g = GROUPS.find(([k]) => k === (dir ? groupFor(dir) : curGroup()) && k !== 'none')?.[1];
+    return { label: `排序方式：依${by}，${cur.dir === 1 ? '升冪' : '降冪'}${g ? `；依${g}分組` : ''}…`, action: () => openMenu(sortItems(colDir), x, y) };
   }
   function sortItems(colDir = null) {
     const dir = sortTarget(colDir);
@@ -2509,6 +2531,9 @@
       // Per folder like the order (Finder has one switch for all, in its settings).
       { label: '資料夾排在前面', check: cur.foldersFirst ?? prefs.foldersFirst, action: () => (dir && folderPref(dir) !== null
         ? set({ foldersFirst: !(cur.foldersFirst ?? prefs.foldersFirst) }) : setPref('foldersFirst', !prefs.foldersFirst)) },
+      // Grouping, for the same folder (the gallery shows no groups).
+      ...(state.cwd !== HOME && viewMode() !== 'gallery' ? ['-', { html: '<div class="mlabel">分組依據</div>' },
+        ...GROUPS.map(([k, l]) => ({ label: l, check: (dir ? groupFor(dir) : curGroup()) === k, action: () => setGroup(k, dir) }))] : []),
     ];
   }
 
@@ -2586,11 +2611,11 @@
   }
   function appItemsForBackground(colDir = null) {
     const views = [['icons', '圖像'], ['list', '列表'], ['columns', '直欄'], ['gallery', '圖庫']];
-    const groups = [['none', '（無）'], ['kind', '類型'], ['date', '修改日期'], ['size', '大小']];
+    const dir = sortTarget(colDir);
     return [
       { label: '檢視', children: views.map(([v, l]) => ({ label: l, check: curView() === v, action: () => setView(v) })) },
       { label: '排序方式', children: sortItems(colDir) },
-      ['list', 'icons'].includes(viewMode()) && { label: '分組依據', children: groups.map(([g, l]) => ({ label: l, check: curGroup() === g, action: () => setGroup(g) })) },
+      viewMode() !== 'gallery' && { label: '分組依據', children: GROUPS.map(([g, l]) => ({ label: g === 'none' ? '（無）' : l, check: groupFor(dir) === g, action: () => setGroup(g, dir) })) },
       { label: '重新整理', action: () => refresh(true) },
       '-',
       undoStack.length && { label: `復原${undoStack[undoStack.length - 1].label}`, action: undo },
