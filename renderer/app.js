@@ -2525,6 +2525,8 @@
   menuEl.addEventListener('click', (ev) => {
     const sw = ev.target.closest('[data-accent]');
     if (sw) { setAccent(sw.dataset.accent); closeMenu(); return; }
+    const th = ev.target.closest('[data-theme-pick]');
+    if (th) { setPref('theme', th.dataset.themePick); closeMenu(); return; }
     const mi = ev.target.closest('.mi');
     if (!mi || mi.classList.contains('disabled')) return;
     closeMenu();
@@ -2746,17 +2748,25 @@
 
   $('#btn-more').addEventListener('click', (ev) => {
     const r = ev.currentTarget.getBoundingClientRect();
+    // What the toolbar has a button for (views, sort, preview) isn't repeated
+    // here, except the views when a narrow window hides their buttons; instead
+    // the settings used most, a click away.
+    const themes = [['system', '跟隨系統'], ['light', '淺色'], ['dark', '深色']];
+    const narrow = getComputedStyle($('#view-seg')).display === 'none';
     openMenu([
-      ...viewItems(),
-      '-',
-      sortEntry(r.right - 230, r.bottom + 6),
-      '-',
+      ...(narrow ? [...viewItems(), '-'] : []),
       { label: '顯示隱藏的項目', kbd: 'Ctrl+Shift+.', check: prefs.showHidden, action: toggleHidden },
+      { label: '顯示副檔名', check: !!prefs.showExt, action: () => setPref('showExt', !prefs.showExt) },
       { label: prefs.sidebarHidden ? '顯示側邊欄' : '隱藏側邊欄', kbd: 'Ctrl+Alt+S', action: toggleSidebar },
-      { label: inColumnsMode() ? '顯示預覽欄' : '預覽窗格', kbd: 'Alt+P', check: inColumnsMode() ? !!prefs.colPreview : !!prefs.previewPane, action: togglePane },
       ...(viewMode() === 'list' && api.dirSize ? [{ label: '計算所有大小', check: !!prefs.calcSizes, action: toggleCalcSizes }] : []),
       { label: '重新整理', kbd: 'F5', action: () => refresh(true) },
       '-',
+      { html: '<div class="mlabel">主題</div>' },
+      { html: `<div class="mrow mseg">${themes.map(([t, l]) => `<button data-theme-pick="${t}" class="${prefs.theme === t ? 'on' : ''}">${l}</button>`).join('')}</div>` },
+      { html: '<div class="mlabel">強調色</div>' },
+      { html: `<div class="mrow">${ACCENTS.map(([c, n]) => `<button class="swatch${prefs.accent === c ? ' on' : ''}" style="background:${c};color:${c}" data-accent="${c}" title="${n}"></button>`).join('')}</div>` },
+      '-',
+      ...(api.checkUpdate ? [{ label: '檢查更新…', kbd: appVersion ? `v${appVersion}` : '', action: () => checkUpdates(true) }] : []),
       { label: '設定…', kbd: 'Ctrl+,', action: () => openSettings() },
       ...(api.quit && prefs.keepRunning ? [{ label: '結束 Winfinder', action: () => api.quit() }] : []),
     ], r.right - 230, r.bottom + 6);
@@ -3582,6 +3592,9 @@
     $('#update').hidden = true;
     if (updater.info) { prefs.skipVersion = updater.info.version; savePrefs(); }
   });
+  // Shown next to 檢查更新 in the ⋯ menu.
+  let appVersion = null;
+  api.appVersion?.().then((v) => { appVersion = v; }).catch(() => {});
   function checkUpdates(isManual) { manual = isManual; updater.check(isManual); }
 
   // ---------- dialogs ----------

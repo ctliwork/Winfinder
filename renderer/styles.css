@@ -590,6 +590,10 @@ body.view-icons #zoom { display: block; }
 .swatch:hover { transform: scale(1.18); }
 .swatch.on { box-shadow: 0 0 0 2px var(--content-bg), 0 0 0 3.5px currentColor; }
 .mlabel { font-size: 11px; color: var(--text3); padding: 6px 12px 0; }
+.mseg { gap: 4px; padding: 5px 10px 6px; }
+.mseg button { flex: 1; height: 24px; border-radius: 6px; font-size: 12px; background: var(--hover); transition: background 0.12s, color 0.12s; }
+.mseg button:hover { background: var(--sel-muted); }
+.mseg button.on { background: var(--accent); color: #fff; }
 
 /* ---------- quick look ---------- */
 #ql { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; }
