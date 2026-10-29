@@ -2552,7 +2552,8 @@
     const g = GROUPS.find(([k]) => k === (dir ? groupFor(dir) : curGroup()) && k !== 'none')?.[1];
     return { label: `排序方式：依${by}，${cur.dir === 1 ? '升冪' : '降冪'}${g ? `；依${g}分組` : ''}…`, action: () => openMenu(sortItems(colDir), x, y) };
   }
-  function sortItems(colDir = null) {
+  // `groups`: with 分組依據 at the end (Windows' own menu has it as a menu of its own).
+  function sortItems(colDir = null, { groups = true } = {}) {
     const dir = sortTarget(colDir);
     const cur = dir ? sortOf(dir) : curSort();
     const set = (sort) => setSort(sort, dir);
@@ -2572,7 +2573,7 @@
       { label: '資料夾排在前面', check: cur.foldersFirst ?? prefs.foldersFirst, action: () => (dir && folderPref(dir) !== null
         ? set({ foldersFirst: !(cur.foldersFirst ?? prefs.foldersFirst) }) : setPref('foldersFirst', !prefs.foldersFirst)) },
       // Grouping, for the same folder (the gallery shows no groups).
-      ...(state.cwd !== HOME && viewMode() !== 'gallery' ? ['-', { html: '<div class="mlabel">分組依據</div>' },
+      ...(groups && state.cwd !== HOME && viewMode() !== 'gallery' ? ['-', { html: '<div class="mlabel">分組依據</div>' },
         ...GROUPS.map(([k, l]) => ({ label: l, check: (dir ? groupFor(dir) : curGroup()) === k, action: () => setGroup(k, dir) }))] : []),
     ];
   }
@@ -2629,7 +2630,8 @@
   // Our menu items (with actions) -> the plain list the native side inserts.
   function toExtras(items) {
     const actions = [];
-    const conv = (list) => list.filter(Boolean).map((it) => {
+    // Windows' menu has text items only: our menus' headings and rows of buttons (html) are left out.
+    const conv = (list) => list.filter((it) => it && !it.html).map((it) => {
       if (it === '-') return { label: '-' };
       if (it.children) return { label: it.label, children: conv(it.children) };
       return { id: actions.push(it.action) - 1, label: it.label, checked: !!it.check, disabled: !!it.disabled };
@@ -2654,7 +2656,7 @@
     const dir = sortTarget(colDir);
     return [
       { label: '檢視', children: views.map(([v, l]) => ({ label: l, check: curView() === v, action: () => setView(v) })) },
-      { label: '排序方式', children: sortItems(colDir) },
+      { label: '排序方式', children: sortItems(colDir, { groups: false }) },
       viewMode() !== 'gallery' && { label: '分組依據', children: GROUPS.map(([g, l]) => ({ label: g === 'none' ? '（無）' : l, check: groupFor(dir) === g, action: () => setGroup(g, dir) })) },
       { label: '重新整理', action: () => refresh(true) },
       '-',

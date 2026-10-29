@@ -373,6 +373,41 @@ await step('group by', async () => {
   return { menuHasGroups: menu.includes('分組依據'), column, selected, list, groupSelected, ungrouped };
 });
 
+// Windows' own right-click menus (the default; the other steps use the Finder
+// style): on the background and on an item, each comes up (a #32768 popup)
+// with no error, in every view.
+await step('Windows menus', async () => {
+  await backToTop();
+  await withPrefs({ menuStyle: 'windows' });
+  const popup = () => ps(`Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class P { [DllImport("user32.dll")] public static extern IntPtr FindWindow(string c, string t); }'
+[P]::FindWindow('#32768', $null) -ne [IntPtr]::Zero`) === 'True';
+  const esc = () => ps("Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('{ESC}{ESC}')");
+  const r = {};
+  for (const [k, v] of [['3', 'columns'], ['2', 'list'], ['1', 'icons']]) {
+    await page.keyboard.press(`Control+${k}`);
+    await sleep(800);
+    const item = page.locator('#view .item', { hasText: '筆記.txt' }).first();
+    const box = await item.boundingBox();
+    // background: below the last item of the first column / of the view
+    const bg = v === 'columns' ? await page.locator('.col').first().boundingBox() : await page.locator('#content').boundingBox();
+    const res = {};
+    for (const [name, x, y] of [['background', bg.x + 30, bg.y + bg.height - 30], ['item', box.x + box.width / 2, box.y + box.height / 2]]) {
+      await page.evaluate(() => { const t = document.querySelector('#toast'); if (t) t.textContent = ''; });
+      page.mouse.click(x, y, { button: 'right' }).catch(() => {}); // returns when the menu closes
+      await sleep(1500);
+      res[name] = popup();
+      esc();
+      await sleep(800);
+      const toast = await page.evaluate(() => document.querySelector('#toast')?.textContent || '');
+      if (toast) res[`${name}Toast`] = toast;
+    }
+    r[v] = res;
+  }
+  await page.keyboard.press('Control+3');
+  await withPrefs({ menuStyle: 'finder' });
+  return r;
+});
+
 // The up button goes to the parent folder (Back goes to the previous one).
 await step('up button', async () => {
   await backToTop();
