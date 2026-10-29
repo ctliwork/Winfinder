@@ -408,6 +408,21 @@ await step('Windows menus', async () => {
   return r;
 });
 
+// The refresh button reads the folder again: a file made outside shows up.
+await step('refresh button', async () => {
+  await backToTop();
+  const f = path.join(FILES, 'refresh-new.txt');
+  fs.writeFileSync(f, 'x');
+  await page.click('#btn-refresh');
+  await sleep(1000);
+  const shown = await page.locator('.col').first().locator('.crow', { hasText: 'refresh-new.txt' }).count();
+  fs.rmSync(f, { force: true });
+  await page.click('#btn-refresh');
+  await sleep(1000);
+  const gone = (await page.locator('.col').first().locator('.crow', { hasText: 'refresh-new.txt' }).count()) === 0;
+  return { shown: shown === 1, gone, title: await page.$eval('#title', (e) => e.textContent) };
+});
+
 // The up button goes to the parent folder (Back goes to the previous one).
 await step('up button', async () => {
   await backToTop();

@@ -2750,7 +2750,7 @@
 
   $('#btn-more').addEventListener('click', (ev) => {
     const r = ev.currentTarget.getBoundingClientRect();
-    // What the toolbar has a button for (views, sort, preview) isn't repeated
+    // What the toolbar has a button for (views, sort, preview, refresh) isn't repeated
     // here, except the views when a narrow window hides their buttons; instead
     // the settings used most, a click away.
     const themes = [['system', '跟隨系統'], ['light', '淺色'], ['dark', '深色']];
@@ -2761,7 +2761,6 @@
       { label: '顯示副檔名', check: !!prefs.showExt, action: () => setPref('showExt', !prefs.showExt) },
       { label: prefs.sidebarHidden ? '顯示側邊欄' : '隱藏側邊欄', kbd: 'Ctrl+Alt+S', action: toggleSidebar },
       ...(viewMode() === 'list' && api.dirSize ? [{ label: '計算所有大小', check: !!prefs.calcSizes, action: toggleCalcSizes }] : []),
-      { label: '重新整理', kbd: 'F5', action: () => refresh(true) },
       '-',
       { html: '<div class="mlabel">主題</div>' },
       { html: `<div class="mrow mseg">${themes.map(([t, l]) => `<button data-theme-pick="${t}" class="${prefs.theme === t ? 'on' : ''}">${l}</button>`).join('')}</div>` },
@@ -2989,6 +2988,12 @@
     openMenu(sortItems(), r.left, r.bottom + 6);
   });
   $('#btn-newfolder').addEventListener('click', newFolder);
+  // The arrow turns once while the folder is read again.
+  $('#btn-refresh').addEventListener('click', (ev) => {
+    const svg = ev.currentTarget.firstElementChild;
+    if (!calm.matches) svg.animate([{ transform: 'rotate(0)' }, { transform: 'rotate(360deg)' }], { duration: 500, easing: 'cubic-bezier(.4,0,.2,1)' });
+    refresh(true);
+  });
   $('#zoom').addEventListener('input', (ev) => setIconSize(Number(ev.target.value)));
 
   // ---------- search ----------
