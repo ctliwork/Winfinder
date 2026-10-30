@@ -370,6 +370,10 @@ pub fn drag_files(hwnd: HWND, paths: &[String]) -> Result<(), String> {
         let res = (|| -> windows::core::Result<()> {
             let items = SHCreateShellItemArrayFromIDLists(&list)?;
             let data: IDataObject = items.BindToHandler(None, &BHID_DataObject)?;
+            // Resting on an app's taskbar button brings its window up; the taskbar
+            // (Explorer) does that, and Windows lets a program come to the front
+            // only if the one in front (this one, running the drag) allows it.
+            let _ = windows::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow(windows::Win32::UI::WindowsAndMessaging::ASFW_ANY);
             SHDoDragDrop(Some(hwnd), &data, None::<&IDropSource>, DROPEFFECT_COPY | DROPEFFECT_MOVE | DROPEFFECT_LINK)?;
             Ok(())
         })();
