@@ -792,9 +792,13 @@ await step('tabs', async () => {
   await sleep(400);
   r.active = await page.$eval('#tabs .tab.active', (e) => e.textContent.trim());
   await page.locator('#tabs .tab').last().click();
+  await sleep(300);
+  r.focus = await page.evaluate(() => document.activeElement?.tagName + (document.activeElement?.className ? '.' + document.activeElement.className : ''));
+  const t0 = Date.now();
   await page.keyboard.press('Control+W');
-  await sleep(400);
+  await until(async () => (await count()) === 1, 2000);
   r.afterClose = await count();
+  r.closeMs = Date.now() - t0;
   return r;
 });
 
