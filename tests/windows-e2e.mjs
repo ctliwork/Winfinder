@@ -563,7 +563,7 @@ function restoreNote() {
 const fileAt = () => page.locator('.col').first().locator('.crow', { hasText: '筆記.txt' }).first().evaluate((el) => {
   const b = el.getBoundingClientRect();
   return [Math.round((window.screenX + b.left + 40) * devicePixelRatio), Math.round((window.screenY + b.top + b.height / 2) * devicePixelRatio), 0, 0];
-});
+}, undefined, { timeout: 8000 });
 
 // Drag a file out to another app with the real mouse: small windows that
 // accept dropped files and write down what they got. A slow and a quick drag
@@ -675,6 +675,10 @@ await step('drag into a Chromium app', async () => {
   const box = { x: width - 420, y: Math.round(height / 2) - 200, w: 400, h: 400 };
   const browser = await chromium.launch({ executablePath: exe, headless: false, args: [`--window-position=${box.x},${box.y}`, `--window-size=${box.w},${box.h}`, '--no-first-run', '--no-default-browser-check'] });
   const r = {};
+  // What Winfinder shows now (a step before can leave it busy or elsewhere).
+  r.before = await page.evaluate(() => ({ title: document.querySelector('#title')?.textContent, view: document.querySelector('#view')?.className, col0: [...document.querySelectorAll('.col:first-child .crow .nm, .colw:first-child .crow .nm')].map((e) => e.textContent).slice(0, 20), dlg: !document.querySelector('#dlg')?.hidden, menu: !document.querySelector('#menu')?.hidden }));
+  r.backend = await Promise.race([page.evaluate(() => window.fsApi.list('C:\\').then((x) => x.ok)), sleep(5000).then(() => 'no answer in 5 s')]);
+  desktop('chromium-start', { log: true });
   try {
     const tab = await browser.newPage();
     await tab.setContent(`<title>DropZone</title><body style="margin:0;height:100vh;background:#def"><div id="z" style="height:100vh">drop here</div><script>
@@ -691,7 +695,9 @@ Get-Process chrome,msedge -ErrorAction SilentlyContinue | ? { $_.MainWindowTitle
     const reset = () => tab.evaluate(() => { window.events = []; window.dropped = []; });
     for (const [name, ms] of [['slow', 1500], ['quick', 300]]) {
       await reset();
-      mouse([await fileAt(), [...into, ms, 500]]);
+      const from = await fileAt().catch(() => null);
+      if (!from) { r[name] = 'no 筆記.txt row in Winfinder'; continue; }
+      mouse([from, [...into, ms, 500]]);
       await sleep(1500);
       r[name] = await read();
     }
