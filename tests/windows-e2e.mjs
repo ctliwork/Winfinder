@@ -541,6 +541,21 @@ await step('delete special files', async () => {
   return r;
 });
 
+// Real mouse input along `points` ([x, y, ms to get there, ms to rest]), button held.
+const mouse = (points) => ps(`Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class M { [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y); [DllImport("user32.dll")] public static extern void mouse_event(int f, int x, int y, int d, int e); }'
+$p = @(${points.map((q) => `@(${q.join(',')})`).join(',')})
+[M]::SetCursorPos($p[0][0], $p[0][1]); Start-Sleep -Milliseconds 300
+[M]::mouse_event(2, 0, 0, 0, 0); Start-Sleep -Milliseconds 100
+for ($k = 1; $k -lt $p.Count; $k++) { $a = $p[$k - 1]; $b = $p[$k]; $n = 25
+for ($i = 1; $i -le $n; $i++) { [M]::SetCursorPos([int]($a[0] + ($b[0] - $a[0]) * $i / $n), [int]($a[1] + ($b[1] - $a[1]) * $i / $n)); Start-Sleep -Milliseconds ([int]($b[2] / $n)) }
+# rest there, moving a pixel back and forth as a hand does
+for ($t = 0; $t -lt $b[3]; $t += 100) { [M]::SetCursorPos($b[0] + ($t / 100) % 2, $b[1]); Start-Sleep -Milliseconds 100 } }
+[M]::mouse_event(4, 0, 0, 0, 0)`);
+const fileAt = () => page.locator('.col').first().locator('.crow', { hasText: '筆記.txt' }).first().evaluate((el) => {
+  const b = el.getBoundingClientRect();
+  return [Math.round((window.screenX + b.left + 40) * devicePixelRatio), Math.round((window.screenY + b.top + b.height / 2) * devicePixelRatio), 0, 0];
+});
+
 // Drag a file out to another app with the real mouse: small windows that
 // accept dropped files and write down what they got. A slow and a quick drag
 // straight into one; and one onto the taskbar button of a minimized one, which
@@ -561,20 +576,6 @@ $f.Add_DragDrop({ Add-Content -Path '${log}' -Value ('${title}:' + (($_.Data.Get
 [Windows.Forms.Application]::Run($f)
 `);
   const shown = (title) => until(() => ps(`Get-Process powershell -ErrorAction SilentlyContinue | ? { $_.MainWindowTitle -eq '${title}' } | % { $_.Id }`) !== '', 30000);
-  // Real mouse input along `points` ([x, y, ms to get there, ms to rest]), button held.
-  const mouse = (points) => ps(`Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class M { [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y); [DllImport("user32.dll")] public static extern void mouse_event(int f, int x, int y, int d, int e); }'
-$p = @(${points.map((q) => `@(${q.join(',')})`).join(',')})
-[M]::SetCursorPos($p[0][0], $p[0][1]); Start-Sleep -Milliseconds 300
-[M]::mouse_event(2, 0, 0, 0, 0); Start-Sleep -Milliseconds 100
-for ($k = 1; $k -lt $p.Count; $k++) { $a = $p[$k - 1]; $b = $p[$k]; $n = 25
-  for ($i = 1; $i -le $n; $i++) { [M]::SetCursorPos([int]($a[0] + ($b[0] - $a[0]) * $i / $n), [int]($a[1] + ($b[1] - $a[1]) * $i / $n)); Start-Sleep -Milliseconds ([int]($b[2] / $n)) }
-  # rest there, moving a pixel back and forth as a hand does
-  for ($t = 0; $t -lt $b[3]; $t += 100) { [M]::SetCursorPos($b[0] + ($t / 100) % 2, $b[1]); Start-Sleep -Milliseconds 100 } }
-[M]::mouse_event(4, 0, 0, 0, 0)`);
-  const fileAt = () => page.locator('.col').first().locator('.crow', { hasText: '筆記.txt' }).first().evaluate((el) => {
-    const b = el.getBoundingClientRect();
-    return [Math.round((window.screenX + b.left + 40) * devicePixelRatio), Math.round((window.screenY + b.top + b.height / 2) * devicePixelRatio), 0, 0];
-  });
   const got = () => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim() : null);
   const into = [target.x + 150, target.y + 150];
   const r = {};
@@ -646,6 +647,60 @@ if ($i) { $r = $i.Current.BoundingRectangle; "$([int]($r.X + 30)) $([int]($r.Y +
   open3.kill();
   ps("Get-Process powershell -ErrorAction SilentlyContinue | ? { $_.MainWindowTitle -eq 'Minimized' } | Stop-Process -Force");
   ps("(New-Object -ComObject Shell.Application).Windows() | % { $_.Quit() }");
+  return r;
+});
+
+// The same into a Chromium app (Claude's desktop app, VS Code, Teams, Slack
+// and the browsers are Chromium inside): a Chrome window whose page takes
+// dropped files and lists them. From Winfinder, and from Explorer to compare.
+await step('drag into a Chromium app', async () => {
+  await backToTop();
+  const exe = ['C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'].find((f) => fs.existsSync(f));
+  if (!exe) return { skipped: 'no Chrome or Edge' };
+  const { width, height } = JSON.parse(ps('Add-Type -AssemblyName System.Windows.Forms; $b=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds; "{""width"":$($b.Width),""height"":$($b.Height)}"'));
+  const box = { x: width - 420, y: Math.round(height / 2) - 200, w: 400, h: 400 };
+  const browser = await chromium.launch({ executablePath: exe, headless: false, args: [`--window-position=${box.x},${box.y}`, `--window-size=${box.w},${box.h}`, '--no-first-run', '--no-default-browser-check'] });
+  const r = {};
+  try {
+    const tab = await browser.newPage();
+    await tab.setContent(`<title>DropZone</title><body style="margin:0;height:100vh;background:#def"><div id="z" style="height:100vh">drop here</div><script>
+      window.events = []; window.dropped = [];
+      for (const t of ['dragenter', 'dragover', 'drop']) document.addEventListener(t, (e) => { e.preventDefault(); if (t !== 'dragover' || !events.includes('dragover')) events.push(t + ':' + [...(e.dataTransfer?.types || [])].join(',')); if (t === 'drop') dropped = [...e.dataTransfer.files].map((f) => f.name); });
+    </script></body>`);
+    await sleep(1500);
+    // Keep it above the Winfinder window, which comes to the front when the drag starts.
+    ps(`Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class Z { [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr a, int x, int y, int cx, int cy, uint f); }'
+Get-Process chrome,msedge -ErrorAction SilentlyContinue | ? { $_.MainWindowTitle -like 'DropZone*' } | % { [Z]::SetWindowPos($_.MainWindowHandle, [IntPtr](-1), ${box.x}, ${box.y}, ${box.w}, ${box.h}, 0x40) }`);
+    await sleep(500);
+    const into = [box.x + box.w / 2, box.y + box.h / 2 + 40];
+    const read = () => tab.evaluate(() => ({ events: window.events, dropped: window.dropped }));
+    const reset = () => tab.evaluate(() => { window.events = []; window.dropped = []; });
+    for (const [name, ms] of [['slow', 1500], ['quick', 300]]) {
+      await reset();
+      mouse([await fileAt(), [...into, ms, 500]]);
+      await sleep(1500);
+      r[name] = await read();
+    }
+    // From Explorer: the same file, the same window.
+    spawn('explorer.exe', [FILES], { detached: true, stdio: 'ignore' }).unref();
+    let item = '';
+    await until(() => (item = ps(`Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes
+$A = [System.Windows.Automation.AutomationElement]
+$n = [string][char]0x7B46 + [char]0x8A18
+$w = $A::RootElement.FindAll('Children', (New-Object System.Windows.Automation.PropertyCondition($A::ClassNameProperty, 'CabinetWClass')))
+$i = $w | % { $_.FindAll('Descendants', (New-Object System.Windows.Automation.PropertyCondition($A::ControlTypeProperty, [System.Windows.Automation.ControlType]::ListItem))) } | ? { $_.Current.Name -eq $n -or $_.Current.Name -eq "$n.txt" } | select -First 1
+if ($i) { $r = $i.Current.BoundingRectangle; "$([int]($r.X + 30)) $([int]($r.Y + $r.Height / 2))" }`)) !== '', 15000);
+    if (item) {
+      await reset();
+      mouse([[...item.split(' ').map(Number), 0, 0], [...into, 1500, 500]]);
+      await sleep(1500);
+      r.explorer = await read();
+    } else r.explorer = 'no Explorer item';
+    desktop('drag-into-chromium', { log: true });
+    ps("(New-Object -ComObject Shell.Application).Windows() | % { $_.Quit() }");
+  } finally {
+    await browser.close().catch(() => {});
+  }
   return r;
 });
 
