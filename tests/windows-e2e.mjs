@@ -669,6 +669,10 @@ await step('drag into a Chromium app', async () => {
   await page.click('#btn-refresh');
   await sleep(800);
   await backToTop();
+  // Clicking the selected file again opens its rename box (as in Finder): close it.
+  await sleep(700);
+  await page.keyboard.press('Escape');
+  await sleep(300);
   const exe = ['C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'].find((f) => fs.existsSync(f));
   if (!exe) return { skipped: 'no Chrome or Edge' };
   const { width, height } = JSON.parse(ps('Add-Type -AssemblyName System.Windows.Forms; $b=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds; "{""width"":$($b.Width),""height"":$($b.Height)}"'));
