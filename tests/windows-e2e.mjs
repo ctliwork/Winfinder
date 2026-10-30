@@ -551,6 +551,15 @@ for ($i = 1; $i -le $n; $i++) { [M]::SetCursorPos([int]($a[0] + ($b[0] - $a[0]) 
 # rest there, moving a pixel back and forth as a hand does
 for ($t = 0; $t -lt $b[3]; $t += 100) { [M]::SetCursorPos($b[0] + ($t / 100) % 2, $b[1]); Start-Sleep -Milliseconds 100 } }
 [M]::mouse_event(4, 0, 0, 0, 0)`);
+// A drag that lands somewhere else (over Winfinder's own folders, when the
+// window it aimed for didn't come up) moves 筆記.txt: put it back.
+function restoreNote() {
+  const home = path.join(FILES, '筆記.txt');
+  if (fs.existsSync(home)) return null;
+  const found = fs.readdirSync(FILES, { recursive: true }).map(String).find((f) => path.basename(f) === '筆記.txt');
+  if (found) fs.renameSync(path.join(FILES, found), home);
+  return found || 'missing';
+}
 const fileAt = () => page.locator('.col').first().locator('.crow', { hasText: '筆記.txt' }).first().evaluate((el) => {
   const b = el.getBoundingClientRect();
   return [Math.round((window.screenX + b.left + 40) * devicePixelRatio), Math.round((window.screenY + b.top + b.height / 2) * devicePixelRatio), 0, 0];
@@ -644,6 +653,7 @@ if ($i) { $r = $i.Current.BoundingRectangle; "$([int]($r.X + 30)) $([int]($r.Y +
     r.explorer.got = got();
   }
   desktop('drag-out-explorer', { log: true });
+  r.movedBack = restoreNote();
   open3.kill();
   ps("Get-Process powershell -ErrorAction SilentlyContinue | ? { $_.MainWindowTitle -eq 'Minimized' } | Stop-Process -Force");
   ps("(New-Object -ComObject Shell.Application).Windows() | % { $_.Quit() }");
@@ -654,6 +664,10 @@ if ($i) { $r = $i.Current.BoundingRectangle; "$([int]($r.X + 30)) $([int]($r.Y +
 // and the browsers are Chromium inside): a Chrome window whose page takes
 // dropped files and lists them. From Winfinder, and from Explorer to compare.
 await step('drag into a Chromium app', async () => {
+  await page.keyboard.press('Escape');
+  restoreNote();
+  await page.click('#btn-refresh');
+  await sleep(800);
   await backToTop();
   const exe = ['C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'].find((f) => fs.existsSync(f));
   if (!exe) return { skipped: 'no Chrome or Edge' };
@@ -701,6 +715,9 @@ if ($i) { $r = $i.Current.BoundingRectangle; "$([int]($r.X + 30)) $([int]($r.Y +
   } finally {
     await browser.close().catch(() => {});
   }
+  r.movedBack = restoreNote();
+  await page.click('#btn-refresh');
+  await sleep(800);
   return r;
 });
 
