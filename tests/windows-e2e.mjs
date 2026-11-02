@@ -273,6 +273,15 @@ await step('file operations', async () => {
   await page.keyboard.press('Enter');
   await sleep(1000);
   r.newFolder = has('新資料夾A');
+  if (!r.newFolder || !(await page.locator('#view .lrow', { hasText: '新資料夾A' }).count())) {
+    // what went wrong: the folder's contents on disk and on screen, the name box, the window
+    r.onDisk = fs.readdirSync(sub);
+    r.shown = await page.$$eval('#view .lrow .nm', (e) => e.map((x) => x.textContent));
+    r.box = await page.evaluate(() => { const i = document.querySelector('input.rename'); return i ? { value: i.value, focused: document.activeElement === i } : null; });
+    r.windows = ps("Get-Process | ? { $_.MainWindowTitle } | % { $_.ProcessName + ': ' + $_.MainWindowTitle }");
+    desktop('new-folder-failed', { log: true });
+    return r;
+  }
   await page.locator('#view .lrow', { hasText: 'inner.txt' }).first().click();
   await page.keyboard.press('F2');
   await page.waitForSelector('input.rename');

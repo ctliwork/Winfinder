@@ -182,6 +182,7 @@ mod tests {
 
     /// A shell in a pseudo console, as a terminal tab runs it, read into a buffer.
     struct Shell {
+        master: Option<Box<dyn MasterPty + Send>>,
         writer: Box<dyn Write + Send>,
         out: Arc<Mutex<Vec<u8>>>,
         child: Box<dyn Child + Send + Sync>,
@@ -198,7 +199,6 @@ mod tests {
             drop(pair.slave);
             let mut reader = pair.master.try_clone_reader().unwrap();
             let writer = pair.master.take_writer().unwrap();
-            std::mem::forget(pair.master); // closing it waits on the output; the test process ends anyway
             let out = Arc::new(Mutex::new(Vec::new()));
             let sink = out.clone();
             std::thread::spawn(move || {
@@ -210,7 +210,7 @@ mod tests {
                     sink.lock().unwrap().extend_from_slice(&buf[..n]);
                 }
             });
-            Shell { writer, out, child, answered: false }
+            Shell { master: Some(pair.master), writer, out, child, answered: false }
         }
         fn text(&self) -> String {
             String::from_utf8_lossy(&self.out.lock().unwrap()).to_string()
@@ -249,9 +249,12 @@ mod tests {
             self.wait(|t| t.matches(mark).count() >= 2)
         }
     }
+    // Leaves nothing running (the shell, its console) for the tests after.
     impl Drop for Shell {
         fn drop(&mut self) {
             let _ = self.child.kill();
+            let _ = self.child.wait();
+            drop(self.master.take());
         }
     }
 
