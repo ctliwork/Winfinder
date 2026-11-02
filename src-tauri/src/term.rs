@@ -49,6 +49,20 @@ fn shell(kind: &str) -> CommandBuilder {
     }
 }
 
+/// The keys typed, as the pseudo console takes them. On Windows it runs in
+/// "win32 input mode" (portable-pty asks for it), where Ctrl+C sent as its
+/// control character is typed as text and doesn't interrupt the command
+/// running: it goes as the key press (Ctrl down, C down and up) instead.
+fn keys(data: &str) -> std::borrow::Cow<'_, str> {
+    // ESC [ Vk ; Sc ; Uc ; Kd ; Cs ; Rc _  (C: VK 0x43, scan code 0x2E; left Ctrl pressed)
+    const CTRL_C: &str = "\x1b[67;46;3;1;8;1_\x1b[67;46;3;0;8;1_";
+    if cfg!(windows) && data.contains('\x03') {
+        data.replace('\x03', CTRL_C).into()
+    } else {
+        data.into()
+    }
+}
+
 #[derive(Clone, serde::Serialize)]
 struct Data {
     id: u32,
@@ -91,7 +105,7 @@ impl Terms {
     pub fn write(&self, id: u32, data: &str) -> Result<(), String> {
         let mut map = self.0.lock().unwrap();
         let s = map.get_mut(&id).ok_or("closed")?;
-        s.writer.write_all(data.as_bytes()).and_then(|_| s.writer.flush()).map_err(|e| e.to_string())
+        s.writer.write_all(keys(data).as_bytes()).and_then(|_| s.writer.flush()).map_err(|e| e.to_string())
     }
 
     pub fn resize(&self, id: u32, cols: u16, rows: u16) -> Result<(), String> {
@@ -114,14 +128,14 @@ impl Terms {
 mod tests {
     use super::*;
 
-    /// A shell starts in the folder given, runs what is typed and reports its output.
+    /// A shell starts, runs what is typed and prints its output; Ctrl+C stops
+    /// the command running (on Windows: PowerShell in ConPTY).
     #[test]
     fn runs_a_shell() {
         let pty = native_pty_system();
         let pair = pty.openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 }).unwrap();
-        let dir = std::env::temp_dir();
         let mut cmd = shell("auto");
-        cmd.cwd(&dir);
+        cmd.cwd(std::env::temp_dir());
         let mut child = pair.slave.spawn_command(cmd).unwrap();
         drop(pair.slave);
         let mut reader = pair.master.try_clone_reader().unwrap();
@@ -137,20 +151,44 @@ mod tests {
                 sink.lock().unwrap().extend_from_slice(&buf[..n]);
             }
         });
-        std::thread::sleep(std::time::Duration::from_millis(if cfg!(windows) { 3000 } else { 500 }));
-        writer.write_all(b"echo winfinder-term-ok\r").unwrap();
-        writer.flush().unwrap();
-        let mut seen = false;
-        for _ in 0..100 {
-            std::thread::sleep(std::time::Duration::from_millis(100));
-            let text = String::from_utf8_lossy(&out.lock().unwrap()).to_string();
-            // the echoed command and its output: twice
-            if text.matches("winfinder-term-ok").count() >= 2 {
-                seen = true;
-                break;
+        let text = || String::from_utf8_lossy(&out.lock().unwrap()).to_string();
+        let mut answered = false;
+        // Waits for `done`, answering the console's cursor position query
+        // (ESC[6n, which ConPTY sends first and waits on; xterm.js answers it in the app).
+        let mut wait = |writer: &mut Box<dyn Write + Send>, done: &dyn Fn(&str) -> bool| {
+            for _ in 0..200 {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                let t = text();
+                if !answered && t.contains("\x1b[6n") {
+                    writer.write_all(b"\x1b[1;1R").unwrap();
+                    writer.flush().unwrap();
+                    answered = true;
+                }
+                if done(&t) {
+                    return true;
+                }
             }
+            false
+        };
+        let send = |writer: &mut Box<dyn Write + Send>, s: &str| {
+            writer.write_all(keys(s).as_bytes()).unwrap();
+            writer.flush().unwrap();
+        };
+        let prompt = wait(&mut writer, &|t| t.contains('>') || t.contains('$') || t.contains('#'));
+        send(&mut writer, "echo winfinder-term-ok\r");
+        // the echoed command and its output: twice
+        let echoed = wait(&mut writer, &|t| t.matches("winfinder-term-ok").count() >= 2);
+        let mut interrupted = true;
+        if cfg!(windows) {
+            send(&mut writer, "Start-Sleep 60\r");
+            std::thread::sleep(std::time::Duration::from_millis(2000));
+            send(&mut writer, "\x03");
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            send(&mut writer, "echo after-ctrl-c\r");
+            interrupted = wait(&mut writer, &|t| t.matches("after-ctrl-c").count() >= 2);
         }
         let _ = child.kill();
-        assert!(seen, "output: {}", String::from_utf8_lossy(&out.lock().unwrap()));
+        let t = text();
+        assert!(prompt && echoed && interrupted, "prompt {prompt} echoed {echoed} interrupted {interrupted}; output: {t:?}");
     }
 }
