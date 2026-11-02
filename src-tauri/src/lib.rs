@@ -8,6 +8,7 @@ mod places;
 mod preview;
 mod recent;
 mod search;
+mod term;
 mod thumb;
 #[cfg(windows)]
 mod prevhost;
@@ -247,6 +248,25 @@ async fn on_ui<T: Send + 'static>(
         })
         .map_err(|e| e.to_string())?;
     blocking(move || rx.recv().map_err(|e| e.to_string())).await?
+}
+
+// ---------- terminal tabs (see term.rs) ----------
+#[tauri::command]
+async fn term_open(app: AppHandle, terms: tauri::State<'_, term::Terms>, id: u32, cwd: String, cols: u16, rows: u16, shell: String) -> Result<(), String> {
+    terms.open(app, id, &cwd, cols, rows, &shell)
+}
+#[tauri::command]
+async fn term_write(terms: tauri::State<'_, term::Terms>, id: u32, data: String) -> Result<(), String> {
+    terms.write(id, &data)
+}
+#[tauri::command]
+async fn term_resize(terms: tauri::State<'_, term::Terms>, id: u32, cols: u16, rows: u16) -> Result<(), String> {
+    terms.resize(id, cols, rows)
+}
+#[tauri::command]
+async fn term_close(terms: tauri::State<'_, term::Terms>, id: u32) -> Result<(), String> {
+    terms.close(id);
+    Ok(())
 }
 
 /// Drags files out to other apps (and Explorer) the way Explorer does; returns
@@ -928,6 +948,7 @@ pub fn run() {
         .plugin(tauri_plugin_drag::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(PendingUpdate::default())
+        .manage(term::Terms::default())
         .manage(WatchState { watcher: Mutex::new(None), dirs: Mutex::new(HashMap::new()) })
         .setup(|app| {
             move_old_settings(app.handle());
@@ -945,7 +966,7 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
-            places, pin_home, list_dir, list_many, cloud_pin, new_file, dir_size, cancel_dir_sizes, compress, extract, open_terminal, native_menu, properties,
+            places, pin_home, list_dir, list_many, cloud_pin, new_file, dir_size, cancel_dir_sizes, compress, extract, open_terminal, term_open, term_write, term_resize, term_close, native_menu, properties,
             clipboard_write, clipboard_read, clipboard_clear, save_theme, set_ui_scale, preview_available, preview_show, preview_move, preview_hide, preview_warm, cancel_transfer, restore_trash,
             everything_available, everything, content_search, disk_free, disk_space, recent_files, resolve_link, folder_count, thumbnail, open_path, reveal, trash, rename, mkdir,
             transfer, read_text, rich_preview, media_info, folder_icon, reclaim_focus, drag_files, search, watch, check_update, install_update, set_keep_running, set_run_at_login, snap_layouts, quit

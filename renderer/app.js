@@ -503,6 +503,7 @@
   }
 
   async function navigate(dir, opts = {}) {
+    if (state.term) return openTab(dir); // from a terminal tab: the folder opens in a tab of its own
     const { push = true, select = null, colActive = null, animate = true, silent = false } = opts;
     dir = canon(dir);
     const root = canon(opts.root || null);
@@ -582,6 +583,7 @@
   }
 
   async function refresh(reload = true) {
+    if (state.term) return;
     if (state.cwd === HOME) {
       if (reload) await loadHome();
       computeEntries();
@@ -599,6 +601,7 @@
   let thumbObserver = null;
 
   async function render({ animate = false } = {}) {
+    if (state.term) { renderTabs(); return; }
     document.body.className = document.body.className.replace(/\bview-\S+/g, '').trim();
     document.body.classList.add(`view-${viewMode()}`);
     renderTabs();
@@ -1564,6 +1567,7 @@
 
   // ---------- tabs ----------
   function tabTitle(t) {
+    if (t.term) return termTitle(t.term);
     if (t.search.smart) return smartById(t.search.smart)?.name || '智慧型資料夾';
     if (t.search.results) return `搜尋「${t.search.query}」`;
     if (t.cwd === HOME || !t.cwd) return '常用';
@@ -1575,8 +1579,8 @@
   const shownTabs = new Set();
   function renderTabs() {
     $('#tabs').innerHTML = tabs.map((t) => `
-      <div class="tab${t === state ? ' active' : ''}${shownTabs.has(t.id) ? '' : ' new'}" data-tab="${t.id}" title="${esc(t.cwd === HOME ? '常用' : t.cwd || '')}">
-        ${t.search.smart ? I.sidebar('smart') : !t.cwd ? I.sidebar('home') : folderIco(t.cwd, 16)}<span>${esc(tabTitle(t))}</span>
+      <div class="tab${t === state ? ' active' : ''}${shownTabs.has(t.id) ? '' : ' new'}" data-tab="${t.id}" title="${esc(t.term ? `終端機：${t.term.dir}` : t.cwd === HOME ? '常用' : t.cwd || '')}">
+        ${t.term ? TERM_ICON : t.search.smart ? I.sidebar('smart') : !t.cwd ? I.sidebar('home') : folderIco(t.cwd, 16)}<span>${esc(tabTitle(t))}</span>
       </div>`).join('');
     saveSession();
     shownTabs.clear();
@@ -1587,8 +1591,9 @@
   async function switchTab(t) {
     if (t === state) return;
     lastBg = null;
-    state.scroll = content.scrollTop;
+    if (!state.term) state.scroll = content.scrollTop;
     state = t;
+    if (showTerm(t)) return;
     syncSearchUi();
     if (t.cwd === HOME) await loadHome();
     else await listDir(t.cwd, true);
@@ -1602,9 +1607,10 @@
   // Reopens the last session's tabs (Settings > 啟動時打開).
   function saveSession() {
     if (G.booting) return;
+    const kept = tabs.filter((t) => !t.term); // a terminal's shell doesn't outlive the app
     prefs.session = {
-      active: tabs.indexOf(state),
-      tabs: tabs.map((t) => (t.search.smart ? { dir: t.cwd || HOME, smart: t.search.smart } : { dir: t.cwd || HOME })),
+      active: Math.max(0, kept.indexOf(state)),
+      tabs: kept.map((t) => (t.search.smart ? { dir: t.cwd || HOME, smart: t.search.smart } : { dir: t.cwd || HOME })),
     };
     savePrefs();
   }
@@ -1637,8 +1643,9 @@
     tabs.splice(at, 0, t);
     lastBg = activate ? null : { opener: state, tab: t };
     if (activate) {
-      state.scroll = content.scrollTop;
+      if (!state.term) state.scroll = content.scrollTop;
       state = t;
+      showTerm(t);
       syncSearchUi();
       if (!(await go(false))) await navigate(HOME);
     } else {
@@ -1655,7 +1662,7 @@
   // Closed tabs, newest last, for Ctrl+Shift+T.
   const closedTabs = [];
   function rememberClosed(t) {
-    if (t.cwd === HOME && !t.search.smart) return;
+    if (t.term || (t.cwd === HOME && !t.search.smart)) return;
     closedTabs.push({ dir: t.cwd || HOME, smart: t.search.smart || null, at: tabs.indexOf(t) });
     if (closedTabs.length > 20) closedTabs.shift();
   }
@@ -1672,6 +1679,8 @@
   async function closeTab(t) {
     rememberClosed(t);
     if (tabs.length === 1) { // keep the window open: the last tab becomes Home
+      endTerm(t);
+      showTerm(t);
       t.history = []; t.hIndex = -1;
       await navigate(HOME);
       return;
@@ -1685,6 +1694,7 @@
     }
     const i = tabs.indexOf(t);
     tabs.splice(i, 1);
+    endTerm(t);
     if (t === state) {
       state = { ...state, id: -1 }; // detached so switchTab doesn't early-return
       await switchTab(tabs[Math.min(i, tabs.length - 1)]);
@@ -1698,11 +1708,167 @@
   async function resetTabs() {
     const start = startupDir();
     lastBg = null;
+    tabs.forEach(endTerm);
     state = newTabState();
+    showTerm(state);
     tabs.splice(0, tabs.length, state);
     syncSearchUi();
     if (!(await navigate(start, { root: start, animate: false }))) await navigate(HOME, { animate: false });
     content.scrollTop = 0;
+  }
+
+  // ---------- terminal tabs ----------
+  // A tab can be a terminal: the shell (Settings: PowerShell, Command Prompt…)
+  // started in a folder, run by term.rs in a pseudo console and drawn by
+  // xterm.js. Each keeps its screen while another tab is shown; typing `exit`
+  // closes the tab. They aren't restored at the next start.
+  const TERM_ICON = '<svg class="ico term-ico" viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="2"/><path d="M4.5 6l2.2 2-2.2 2M8.5 10.3h3"/></svg>';
+  let termSeq = 0;
+  const termsEl = $('#terms');
+  // Windows Terminal's colour schemes: Campbell (dark), One Half Light (light),
+  // so PowerShell's colours (errors, prompts, PSReadLine) look as they do there.
+  const CAMPBELL = {
+    black: '#0C0C0C', red: '#C50F1F', green: '#13A10E', yellow: '#C19C00', blue: '#0037DA', magenta: '#881798', cyan: '#3A96DD', white: '#CCCCCC',
+    brightBlack: '#767676', brightRed: '#E74856', brightGreen: '#16C60C', brightYellow: '#F9F1A5', brightBlue: '#3B78FF', brightMagenta: '#B4009E', brightCyan: '#61D6D6', brightWhite: '#F2F2F2',
+  };
+  const ONE_HALF_LIGHT = {
+    black: '#383A42', red: '#E45649', green: '#50A14F', yellow: '#C18301', blue: '#0184BC', magenta: '#A626A4', cyan: '#0997B3', white: '#A0A1A7',
+    brightBlack: '#4F525D', brightRed: '#DF6C75', brightGreen: '#98C379', brightYellow: '#B8862F', brightBlue: '#61AFEF', brightMagenta: '#C577DD', brightCyan: '#56B5C1', brightWhite: '#7A7C82',
+  };
+  function termColors() {
+    const cs = getComputedStyle(document.body);
+    const v = (n) => cs.getPropertyValue(n).trim();
+    const dark = isDark();
+    return {
+      ...(dark ? CAMPBELL : ONE_HALF_LIGHT),
+      background: v('--content-bg') || (dark ? '#1e1e1e' : '#ffffff'),
+      foreground: dark ? '#CCCCCC' : '#383A42',
+      cursor: v('--accent') || '#0a84ff',
+      selectionBackground: dark ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.18)',
+    };
+  }
+  // The tab says which shell and where: shells set the title to their own
+  // path (C:\…\pwsh.exe), which says neither.
+  function termTitle(term) {
+    const raw = (term.title || '').trim();
+    const exe = /([^\\/]+)\.exe$/i.exec(raw)?.[1]?.toLowerCase();
+    const name = { pwsh: 'PowerShell', powershell: 'Windows PowerShell', cmd: '命令提示字元', wsl: 'WSL', bash: 'bash' }[exe];
+    if (raw && !exe) return raw; // a title the shell or a program chose
+    return `${name || '終端機'} · ${displayName(term.dir)}`;
+  }
+  // Where a terminal opened from the toolbar starts: the folder shown (Home: the user's folder).
+  function termDir() {
+    if (state.term) return state.term.dir;
+    return state.cwd && state.cwd !== HOME && !state.search.results ? state.cwd : G.places?.home || '';
+  }
+  async function openTerminalTab(dir = termDir()) {
+    if (!api.termOpen) { openTerminal(dir); return; }
+    const t = newTabState();
+    t.cwd = dir;
+    t.term = { id: ++termSeq, dir, title: '' };
+    tabs.splice(tabs.indexOf(state) + 1, 0, t);
+    lastBg = null;
+    if (!state.term) state.scroll = content.scrollTop;
+    state = t;
+    showTerm(t);
+  }
+  // Shows tab `t` (a terminal: true) or, for a folder tab, the folder views again.
+  function showTerm(t) {
+    document.body.classList.toggle('term-mode', !!t.term);
+    for (const el of termsEl.children) el.classList.toggle('on', !!t.term && el === t.term.el);
+    if (!t.term) return false;
+    nativeHide?.();
+    closeMenu();
+    renderTabs();
+    if (!t.term.xt) startTerm(t);
+    else fitTerm(t);
+    // after the click that switched tabs has settled, so the keys go to the shell
+    setTimeout(() => { if (state === t) t.term?.xt?.focus(); }, 0);
+    return true;
+  }
+  function startTerm(t) {
+    const term = t.term;
+    const el = document.createElement('div');
+    el.className = 'term on';
+    termsEl.appendChild(el);
+    const xt = new window.Terminal({
+      fontFamily: '"Cascadia Mono", "Cascadia Code", Consolas, "Microsoft JhengHei", monospace',
+      fontSize: 13, lineHeight: 1.15, cursorBlink: true, scrollback: 5000, allowProposedApi: false,
+      theme: termColors(), macOptionIsMeta: false,
+    });
+    const fit = new window.FitAddon.FitAddon();
+    xt.loadAddon(fit);
+    xt.open(el);
+    Object.assign(term, { el, xt, fit, alive: true });
+    try { fit.fit(); } catch {}
+    // Copy and paste as in Windows Terminal: Ctrl+C copies a selection (else
+    // it interrupts), Ctrl+V and Ctrl+Shift+V paste, Ctrl+Shift+C copies.
+    xt.attachCustomKeyEventHandler((ev) => {
+      if (ev.type !== 'keydown') return true;
+      const k = ev.key.toLowerCase();
+      if (ev.ctrlKey && (k === 'c' && (ev.shiftKey || xt.hasSelection()))) {
+        navigator.clipboard?.writeText(xt.getSelection()).catch(() => {});
+        xt.clearSelection();
+        return false;
+      }
+      if (ev.ctrlKey && k === 'v') return false; // the browser's paste reaches xterm's text box
+      if (ev.ctrlKey && (ev.key === 'Tab' || ev.key === 'PageUp' || ev.key === 'PageDown')) return false; // tabs
+      return true;
+    });
+    // Right-click: copy the selection, or paste (as in Windows Terminal).
+    el.addEventListener('contextmenu', async (ev) => {
+      ev.preventDefault();
+      if (xt.hasSelection()) { navigator.clipboard?.writeText(xt.getSelection()).catch(() => {}); xt.clearSelection(); return; }
+      const text = await navigator.clipboard?.readText().catch(() => '');
+      if (text) xt.paste(text);
+    });
+    xt.onData((d) => term.alive && api.termWrite(term.id, d));
+    xt.onResize(({ cols, rows }) => term.alive && api.termResize(term.id, cols, rows));
+    xt.onTitleChange((title) => { term.title = title || ''; renderTabs(); });
+    api.termOpen(term.id, term.dir, xt.cols, xt.rows, prefs.shell || 'auto').then((err) => {
+      if (err) { term.alive = false; xt.write(`\r\n無法開啟終端機：${err}\r\n`); }
+    });
+    xt.focus();
+  }
+  function fitTerm(t) {
+    if (!t?.term?.fit || !t.term.el.classList.contains('on')) return;
+    try { t.term.fit.fit(); } catch {}
+  }
+  // Closes a terminal's shell and drops its screen (when its tab closes).
+  function endTerm(t) {
+    const term = t.term;
+    if (!term) return;
+    if (term.alive) api.termClose?.(term.id);
+    term.alive = false;
+    term.xt?.dispose();
+    term.el?.remove();
+    delete t.term;
+    t.cwd = t.cwd || HOME;
+  }
+  function termById(id) { return tabs.find((t) => t.term?.id === id); }
+  api.onTermData?.(({ id, data }) => {
+    const t = termById(id);
+    if (!t?.term?.xt) return;
+    const bin = atob(data);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    t.term.xt.write(bytes);
+  });
+  // The shell ended (`exit`): its tab closes, as in Windows Terminal.
+  api.onTermExit?.((id) => {
+    const t = termById(id);
+    if (!t) return;
+    t.term.alive = false;
+    closeTab(t);
+  });
+  new ResizeObserver(() => fitTerm(state)).observe(termsEl);
+  // Files dropped on a terminal are typed into it, quoted, as in Windows Terminal.
+  function dropOnTerm(target, paths) {
+    if (!state.term || !target?.closest?.('#terms') || !paths.length) return false;
+    const q = (p) => (/[\s'"&()]/.test(p) ? `"${p}"` : p);
+    state.term.xt?.paste(paths.map(q).join(' '));
+    state.term.xt?.focus();
+    return true;
   }
 
   function cycleTab(step) {
@@ -2163,6 +2329,7 @@
     },
     drop: (x, y, paths) => {
       springOver(null);
+      if (dropOnTerm(document.elementFromPoint(x, y), paths.length ? paths : (G.dragging || []))) return;
       dropInto(document.elementFromPoint(x, y), paths.length ? paths : (G.dragging || []), ctrlHeld);
     },
     leave: () => { springOver(null); setDropEl(null); },
@@ -2598,7 +2765,7 @@
       ...(api.compress && !virt ? [{ label: '壓縮成 ZIP 檔', action: () => compressSelected(entries) }] : []),
       ...(one && ARCHIVES.has(one.ext) && api.extract ? [{ label: `解壓縮到「${archiveStem(one.name)}」`, action: () => extractZip(one) }] : []),
       ...(one?.isDir && !isVirtual(one) && api.dirSize ? [{ label: '計算大小', action: () => calcSize(one) }] : []),
-      ...(one?.isDir && !isVirtual(one) && api.openTerminal ? [{ label: '在終端機中開啟', action: () => openTerminal(one.path) }] : []),
+      ...(one?.isDir && !isVirtual(one) && api.openTerminal ? [{ label: '在終端機中開啟', kbd: 'Ctrl+`', action: () => openTerminalTab(one.path) }] : []),
       ...cloudItems(entries),
       '-',
       ...(one?.isDir && one.kind !== 'drive' ? [{ label: isFav ? '從快速存取取消釘選' : '釘選到快速存取', action: () => toggleFavorite(one.path) }] : []),
@@ -2662,7 +2829,8 @@
       '-',
       undoStack.length && { label: `復原${undoStack[undoStack.length - 1].label}`, action: undo },
       { label: '顯示隱藏的項目', check: prefs.showHidden, action: toggleHidden },
-      api.openTerminal && { label: '在終端機中開啟', action: () => openTerminal(state.cwd) },
+      api.openTerminal && { label: '在終端機中開啟', action: () => openTerminalTab(state.cwd) },
+      isWin && api.openTerminal && { label: '在 Windows Terminal 中開啟', action: () => openTerminal(state.cwd) },
     ];
   }
   // Right-click on Windows shows Explorer's own menu unless Settings say otherwise.
@@ -2720,7 +2888,8 @@
       sortEntry(x, y, colDir),
       '-',
       { label: '顯示隱藏的項目', kbd: 'Ctrl+Shift+.', check: prefs.showHidden, action: toggleHidden },
-      ...(api.openTerminal ? [{ label: '在終端機中開啟', action: () => openTerminal(state.cwd) }] : []),
+      ...(api.openTerminal ? [{ label: '在終端機中開啟', kbd: 'Ctrl+`', action: () => openTerminalTab(state.cwd) }] : []),
+      ...(isWin && api.openTerminal ? [{ label: '在 Windows Terminal 中開啟', action: () => openTerminal(state.cwd) }] : []),
       { label: isWin ? '在檔案總管中打開' : '在系統檔案管理員中打開', action: () => api.open(state.cwd) },
       ...(api.nativeMenu ? ['-',
         { label: '內容', kbd: 'Alt+Enter', disabled: !!state.search.results, action: () => showProperties([state.cwd]) },
@@ -2833,6 +3002,7 @@
   $('#tabs').addEventListener('mousedown', (ev) => {
     const tab = ev.target.closest('.tab');
     if (ev.button !== 0 || !tab) return;
+    ev.preventDefault(); // keeps the focus where switchTab puts it (a terminal's input)
     const t = tabs.find((x) => x.id === Number(tab.dataset.tab));
     switchTab(t);
     const startX = ev.clientX;
@@ -2988,6 +3158,7 @@
     openMenu(sortItems(), r.left, r.bottom + 6);
   });
   $('#btn-newfolder').addEventListener('click', newFolder);
+  $('#btn-terminal').addEventListener('click', () => openTerminalTab());
   // The arrow turns once while the folder is read again.
   $('#btn-refresh').addEventListener('click', (ev) => {
     const svg = ev.currentTarget.firstElementChild;
@@ -3255,6 +3426,14 @@
 
   document.addEventListener('keydown', async (ev) => {
     if (G.renaming) return;
+    // A terminal gets every key but switching tabs (Ctrl+Tab, Ctrl+PageUp/PageDown).
+    if (ev.target.closest?.('#terms')) {
+      if (ev.ctrlKey && (ev.key === 'Tab' || ev.key === 'PageUp' || ev.key === 'PageDown')) {
+        ev.preventDefault();
+        cycleTab(ev.key === 'PageUp' || (ev.key === 'Tab' && ev.shiftKey) ? -1 : 1);
+      }
+      return;
+    }
     const inInput = ev.target.matches?.('input, textarea, select');
     const ctrl = ev.ctrlKey || ev.metaKey;
     const k = ev.key;
@@ -3272,6 +3451,7 @@
     if (inInput) return;
     if ((ctrl && k.toLowerCase() === 'l') || (ev.altKey && k.toLowerCase() === 'd') || k === 'F4') { ev.preventDefault(); editPath(); return; }
     if (ctrl && ev.altKey && k.toLowerCase() === 'n') { ev.preventDefault(); newFile(); return; }
+    if (ctrl && (k === '`' || ev.code === 'Backquote') && !inInput) { ev.preventDefault(); openTerminalTab(); return; }
     if (ev.altKey && !ctrl && k.toLowerCase() === 'p') { ev.preventDefault(); togglePane(); return; }
     if (ctrl && ev.shiftKey && k.toLowerCase() === 't') { ev.preventDefault(); reopenTab(); return; }
     if (ctrl && k.toLowerCase() === 't') { ev.preventDefault(); openTab(newTabDir()); return; }
@@ -3777,6 +3957,7 @@
     // needs to reach it.
     if (!initial) W.setTheme?.(prefs.theme);
     api.saveTheme?.(prefs.theme);
+    if (!initial) requestAnimationFrame(() => tabs.forEach((t) => { if (t.term?.xt) t.term.xt.options.theme = termColors(); }));
   }
   function applyDensity() {
     document.body.classList.toggle('density-compact', prefs.density === 'compact');
@@ -3794,7 +3975,7 @@
     ['Ctrl+T／Ctrl+W', '新分頁／關閉分頁'], ['Ctrl+Shift+T', '重新打開關閉的分頁'], ['Ctrl+1～4', '圖像／列表／直欄／圖庫'], ['Ctrl+L、Alt+D、F4', '輸入路徑'],
     ['Ctrl+Shift+N', '新增資料夾'], ['Ctrl+Alt+N', '新增文字文件'], ['F2', '重新命名（多選時批次重新命名）'],
     ['空白鍵', '快速查看'], ['Alt+P', '預覽窗格'], ['Ctrl+Shift+.', '顯示隱藏的項目'], ['Ctrl+F', '搜尋'],
-    ['Ctrl+Alt+C', '拷貝路徑'], ['Alt+←／→／↑', '上一頁／下一頁／上層'], ['Ctrl+,', '設定'],
+    ['Ctrl+Alt+C', '拷貝路徑'], ['Ctrl+`', '在終端機分頁中開啟這個資料夾'], ['Alt+←／→／↑', '上一頁／下一頁／上層'], ['Ctrl+,', '設定'],
     ['Ctrl+Z', '復原'], ['Alt+Enter', '內容'], ['Shift+F10、Shift+右鍵', 'Windows 原生右鍵選單'],
   ];
   function settingsSections() {
@@ -3832,6 +4013,9 @@
         ['顯示副檔名', null, sw('showExt')],
         ['資料夾排在檔案前面', '預設值；個別資料夾可在排序選單（工具列的排序按鈕）另外設定', sw('foldersFirst')],
         api.dirSize && ['計算所有大小', '列表檢視在背景算出每個資料夾的大小（Finder 的「計算所有大小」）', sw('calcSizes')],
+        api.termOpen && ['終端機', '終端機分頁（工具列的終端機按鈕、Ctrl+`）使用的殼層', sel('shell', isWin
+          ? [['auto', '自動（有 PowerShell 7 就用它）'], ['pwsh', 'PowerShell 7'], ['powershell', 'Windows PowerShell'], ['cmd', '命令提示字元']]
+          : [['auto', '預設的殼層']])],
         ['檔案大小單位', null, sel('sizeBase', [[1000, '1 KB = 1000 位元組（macOS）'], [1024, '1 KB = 1024 位元組（Windows）']])],
         ['直欄寬度', '目前記住了 ' + Object.keys(prefs.colWidths || {}).length + ' 個資料夾的欄寬', '<button data-act="reset-cols">全部還原為預設寬度</button>'],
       ] },

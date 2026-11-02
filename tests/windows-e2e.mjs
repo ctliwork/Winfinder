@@ -423,6 +423,55 @@ await step('refresh button', async () => {
   return { shown: shown === 1, gone, title: await page.$eval('#title', (e) => e.textContent) };
 });
 
+// A terminal tab: real PowerShell in a pseudo console, started in the folder
+// shown. Commands, Chinese names, Tab completion, history (↑), Ctrl+C, the
+// tab's title, switching tabs and `exit` closing the tab.
+await step('terminal tab', async () => {
+  await backToTop();
+  await sleep(700);
+  await page.keyboard.press('Escape');
+  const screen = () => page.evaluate(() => [...document.querySelectorAll('.term.on .xterm-rows > div')].map((d) => d.textContent.replace(/\s+$/, '')).join('\n'));
+  const line = async () => (await screen()).split('\n').filter((l) => l.trim()).pop() || '';
+  const wait = (fn, ms = 15000) => until(async () => fn(await screen()), ms);
+  const tabsNow = () => page.$$eval('#tabs .tab', (e) => e.map((x) => x.textContent.trim()));
+  const r = { tabsBefore: await tabsNow() };
+  await page.click('#btn-terminal');
+  r.prompt = await wait((t) => /PS .*e2e-files>/.test(t), 20000);
+  r.title = (await tabsNow()).find((x) => /PowerShell|終端機/.test(x)) || null;
+  await page.keyboard.type('Write-Output ("wf-" + (1+2))');
+  await page.keyboard.press('Enter');
+  r.output = await wait((t) => /^wf-3$/m.test(t));
+  await page.keyboard.type('Get-ChildIt');
+  await page.keyboard.press('Tab');
+  r.completion = await wait((t) => /Get-ChildItem/.test(t), 5000);
+  await page.keyboard.type(' -Name');
+  await page.keyboard.press('Enter');
+  r.chinese = await wait((t) => t.includes('筆記.txt'));
+  await page.keyboard.press('ArrowUp');
+  r.history = await until(async () => (await line()).includes('Get-ChildItem -Name'), 5000);
+  await page.keyboard.press('Escape');
+  await page.keyboard.type('Start-Sleep 60');
+  await page.keyboard.press('Enter');
+  await sleep(1500);
+  const t0 = Date.now();
+  await page.keyboard.press('Control+C');
+  r.ctrlC = await until(async () => /PS .*>\s*$/.test(await line()), 5000);
+  r.ctrlCMs = Date.now() - t0;
+  desktop('terminal', { log: true });
+  await page.keyboard.press('Control+Tab');
+  await sleep(600);
+  r.switched = await page.evaluate(() => !document.body.classList.contains('term-mode'));
+  await page.keyboard.press('Control+Tab');
+  await sleep(600);
+  r.back = await page.evaluate(() => document.body.classList.contains('term-mode'));
+  await page.keyboard.type('exit');
+  await page.keyboard.press('Enter');
+  r.closed = await until(async () => (await tabsNow()).length === r.tabsBefore.length, 8000);
+  r.tabsAfter = await tabsNow();
+  if (!r.closed) r.screen = (await screen()).slice(-600);
+  return r;
+});
+
 // The up button goes to the parent folder (Back goes to the previous one).
 await step('up button', async () => {
   await backToTop();

@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' ipc: http://ipc.localhost; img-src 'self' file: data: asset: http://asset.localhost; media-src file: asset: http://asset.localhost; object-src file: asset: http://asset.localhost; frame-src 'self' file: asset: http://asset.localhost; font-src 'self' file: asset: http://asset.localhost; style-src 'self' 'unsafe-inline'; script-src 'self'">
   <title>Winfinder</title>
+  <link rel="stylesheet" href="vendor/xterm/xterm.css">
   <link rel="stylesheet" href="styles.css">
   <script src="early.js"></script>
 </head>
@@ -49,6 +50,7 @@
           <button id="btn-newfolder" class="tb" title="新增資料夾 (Ctrl+Shift+N)"><svg viewBox="0 0 20 20"><path d="M2.8 6.2c0-1 .8-1.7 1.7-1.7h3.2l1.6 1.6h6.2c1 0 1.7.8 1.7 1.7v6.4c0 1-.8 1.7-1.7 1.7H4.5c-1 0-1.7-.8-1.7-1.7z"/><path d="M10 8.6v4.6M7.7 10.9h4.6"/></svg></button>
           <button id="btn-sort" class="tb" title="排序與分組"><svg viewBox="0 0 20 20"><path d="M6.5 15.5V4.5M3.5 7.5l3-3 3 3M13.5 4.5v11M10.5 12.5l3 3 3-3"/></svg></button>
           <button id="btn-preview" class="tb" title="預覽窗格 (Alt+P)"><svg viewBox="0 0 20 20"><rect x="2.8" y="4" width="14.4" height="12" rx="2"/><path d="M11.5 4v12"/><path d="M13.4 7.5h2M13.4 10h2" /></svg></button>
+          <button id="btn-terminal" class="tb" title="在終端機中開啟這個資料夾 (Ctrl+`)"><svg viewBox="0 0 20 20"><rect x="2.8" y="4" width="14.4" height="12" rx="2"/><path d="M6 8.2l2.3 1.9L6 12M10 12.3h4"/></svg></button>
           <button id="btn-refresh" class="tb" title="重新整理 (F5)"><svg viewBox="0 0 20 20"><path d="M15.6 10a5.6 5.6 0 1 1-1.7-4"/><path d="M14.2 2.8v3.4h-3.4"/></svg></button>
           <button id="btn-more" class="tb" title="更多選項"><svg viewBox="0 0 20 20"><circle cx="5" cy="10" r="1.2" class="fill"/><circle cx="10" cy="10" r="1.2" class="fill"/><circle cx="15" cy="10" r="1.2" class="fill"/></svg></button>
         </div>
@@ -102,6 +104,7 @@
         <input id="zoom" type="range" min="48" max="160" step="8" title="圖像大小">
       </footer>
       </div>
+      <div id="terms"></div>
       </div>
     </main>
   </div>
@@ -135,6 +138,8 @@
   <div id="menu" hidden></div>
   <div id="toast" hidden></div>
 
+  <script src="vendor/xterm/xterm.js"></script>
+  <script src="vendor/xterm/addon-fit.js"></script>
   <script src="bridge-tauri.js"></script>
   <script src="icons.js"></script>
   <script src="preview.js"></script>

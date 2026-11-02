@@ -859,3 +859,13 @@ img.panning, video.panning { cursor: grabbing; transition: none; }
 @keyframes springWait { 50% { background: rgba(var(--accent-rgb), 0.28); } }
 .sprung { animation: springBlink 0.32s steps(1) 1; }
 @keyframes springBlink { 0%, 50% { background: var(--accent); color: #fff; } 25%, 75% { background: transparent; } }
+
+/* ---------- terminal tabs ---------- */
+#terms { display: none; flex: 1; min-width: 0; position: relative; background: var(--content-bg); }
+body.term-mode #pane1 { display: none; }
+body.term-mode #terms { display: block; }
+.term { position: absolute; inset: 0; padding: 8px 6px 6px 12px; display: none; }
+.term.on { display: block; animation: fadeIn 0.18s ease-out; }
+.term .xterm { height: 100%; }
+.term .xterm-viewport { background: transparent !important; }
+.tab .term-ico { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.3; stroke-linecap: round; stroke-linejoin: round; }
