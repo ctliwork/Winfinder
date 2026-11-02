@@ -4,7 +4,7 @@
 //! page writes the keys typed in it back. `term-exit` says the shell ended.
 
 use base64::Engine;
-use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
+use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
@@ -13,7 +13,7 @@ use tauri::{AppHandle, Emitter};
 struct Session {
     writer: Box<dyn Write + Send>,
     master: Box<dyn MasterPty + Send>,
-    child: Box<dyn Child + Send + Sync>,
+    killer: Box<dyn ChildKiller + Send + Sync>,
 }
 
 /// The open terminals, by the id the page gave them.
@@ -81,6 +81,35 @@ struct Data {
 
 impl Terms {
     pub fn open(&self, app: AppHandle, id: u32, cwd: &str, cols: u16, rows: u16, kind: &str) -> Result<(), String> {
+        let out = app.clone();
+        self.start(
+            id,
+            cwd,
+            cols,
+            rows,
+            kind,
+            move |id, bytes| {
+                let data = base64::engine::general_purpose::STANDARD.encode(bytes);
+                let _ = out.emit("term-data", Data { id, data });
+            },
+            move |id| {
+                let _ = app.emit("term-exit", id);
+            },
+        )
+    }
+
+    /// Starts the shell; `on_data` gets what it prints, `on_exit` is called once it has ended.
+    #[allow(clippy::too_many_arguments)]
+    fn start(
+        &self,
+        id: u32,
+        cwd: &str,
+        cols: u16,
+        rows: u16,
+        kind: &str,
+        on_data: impl Fn(u32, &[u8]) + Send + 'static,
+        on_exit: impl FnOnce(u32) + Send + 'static,
+    ) -> Result<(), String> {
         let pty = native_pty_system();
         let pair = pty
             .openpty(PtySize { rows: rows.max(2), cols: cols.max(10), pixel_width: 0, pixel_height: 0 })
@@ -90,27 +119,38 @@ impl Terms {
             cmd.cwd(cwd);
         }
         allow_ctrl_c();
-        let child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
-        drop(pair.slave); // the shell holds its end; reading ends when it exits
+        let mut child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
+        drop(pair.slave);
         let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
         let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
-        self.0.lock().unwrap().insert(id, Session { writer, master: pair.master, child });
-        let terms = self.clone();
+        let killer = child.clone_killer();
+        self.0.lock().unwrap().insert(id, Session { writer, master: pair.master, killer });
+        // What it prints, until the console closes.
         std::thread::spawn(move || {
             let mut buf = [0u8; 16384];
             loop {
                 match reader.read(&mut buf) {
                     Ok(0) | Err(_) => break,
-                    Ok(n) => {
-                        let data = base64::engine::general_purpose::STANDARD.encode(&buf[..n]);
-                        let _ = app.emit("term-data", Data { id, data });
-                    }
+                    Ok(n) => on_data(id, &buf[..n]),
                 }
             }
-            terms.close(id);
-            let _ = app.emit("term-exit", id);
+            on_exit(id);
+        });
+        // When the shell ends (`exit`), its console is closed, which ends the
+        // reading above: on Windows the output doesn't end by itself while
+        // the pseudo console is open.
+        let terms = self.clone();
+        std::thread::spawn(move || {
+            let _ = child.wait();
+            terms.take(id);
         });
         Ok(())
+    }
+
+    /// Takes a terminal out of the list and closes its console.
+    fn take(&self, id: u32) -> Option<Session> {
+        let s = self.0.lock().unwrap().remove(&id);
+        s // dropped by the caller, outside the lock (closing waits for the console)
     }
 
     pub fn write(&self, id: u32, data: &str) -> Result<(), String> {
@@ -129,8 +169,8 @@ impl Terms {
 
     /// Ends the shell (and what it runs); the reader then reports `term-exit`.
     pub fn close(&self, id: u32) {
-        if let Some(mut s) = self.0.lock().unwrap().remove(&id) {
-            let _ = s.child.kill();
+        if let Some(mut s) = self.take(id) {
+            let _ = s.killer.kill();
         }
     }
 }
@@ -138,6 +178,7 @@ impl Terms {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use portable_pty::Child;
 
     /// A shell in a pseudo console, as a terminal tab runs it, read into a buffer.
     struct Shell {
@@ -222,6 +263,45 @@ mod tests {
         sh.send("echo winfinder-term-ok\r");
         // the echoed command and its output: twice
         assert!(sh.wait(|t| t.matches("winfinder-term-ok").count() >= 2), "output: {:?}", sh.text());
+    }
+
+    /// A terminal opened as the app opens one ends when its shell does
+    /// (`exit`), so its tab closes; on Windows that needs the console closed.
+    #[test]
+    fn exit_ends_the_terminal() {
+        let terms = Terms::default();
+        let (tx, rx) = std::sync::mpsc::channel::<Option<Vec<u8>>>();
+        let data = tx.clone();
+        let dir = std::env::temp_dir();
+        terms
+            .start(7, &dir.to_string_lossy(), 80, 24, "auto", move |_, b| { let _ = data.send(Some(b.to_vec())); }, move |_| { let _ = tx.send(None); })
+            .unwrap();
+        let mut out = Vec::new();
+        let mut answered = false;
+        let mut prompted = false;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        let mut ended = false;
+        while std::time::Instant::now() < deadline {
+            match rx.recv_timeout(std::time::Duration::from_millis(200)) {
+                Ok(Some(b)) => out.extend_from_slice(&b),
+                Ok(None) => { ended = true; break; }
+                Err(_) => {}
+            }
+            let t = String::from_utf8_lossy(&out).to_string();
+            if !answered && t.contains("\x1b[6n") {
+                terms.write(7, "\x1b[1;1R").unwrap();
+                answered = true;
+            }
+            if !prompted && (t.contains('>') || t.contains('$') || t.contains('#')) {
+                prompted = true;
+                std::thread::sleep(std::time::Duration::from_millis(500));
+                terms.write(7, "exit\r").unwrap();
+            }
+        }
+        assert!(prompted && ended, "prompted {prompted} ended {ended}: {:?}", String::from_utf8_lossy(&out));
+        // the shell's end is seen by the reader and the waiter, in either order
+        let gone = (0..50).any(|_| { std::thread::sleep(std::time::Duration::from_millis(100)); terms.0.lock().unwrap().is_empty() });
+        assert!(gone, "the session is gone");
     }
 
     /// Ctrl+C stops the command running in PowerShell, also after what
