@@ -381,7 +381,21 @@ await step('Windows menus', async () => {
   await withPrefs({ menuStyle: 'windows' });
   const popup = () => ps(`Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class P { [DllImport("user32.dll")] public static extern IntPtr FindWindow(string c, string t); }'
 [P]::FindWindow('#32768', $null) -ne [IntPtr]::Zero`) === 'True';
-  const esc = () => ps("Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('{ESC}{ESC}')");
+  // Closes the popup menu: Escape posted to every menu window (the keyboard's
+  // goes to whatever window is in front), until none is left. A menu left
+  // open holds Winfinder's window thread, and with it everything after.
+  const esc = async () => {
+    for (let i = 0; i < 6; i++) {
+      ps(`Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class Q { [DllImport("user32.dll")] public static extern IntPtr FindWindowEx(IntPtr p, IntPtr a, string c, string t); [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l); }'
+$h = [IntPtr]::Zero
+while (($h = [Q]::FindWindowEx([IntPtr]::Zero, $h, '#32768', $null)) -ne [IntPtr]::Zero) { [Q]::PostMessage($h, 0x100, [IntPtr]0x1B, [IntPtr]::Zero) | Out-Null; [Q]::PostMessage($h, 0x101, [IntPtr]0x1B, [IntPtr]::Zero) | Out-Null }`);
+      await sleep(400);
+      if (!popup()) return true;
+    }
+    ps("Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('{ESC}{ESC}')");
+    await sleep(400);
+    return !popup();
+  };
   const r = {};
   for (const [k, v] of [['3', 'columns'], ['2', 'list'], ['1', 'icons']]) {
     await page.keyboard.press(`Control+${k}`);
@@ -396,8 +410,8 @@ await step('Windows menus', async () => {
       page.mouse.click(x, y, { button: 'right' }).catch(() => {}); // returns when the menu closes
       await sleep(1500);
       res[name] = popup();
-      esc();
-      await sleep(800);
+      if (!(await esc())) res[`${name}StillOpen`] = true;
+      await sleep(600);
       const toast = await page.evaluate(() => document.querySelector('#toast')?.textContent || '');
       if (toast) res[`${name}Toast`] = toast;
     }
