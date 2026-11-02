@@ -63,6 +63,16 @@ fn keys(data: &str) -> std::borrow::Cow<'_, str> {
     }
 }
 
+/// A program started in a new process group (as some launchers do, and
+/// Node's `detached`) ignores Ctrl+C, and the shells it starts inherit that,
+/// so Ctrl+C wouldn't stop the command running: they handle it again.
+fn allow_ctrl_c() {
+    #[cfg(windows)]
+    unsafe {
+        let _ = windows::Win32::System::Console::SetConsoleCtrlHandler(None, false);
+    }
+}
+
 #[derive(Clone, serde::Serialize)]
 struct Data {
     id: u32,
@@ -79,6 +89,7 @@ impl Terms {
         if std::path::Path::new(cwd).is_dir() {
             cmd.cwd(cwd);
         }
+        allow_ctrl_c();
         let child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
         drop(pair.slave); // the shell holds its end; reading ends when it exits
         let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
@@ -141,6 +152,7 @@ mod tests {
             let pair = pty.openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 }).unwrap();
             let mut cmd = shell("auto");
             cmd.cwd(std::env::temp_dir());
+            allow_ctrl_c(); // as Terms::open does
             let child = pair.slave.spawn_command(cmd).unwrap();
             drop(pair.slave);
             let mut reader = pair.master.try_clone_reader().unwrap();
@@ -217,14 +229,19 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn ctrl_c_interrupts() {
-        let cases: [(&str, &[&str]); 4] = [
+        let cases: [(&str, &[&str]); 5] = [
             ("plain", &[]),
             ("focus", &["\x1b[I"]),
             ("escape", &["\x1b"]),
             ("arrows", &["echo a\r", "\x1b[A", "\x1b"]),
+            ("ignoring", &[]),
         ];
         let mut failed = Vec::new();
         for (name, before) in cases {
+            if name == "ignoring" {
+                // as when started in a new process group: Ctrl+C ignored, which the shell would inherit
+                unsafe { windows::Win32::System::Console::SetConsoleCtrlHandler(None, true).unwrap() };
+            }
             let mut sh = Shell::start();
             assert!(sh.prompt(), "{name}: no prompt: {:?}", sh.text());
             for b in before {
