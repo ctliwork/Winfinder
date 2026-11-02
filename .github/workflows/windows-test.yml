@@ -38,6 +38,7 @@ jobs:
 
       - name: End to end
         if: ${{ !cancelled() }}
+        timeout-minutes: 20
         run: |
           npm install --no-save playwright-core@1.58.2
           node tests/windows-e2e.mjs e2e-files
