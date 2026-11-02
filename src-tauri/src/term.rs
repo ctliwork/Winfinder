@@ -128,67 +128,113 @@ impl Terms {
 mod tests {
     use super::*;
 
-    /// A shell starts, runs what is typed and prints its output; Ctrl+C stops
-    /// the command running (on Windows: PowerShell in ConPTY).
-    #[test]
-    fn runs_a_shell() {
-        let pty = native_pty_system();
-        let pair = pty.openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 }).unwrap();
-        let mut cmd = shell("auto");
-        cmd.cwd(std::env::temp_dir());
-        let mut child = pair.slave.spawn_command(cmd).unwrap();
-        drop(pair.slave);
-        let mut reader = pair.master.try_clone_reader().unwrap();
-        let mut writer = pair.master.take_writer().unwrap();
-        let out = Arc::new(Mutex::new(Vec::new()));
-        let sink = out.clone();
-        std::thread::spawn(move || {
-            let mut buf = [0u8; 4096];
-            while let Ok(n) = reader.read(&mut buf) {
-                if n == 0 {
-                    break;
+    /// A shell in a pseudo console, as a terminal tab runs it, read into a buffer.
+    struct Shell {
+        writer: Box<dyn Write + Send>,
+        out: Arc<Mutex<Vec<u8>>>,
+        child: Box<dyn Child + Send + Sync>,
+        answered: bool,
+    }
+    impl Shell {
+        fn start() -> Shell {
+            let pty = native_pty_system();
+            let pair = pty.openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 }).unwrap();
+            let mut cmd = shell("auto");
+            cmd.cwd(std::env::temp_dir());
+            let child = pair.slave.spawn_command(cmd).unwrap();
+            drop(pair.slave);
+            let mut reader = pair.master.try_clone_reader().unwrap();
+            let writer = pair.master.take_writer().unwrap();
+            std::mem::forget(pair.master); // closing it waits on the output; the test process ends anyway
+            let out = Arc::new(Mutex::new(Vec::new()));
+            let sink = out.clone();
+            std::thread::spawn(move || {
+                let mut buf = [0u8; 4096];
+                while let Ok(n) = reader.read(&mut buf) {
+                    if n == 0 {
+                        break;
+                    }
+                    sink.lock().unwrap().extend_from_slice(&buf[..n]);
                 }
-                sink.lock().unwrap().extend_from_slice(&buf[..n]);
-            }
-        });
-        let text = || String::from_utf8_lossy(&out.lock().unwrap()).to_string();
-        let mut answered = false;
-        // Waits for `done`, answering the console's cursor position query
-        // (ESC[6n, which ConPTY sends first and waits on; xterm.js answers it in the app).
-        let mut wait = |writer: &mut Box<dyn Write + Send>, done: &dyn Fn(&str) -> bool| {
+            });
+            Shell { writer, out, child, answered: false }
+        }
+        fn text(&self) -> String {
+            String::from_utf8_lossy(&self.out.lock().unwrap()).to_string()
+        }
+        /// Typed keys, as Terms::write sends them.
+        fn send(&mut self, s: &str) {
+            self.writer.write_all(keys(s).as_bytes()).unwrap();
+            self.writer.flush().unwrap();
+        }
+        /// Waits up to 20 s for `done`, answering the console's cursor position
+        /// query (ESC[6n, which ConPTY sends first and waits on; xterm.js answers it in the app).
+        fn wait(&mut self, done: impl Fn(&str) -> bool) -> bool {
             for _ in 0..200 {
                 std::thread::sleep(std::time::Duration::from_millis(100));
-                let t = text();
-                if !answered && t.contains("\x1b[6n") {
-                    writer.write_all(b"\x1b[1;1R").unwrap();
-                    writer.flush().unwrap();
-                    answered = true;
+                let t = self.text();
+                if !self.answered && t.contains("\x1b[6n") {
+                    self.send("\x1b[1;1R");
+                    self.answered = true;
                 }
                 if done(&t) {
                     return true;
                 }
             }
             false
-        };
-        let send = |writer: &mut Box<dyn Write + Send>, s: &str| {
-            writer.write_all(keys(s).as_bytes()).unwrap();
-            writer.flush().unwrap();
-        };
-        let prompt = wait(&mut writer, &|t| t.contains('>') || t.contains('$') || t.contains('#'));
-        send(&mut writer, "echo winfinder-term-ok\r");
-        // the echoed command and its output: twice
-        let echoed = wait(&mut writer, &|t| t.matches("winfinder-term-ok").count() >= 2);
-        let mut interrupted = true;
-        if cfg!(windows) {
-            send(&mut writer, "Start-Sleep 60\r");
-            std::thread::sleep(std::time::Duration::from_millis(2000));
-            send(&mut writer, "\x03");
-            std::thread::sleep(std::time::Duration::from_millis(500));
-            send(&mut writer, "echo after-ctrl-c\r");
-            interrupted = wait(&mut writer, &|t| t.matches("after-ctrl-c").count() >= 2);
         }
-        let _ = child.kill();
-        let t = text();
-        assert!(prompt && echoed && interrupted, "prompt {prompt} echoed {echoed} interrupted {interrupted}; output: {t:?}");
+        fn prompt(&mut self) -> bool {
+            self.wait(|t| t.contains('>') || t.contains('$') || t.contains('#'))
+        }
+        /// Starts a long command, presses Ctrl+C, and says whether the shell takes a command again.
+        fn interrupts(&mut self, mark: &str) -> bool {
+            self.send("Start-Sleep 60\r");
+            std::thread::sleep(std::time::Duration::from_millis(2000));
+            self.send("\x03");
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            self.send(&format!("echo {mark}\r"));
+            self.wait(|t| t.matches(mark).count() >= 2)
+        }
+    }
+    impl Drop for Shell {
+        fn drop(&mut self) {
+            let _ = self.child.kill();
+        }
+    }
+
+    /// A shell starts, runs what is typed and prints its output.
+    #[test]
+    fn runs_a_shell() {
+        let mut sh = Shell::start();
+        assert!(sh.prompt(), "no prompt: {:?}", sh.text());
+        sh.send("echo winfinder-term-ok\r");
+        // the echoed command and its output: twice
+        assert!(sh.wait(|t| t.matches("winfinder-term-ok").count() >= 2), "output: {:?}", sh.text());
+    }
+
+    /// Ctrl+C stops the command running in PowerShell, also after what
+    /// xterm.js sends besides the keys typed: focus reports, Escape, arrows.
+    #[cfg(windows)]
+    #[test]
+    fn ctrl_c_interrupts() {
+        let cases: [(&str, &[&str]); 4] = [
+            ("plain", &[]),
+            ("focus", &["\x1b[I"]),
+            ("escape", &["\x1b"]),
+            ("arrows", &["echo a\r", "\x1b[A", "\x1b"]),
+        ];
+        let mut failed = Vec::new();
+        for (name, before) in cases {
+            let mut sh = Shell::start();
+            assert!(sh.prompt(), "{name}: no prompt: {:?}", sh.text());
+            for b in before {
+                sh.send(b);
+                std::thread::sleep(std::time::Duration::from_millis(300));
+            }
+            if !sh.interrupts(&format!("after-{name}")) {
+                failed.push(format!("{name}: {:?}", sh.text().chars().rev().take(400).collect::<String>().chars().rev().collect::<String>()));
+            }
+        }
+        assert!(failed.is_empty(), "Ctrl+C didn't interrupt after: {failed:#?}");
     }
 }

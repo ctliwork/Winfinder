@@ -435,6 +435,8 @@ await step('terminal tab', async () => {
   const wait = (fn, ms = 15000) => until(async () => fn(await screen()), ms);
   const tabsNow = () => page.$$eval('#tabs .tab', (e) => e.map((x) => x.textContent.trim()));
   const r = { tabsBefore: await tabsNow() };
+  // everything the page sends the shell (to compare with term.rs's own test)
+  await page.evaluate(() => { const w = window.fsApi.termWrite; window.__writes = []; window.fsApi.termWrite = (id, d) => { window.__writes.push(d); return w(id, d); }; });
   await page.click('#btn-terminal');
   r.prompt = await wait((t) => /PS .*e2e-files>/.test(t), 20000);
   r.title = (await tabsNow()).find((x) => /PowerShell|終端機/.test(x)) || null;
@@ -453,8 +455,6 @@ await step('terminal tab', async () => {
   await page.keyboard.type('Start-Sleep 60');
   await page.keyboard.press('Enter');
   await sleep(1500);
-  // what the page sends the shell from here on (to see what Ctrl+C becomes)
-  await page.evaluate(() => { const w = window.fsApi.termWrite; window.__writes = []; window.fsApi.termWrite = (id, d) => { window.__writes.push(d); return w(id, d); }; });
   const t0 = Date.now();
   await page.keyboard.press('Control+C');
   r.ctrlC = await until(async () => /PS .*>\s*$/.test(await line()), 5000);
