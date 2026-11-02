@@ -1826,6 +1826,13 @@
     xt.onResize(({ cols, rows }) => term.alive && api.termResize(term.id, cols, rows));
     xt.onTitleChange((title) => { term.title = title || ''; renderTabs(); });
     api.termOpen(term.id, term.dir, xt.cols, xt.rows, prefs.shell || 'auto').then((err) => {
+      // Closing a tab while term_open is still starting used to leave an
+      // orphaned shell: termClose could run before the session existed.
+      // Once startup settles, always close a shell whose tab is gone.
+      if (t.term !== term || !tabs.includes(t)) {
+        if (!err) api.termClose?.(term.id);
+        return;
+      }
       if (err) { term.alive = false; xt.write(`\r\n無法開啟終端機：${err}\r\n`); }
     });
     xt.focus();
