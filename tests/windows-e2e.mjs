@@ -453,10 +453,13 @@ await step('terminal tab', async () => {
   await page.keyboard.type('Start-Sleep 60');
   await page.keyboard.press('Enter');
   await sleep(1500);
+  // what the page sends the shell from here on (to see what Ctrl+C becomes)
+  await page.evaluate(() => { const w = window.fsApi.termWrite; window.__writes = []; window.fsApi.termWrite = (id, d) => { window.__writes.push(d); return w(id, d); }; });
   const t0 = Date.now();
   await page.keyboard.press('Control+C');
   r.ctrlC = await until(async () => /PS .*>\s*$/.test(await line()), 5000);
   r.ctrlCMs = Date.now() - t0;
+  r.ctrlCSent = await page.evaluate(() => JSON.stringify(window.__writes));
   desktop('terminal', { log: true });
   await page.keyboard.press('Control+Tab');
   await sleep(600);
@@ -468,7 +471,12 @@ await step('terminal tab', async () => {
   await page.keyboard.press('Enter');
   r.closed = await until(async () => (await tabsNow()).length === r.tabsBefore.length, 8000);
   r.tabsAfter = await tabsNow();
-  if (!r.closed) r.screen = (await screen()).slice(-600);
+  if (!r.closed) {
+    r.screen = (await screen()).slice(-600);
+    // close it with the middle button, so the steps after start from a folder tab
+    await page.locator('#tabs .tab').last().click({ button: 'middle' });
+    await sleep(800);
+  }
   return r;
 });
 
