@@ -1787,11 +1787,40 @@
     setTimeout(() => { if (state === t) t.term?.xt?.focus(); }, 0);
     return true;
   }
+  // Chinese (and Japanese, Korean) characters take two cells each, but the
+  // system's CJK font at the letters' size is narrower than two cells of a
+  // monospaced font, leaving a gap after each character (報 告 .docx). The
+  // terminal uses that font under a name of its own, enlarged (size-adjust)
+  // to fill two cells of the font chosen; one face per size it needs.
+  const CJK_FACES = new Map();
+  const CJK_LOCAL = ['Microsoft JhengHei', 'Microsoft JhengHei Regular', 'MicrosoftJhengHeiRegular', 'Microsoft JhengHei UI', 'PingFang TC', 'Noto Sans CJK TC', 'Noto Sans Mono CJK TC', 'WenQuanYi Zen Hei'];
+  function cjkFace(letters, size) {
+    if (!window.FontFace) return null;
+    const ctx = (cjkFace.ctx ||= document.createElement('canvas').getContext('2d'));
+    ctx.font = `${size}px ${letters}`;
+    const cell = ctx.measureText('W').width;
+    // two cells, less a hair so neighbours don't touch; the CJK font's characters are 1 em wide
+    const pct = Math.round(Math.min(1.3, Math.max(1, (2 * cell * 0.95) / size)) * 100);
+    const name = `Winfinder CJK ${pct}`;
+    if (!CJK_FACES.has(name)) {
+      const face = new FontFace(name, CJK_LOCAL.map((n) => `local("${n}")`).join(', '), {
+        sizeAdjust: `${pct}%`,
+        unicodeRange: 'U+2E80-9FFF, U+AC00-D7AF, U+F900-FAFF, U+FE30-FE4F, U+FF00-FF60, U+FFE0-FFE6, U+20000-2FFFF',
+      });
+      document.fonts.add(face);
+      face.load().catch(() => {});
+      CJK_FACES.set(name, face);
+    }
+    return name;
+  }
   function terminalFontOptions() {
     const name = String(prefs.terminalFont || '').trim() || 'Cascadia Mono';
+    const fontSize = Math.max(8, Math.min(48, Number(prefs.terminalFontSize) || 13));
+    const letters = `${JSON.stringify(name)}, "Cascadia Code", Consolas, "Liberation Mono"`;
+    const cjk = cjkFace(letters, fontSize);
     return {
-      fontFamily: `${JSON.stringify(name)}, "Cascadia Code", Consolas, "Microsoft JhengHei", monospace`,
-      fontSize: Math.max(8, Math.min(48, Number(prefs.terminalFontSize) || 13)),
+      fontFamily: `${letters}, ${cjk ? `${JSON.stringify(cjk)}, ` : ''}"Microsoft JhengHei", monospace`,
+      fontSize,
     };
   }
   function applyTerminalFonts(targets = tabs) {
@@ -1821,7 +1850,7 @@
     const xt = new window.Terminal({
       ...terminalFontOptions(),
       ...(isWin ? { windowsPty: { backend: 'conpty', buildNumber: Number(env.windowsBuild) || 0 } } : {}),
-      lineHeight: 1.15, cursorBlink: true, scrollback: 5000, allowProposedApi: false,
+      lineHeight: 1.2, cursorBlink: true, scrollback: 5000, allowProposedApi: false,
       theme: termColors(), macOptionIsMeta: false,
     });
     const fit = new window.FitAddon.FitAddon();

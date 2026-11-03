@@ -463,6 +463,16 @@ await step('terminal tab', async () => {
   await page.click('#btn-terminal');
   r.prompt = await wait((t) => /PS .*e2e-files>/.test(t), 20000);
   r.title = (await tabsNow()).find((x) => /PowerShell|終端機/.test(x)) || null;
+  // A Chinese character fills its two cells (no gap after each: 報 告 .docx).
+  r.cjkFill = await page.evaluate(async () => {
+    const xt = document.querySelector('.term.on .xterm');
+    const family = getComputedStyle(xt.querySelector('.xterm-rows') || xt).fontFamily;
+    const size = parseFloat(getComputedStyle(xt.querySelector('.xterm-rows') || xt).fontSize);
+    await document.fonts.ready;
+    const ctx = document.createElement('canvas').getContext('2d');
+    ctx.font = `${size}px ${family}`;
+    return Math.round((ctx.measureText('中').width / (2 * ctx.measureText('W').width)) * 100) / 100;
+  });
   await page.keyboard.type('Write-Output ("wf-" + (1+2))');
   await page.keyboard.press('Enter');
   r.output = await wait((t) => /^wf-3$/m.test(t));
