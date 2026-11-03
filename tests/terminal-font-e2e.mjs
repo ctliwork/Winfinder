@@ -32,6 +32,7 @@ async function boot() {
       page = browser.contexts().flatMap((c) => c.pages()).find((p) => !p.url().startsWith('devtools'));
       if (!page) throw new Error('no app page');
       await page.waitForSelector('#btn-terminal', { timeout: 5000 });
+      await page.waitForFunction(() => document.querySelector('#tabs .tab.active') && document.querySelector('#title')?.textContent.trim() === 'e2e-files', null, { timeout: 30000 });
       break;
     } catch (e) {
       error = e;
@@ -54,7 +55,12 @@ async function boot() {
   });
 }
 async function settings() {
-  await page.keyboard.press('Control+,');
+  if (await page.evaluate(() => document.body.classList.contains('term-mode'))) {
+    await page.keyboard.press('Control+,');
+  } else {
+    await page.click('#btn-more');
+    await page.locator('#menu').getByText('設定…', { exact: true }).click();
+  }
   await page.click('#dlg [data-sec="terminal"]');
   await page.waitForSelector('#dlg input[data-pref="terminalFont"]');
 }
@@ -244,6 +250,7 @@ try {
   if (page) {
     await page.screenshot({ path: path.join(out, 'terminal-font-failure.png') }).catch(() => {});
     console.error('FONT SCREEN', JSON.stringify(await snapshot().catch(() => null)));
+    console.error('FONT UI', JSON.stringify(await page.evaluate(() => ({ ready: document.readyState, focus: document.activeElement?.outerHTML, text: document.body.innerText.slice(0,5000) })).catch(() => null)));
   }
   process.exitCode = 1;
 } finally {
