@@ -59,7 +59,7 @@ async function settings() {
 }
 async function closeSettings() {
   await page.click('#dlg .set-close');
-  await page.waitForSelector('#dlg .settings', { state: 'detached' }).catch(() => {});
+  await page.waitForSelector('#dlg', { state: 'hidden' });
 }
 async function setFont(name, size) {
   await page.fill('#dlg input[data-pref="terminalFont"]', name);
@@ -127,6 +127,7 @@ try {
     await pause(300);
     const [t] = await snapshot();
     assert.equal(t.cssSize, '20px');
+    assert.ok(await page.evaluate(() => document.activeElement?.matches('.term.on .xterm-helper-textarea')), 'closing settings must return focus to terminal input');
     assert.ok(t.family.startsWith('"Consolas"'));
     assert.ok(t.cols > 10);
     assert.ok(t.cols < results[0].detail.cols, 'larger font should reduce columns');
