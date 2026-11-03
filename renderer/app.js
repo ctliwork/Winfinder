@@ -3841,7 +3841,8 @@
     const f = dlg.onClose;
     dlg.onClose = null;
     f?.();
-    content.focus();
+    if (state.term?.xt) state.term.xt.focus();
+    else content.focus();
   }
   function dialogOpen() { return !dlg.el.hidden && !dlg.el.classList.contains('closing'); }
   $('#dlg-backdrop').addEventListener('mousedown', closeDialog);
