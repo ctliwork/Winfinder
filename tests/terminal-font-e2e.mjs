@@ -11,6 +11,7 @@ const cwd = path.resolve('e2e-files');
 const port = 9223;
 fs.mkdirSync(out, { recursive: true });
 const results = [];
+const terminalTabIds = [];
 let browser, page, child;
 const pause = (ms) => new Promise((r) => setTimeout(r, ms));
 async function check(name, fn) {
@@ -19,6 +20,7 @@ async function check(name, fn) {
   console.log('FONT PASS', name, JSON.stringify(detail ?? null));
 }
 async function boot() {
+  terminalTabIds.length = 0;
   child = spawn(exe, ['--dir=' + cwd], {
     env: { ...process.env, WINFINDER_DEVTOOLS_PORT: String(port) },
     stdio: 'ignore',
@@ -70,6 +72,7 @@ async function openTerminal() {
   await page.locator('#tabs .tab').first().click();
   await page.click('#btn-terminal');
   await page.waitForFunction((n) => window.__fontTestTerms.length === n + 1, n);
+  terminalTabIds.push(await page.locator('#tabs .tab.active').getAttribute('data-tab'));
   await page.waitForFunction(() => {
     const xt = window.__fontTestTerms.at(-1);
     return Array.from({ length: xt.buffer.active.length }, (_, i) => xt.buffer.active.getLine(i)?.translateToString(true) || '').some((s) => /PS .*>/.test(s));
@@ -148,7 +151,7 @@ try {
     await pause(300);
     ts = await snapshot();
     assert.ok(ts.every((t) => t.size === 16 && t.family.startsWith('"Courier New"')));
-    await page.keyboard.press('Control+Shift+Tab');
+    await page.locator('#tabs .tab[data-tab="' + terminalTabIds[0] + '"]').click();
     await pause(300);
     const first = (await snapshot())[0];
     assert.equal(first.cssSize, '16px');
@@ -165,7 +168,7 @@ try {
     await settings();
     await setFont('Winfinder Missing Font 123456', 18);
     await closeSettings();
-    await page.keyboard.press('Control+Tab');
+    await page.locator('#tabs .tab[data-tab="' + terminalTabIds[1] + '"]').click();
     await commandOutput('fallback-ok', 'Write-Output ("fallback-" + "ok")');
     await settings();
     await setFont('   ', 18);
@@ -192,6 +195,10 @@ try {
     await page.keyboard.press('Enter');
     await pause(1200);
     await page.keyboard.press('Control+C');
+    await page.waitForFunction(() => {
+      const xt = window.__fontTestTerms.at(-1);
+      return /PS .*?>\s*$/.test(xt.buffer.active.getLine(xt.buffer.active.baseY + xt.buffer.active.cursorY)?.translateToString(true) || '');
+    }, null, { timeout: 10000 });
     await commandOutput('interrupt-ok', 'Write-Output ("interrupt-" + "ok")');
     return { completion: true, history: true, interrupt: true };
   });
