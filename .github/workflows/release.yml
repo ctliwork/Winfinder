@@ -20,7 +20,7 @@ permissions:
 
 jobs:
   windows:
-    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.id == 41559994340 && github.event.workflow_run.conclusion == 'success') }}
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.id == 41561474838 && github.event.workflow_run.conclusion == 'success') }}
     runs-on: windows-latest
     env:
       ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
