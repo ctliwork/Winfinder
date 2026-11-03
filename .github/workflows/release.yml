@@ -3,6 +3,11 @@ name: Release
 # Manual only (Actions tab → Release → Run workflow), to save Actions minutes.
 # Each run publishes v0.3.<run number>; installed apps pick it up through the updater.
 on:
+  # One-time release authorized after this exact Windows validation run.
+  workflow_run:
+    workflows: ["Windows test"]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
     inputs:
       notes:
@@ -15,11 +20,14 @@ permissions:
 
 jobs:
   windows:
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.id == 41559994340 && github.event.workflow_run.conclusion == 'success') }}
     runs-on: windows-latest
     env:
       ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -49,7 +57,7 @@ jobs:
         with:
           tagName: v__VERSION__
           releaseName: Winfinder v__VERSION__
-          releaseBody: ${{ inputs.notes || '下載 Winfinder_x64-setup.exe 安裝。已安裝的版本會自動提示更新。' }}
+          releaseBody: ${{ inputs.notes || (github.event_name == 'workflow_run' && '新增終端機字型與 8–48 px 字體大小設定，立即套用所有分頁並保留設定。終端機內按 Ctrl+, 開啟設定；關閉設定後可直接繼續輸入。已通過 Windows 實際 App 字型、PowerShell 操作與完整重啟測試。') || '下載 Winfinder_x64-setup.exe 安裝。已安裝的版本會自動提示更新。' }}
           releaseDraft: false
           prerelease: false
           includeUpdaterJson: true
