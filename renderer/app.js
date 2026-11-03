@@ -504,8 +504,7 @@
   }
 
   async function navigate(dir, opts = {}) {
-    // In a terminal tab, a folder chosen (in the sidebar) is where the shell goes; the tab stays.
-    if (state.term) { termCd(state, dir); return true; }
+    if (state.term) return openTab(dir); // from a terminal tab (its menu's 打開): a folder tab of its own
     const { push = true, select = null, colActive = null, animate = true, silent = false } = opts;
     dir = canon(dir);
     const root = canon(opts.root || null);
@@ -1767,7 +1766,7 @@
     if (!api.termOpen) { openTerminal(dir); return; }
     const t = newTabState();
     t.cwd = dir;
-    t.term = { id: ++termSeq, dir, title: '', shell: prefs.shell || 'auto' };
+    t.term = { id: ++termSeq, dir, title: '' };
     tabs.splice(tabs.indexOf(state) + 1, 0, t);
     lastBg = null;
     if (!state.term) state.scroll = content.scrollTop;
@@ -1889,18 +1888,6 @@
     });
     applyTerminalFonts([t]);
     xt.focus();
-  }
-  // Types the command that takes the shell to `dir` (as if typed at its prompt).
-  function termCd(t, dir) {
-    const term = t.term;
-    if (!term?.alive || !dir || dir === HOME || dir.startsWith('shell:')) { term?.xt?.focus(); return; }
-    const cmd = !isWin ? `cd '${dir.replace(/'/g, "'\\''")}'`
-      : term.shell === 'cmd' ? `cd /d "${dir}"`
-        : `Set-Location -LiteralPath '${dir.replace(/'/g, "''")}'`;
-    api.termWrite(term.id, `${cmd}\r`);
-    term.dir = dir;
-    renderTabs();
-    term.xt.focus();
   }
   function fitTerm(t) {
     if (!t?.term?.fit || !t.term.el.classList.contains('on')) return;
@@ -3026,6 +3013,13 @@
       return;
     }
     const p = ev.target.closest('.place');
+    // In a terminal tab the sidebar is only to look around: a folder opens or
+    // closes in the tree, and the terminal keeps the keyboard.
+    if (state.term) {
+      if (p?.dataset.path && p.dataset.path !== HOME && !p.querySelector('.twisty.none')) toggleTree(p.dataset.path);
+      state.term.xt?.focus();
+      return;
+    }
     if (p?.dataset.smart) { const sf = smartById(p.dataset.smart); if (sf) openSmart(sf); return; }
     if (p?.dataset.path === PC) { toggleTree(PC); return; }
     if (p) navigate(p.dataset.path, { root: p.dataset.path });
@@ -3347,7 +3341,6 @@
     return [sf.query && `「${sf.query}」`, opt('kind', f.kind), opt('size', f.size), opt('date', f.date), `位置：${where}`].filter(Boolean).join('，');
   }
   async function openSmart(sf, { silent = false } = {}) {
-    if (state.term) { termCd(state, sf.root); return true; } // a terminal goes to its folder
     if (!(await navigate(sf.root, { root: sf.root, silent: true }))) return false;
     state.search = { query: sf.query, scope: sf.scope, results: null, busy: false, filters: { ...sf.filters }, smart: sf.id };
     if (silent) return true;

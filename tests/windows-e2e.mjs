@@ -485,15 +485,20 @@ await step('terminal tab', async () => {
   await page.keyboard.press('ArrowUp');
   r.history = await until(async () => (await line()).includes('Get-ChildItem -Name'), 5000);
   await page.keyboard.press('Escape');
-  // A folder clicked in the sidebar: the shell goes there, no new tab, the terminal stays in front.
+  // A folder clicked in the sidebar only opens in the tree: no new tab, no
+  // command typed, the terminal stays in front with the keyboard.
   const docs = page.locator('#places .place', { hasText: 'Documents' }).first();
   if (await docs.count()) {
     const n = (await tabsNow()).length;
+    const rows = await page.$$eval('#places .place', (e) => e.length);
+    const before = await screen();
     await docs.click();
-    r.sidebarCd = await wait((t) => /PS .*Documents>\s*$/m.test(t), 8000);
+    await sleep(800);
     r.sidebarTabs = (await tabsNow()).length === n;
     r.sidebarStays = await page.evaluate(() => document.body.classList.contains('term-mode') && !!document.activeElement?.closest('#terms'));
-  } else r.sidebarCd = 'no Documents in the sidebar';
+    r.sidebarNoCommand = (await screen()) === before;
+    r.sidebarTreeRows = [rows, await page.$$eval('#places .place', (e) => e.length)];
+  } else r.sidebarTabs = 'no Documents in the sidebar';
   await page.keyboard.type('Start-Sleep 60');
   await page.keyboard.press('Enter');
   await sleep(1500);
