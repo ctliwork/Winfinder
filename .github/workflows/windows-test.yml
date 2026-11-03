@@ -5,6 +5,12 @@ name: Windows test
 # and desktop screenshots are in the run's "e2e" artifact.
 on:
   workflow_dispatch:
+    inputs:
+      terminal_only:
+        description: "只跑 Rust 與終端機字型回歸（略過其他介面測試）"
+        type: boolean
+        required: false
+        default: false
 
 jobs:
   windows:
@@ -37,11 +43,15 @@ jobs:
           python tests/make_fixtures.py e2e-files
 
       - name: End to end
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && !inputs.terminal_only }}
         timeout-minutes: 20
         run: |
           npm install --no-save playwright-core@1.58.2
           node tests/windows-e2e.mjs e2e-files
+
+      - name: Install terminal test driver
+        if: ${{ !cancelled() && inputs.terminal_only }}
+        run: npm install --no-save playwright-core@1.58.2
 
       - name: Terminal font regression (real Windows app)
         if: ${{ !cancelled() }}
