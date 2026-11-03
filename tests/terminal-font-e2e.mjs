@@ -52,8 +52,7 @@ async function boot() {
   });
 }
 async function settings() {
-  await page.click('#btn-more');
-  await page.locator('#menu').getByText('設定…', { exact: true }).click();
+  await page.keyboard.press('Control+,');
   await page.click('#dlg [data-sec="terminal"]');
   await page.waitForSelector('#dlg input[data-pref="terminalFont"]');
 }
@@ -68,6 +67,7 @@ async function setFont(name, size) {
 }
 async function openTerminal() {
   const n = await page.evaluate(() => window.__fontTestTerms.length);
+  await page.locator('#tabs .tab').first().click();
   await page.click('#btn-terminal');
   await page.waitForFunction((n) => window.__fontTestTerms.length === n + 1, n);
   await page.waitForFunction(() => {
@@ -95,6 +95,7 @@ async function commandOutput(marker, command) {
   }, marker, { timeout: 15000 });
 }
 async function quit() {
+  await page.locator('#tabs .tab').first().click();
   await page.click('#btn-more');
   await page.locator('#menu').getByText('結束 Winfinder', { exact: true }).click();
   await new Promise((resolve, reject) => {
