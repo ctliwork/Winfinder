@@ -26,6 +26,7 @@
     showExt: true, foldersFirst: true, sizeBase: 1000, confirmTrash: false, autoUpdate: true, colPreview: true,
     rememberView: true, folderViews: {}, menuStyle: 'windows', calcSizes: false, smart: [], uiScale: 1, nativePreview: true,
     keepRunning: true, resetOnClose: true, runAtLogin: false,
+    terminalFont: 'Cascadia Mono', terminalFontSize: 13,
   }, readPrefs());
   // Like Finder, reopen the last tabs. Earlier versions saved 'home' as the
   // default, so move that over once.
@@ -1786,14 +1787,40 @@
     setTimeout(() => { if (state === t) t.term?.xt?.focus(); }, 0);
     return true;
   }
+  function terminalFontOptions() {
+    const name = String(prefs.terminalFont || '').trim() || 'Cascadia Mono';
+    return {
+      fontFamily: `${JSON.stringify(name)}, "Cascadia Code", Consolas, "Microsoft JhengHei", monospace`,
+      fontSize: Math.max(8, Math.min(48, Number(prefs.terminalFontSize) || 13)),
+    };
+  }
+  function applyTerminalFonts(targets = tabs) {
+    const options = terminalFontOptions();
+    for (const t of targets) {
+      if (!t.term?.xt) continue;
+      t.term.xt.options.fontFamily = options.fontFamily;
+      t.term.xt.options.fontSize = options.fontSize;
+    }
+    const refit = () => requestAnimationFrame(() => {
+      for (const t of targets) {
+        if (!t.term?.xt || !t.term.el.classList.contains('on')) continue;
+        fitTerm(t);
+        t.term.xt.refresh(0, t.term.xt.rows - 1);
+      }
+    });
+    refit();
+    // A newly selected font may finish loading after the first measurement.
+    document.fonts?.load(`${options.fontSize}px ${JSON.stringify(String(prefs.terminalFont || '').trim() || 'Cascadia Mono')}`)
+      .then(refit).catch(() => {});
+  }
   function startTerm(t) {
     const term = t.term;
     const el = document.createElement('div');
     el.className = 'term on';
     termsEl.appendChild(el);
     const xt = new window.Terminal({
-      fontFamily: '"Cascadia Mono", "Cascadia Code", Consolas, "Microsoft JhengHei", monospace',
-      fontSize: 13, lineHeight: 1.15, cursorBlink: true, scrollback: 5000, allowProposedApi: false,
+      ...terminalFontOptions(),
+      lineHeight: 1.15, cursorBlink: true, scrollback: 5000, allowProposedApi: false,
       theme: termColors(), macOptionIsMeta: false,
     });
     const fit = new window.FitAddon.FitAddon();
@@ -1828,6 +1855,7 @@
     api.termOpen(term.id, term.dir, xt.cols, xt.rows, prefs.shell || 'auto').then((err) => {
       if (err) { term.alive = false; xt.write(`\r\n無法開啟終端機：${err}\r\n`); }
     });
+    applyTerminalFonts([t]);
     xt.focus();
   }
   function fitTerm(t) {
@@ -4013,12 +4041,16 @@
         ['顯示副檔名', null, sw('showExt')],
         ['資料夾排在檔案前面', '預設值；個別資料夾可在排序選單（工具列的排序按鈕）另外設定', sw('foldersFirst')],
         api.dirSize && ['計算所有大小', '列表檢視在背景算出每個資料夾的大小（Finder 的「計算所有大小」）', sw('calcSizes')],
-        api.termOpen && ['終端機', '終端機分頁（工具列的終端機按鈕、Ctrl+`）使用的殼層', sel('shell', isWin
-          ? [['auto', '自動（有 PowerShell 7 就用它）'], ['pwsh', 'PowerShell 7'], ['powershell', 'Windows PowerShell'], ['cmd', '命令提示字元']]
-          : [['auto', '預設的殼層']])],
         ['檔案大小單位', null, sel('sizeBase', [[1000, '1 KB = 1000 位元組（macOS）'], [1024, '1 KB = 1024 位元組（Windows）']])],
         ['直欄寬度', '目前記住了 ' + Object.keys(prefs.colWidths || {}).length + ' 個資料夾的欄寬', '<button data-act="reset-cols">全部還原為預設寬度</button>'],
       ] },
+      ...(api.termOpen ? [{ id: 'terminal', title: '終端機', rows: [
+        ['殼層', '新開啟的終端機分頁使用此殼層', sel('shell', isWin
+          ? [['auto', '自動（有 PowerShell 7 就用它）'], ['pwsh', 'PowerShell 7'], ['powershell', 'Windows PowerShell'], ['cmd', '命令提示字元']]
+          : [['auto', '預設的殼層']])],
+        ['字型', '輸入已安裝的等寬字型名稱；變更會立即套用到所有終端機分頁', `<input data-pref="terminalFont" list="terminal-fonts" value="${esc(prefs.terminalFont)}" placeholder="Cascadia Mono" spellcheck="false" aria-label="終端機字型"><datalist id="terminal-fonts">${['Cascadia Mono', 'Cascadia Code', 'Consolas', 'Courier New', 'JetBrains Mono', 'Fira Code', 'CaskaydiaCove Nerd Font', 'MesloLGS NF'].map((name) => `<option value="${name}"></option>`).join('')}</datalist>`],
+        ['字體大小', '立即套用；未安裝的字型會使用替代字型', sel('terminalFontSize', [8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24, 28, 32, 36, 40, 48].map((size) => [size, `${size} px`]))],
+      ] }] : []),
       { id: 'about', title: '關於', rows: [
         ['版本', null, '<span class="set-version">…</span>'],
         api.checkUpdate && ['更新', null, '<button data-act="check-update">檢查更新</button>'],
@@ -4049,9 +4081,12 @@
   function setPref(key, value) {
     if (key === 'view') { setView(value, { asDefault: true }); return; }
     if (key === 'folderIcons') value = value ? 'windows' : 'finder';
+    if (key === 'terminalFont') value = String(value).trim() || 'Cascadia Mono';
+    if (key === 'terminalFontSize') value = Math.max(8, Math.min(48, Number(value) || 13));
     prefs[key] = value;
     savePrefs();
-    if (key === 'theme') applyTheme();
+    if (key === 'terminalFont' || key === 'terminalFontSize') applyTerminalFonts();
+    else if (key === 'theme') applyTheme();
     else if (key === 'density') applyDensity();
     else if (key === 'sidebarHidden') document.body.classList.toggle('sidebar-hidden', !!value);
     else if (key === 'previewPane') updatePane();
