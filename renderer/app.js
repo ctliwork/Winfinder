@@ -3024,6 +3024,9 @@
     if (p?.dataset.path === PC) { toggleTree(PC); return; }
     if (p) navigate(p.dataset.path, { root: p.dataset.path });
   });
+  // In a terminal tab, pressing in the sidebar leaves the keyboard with the
+  // terminal (no focus lost and back, which the shell would be told of).
+  $('#places').addEventListener('mousedown', (ev) => { if (state.term && ev.button === 0) ev.preventDefault(); });
   $('#places').addEventListener('dblclick', (ev) => {
     const p = ev.target.closest('.place');
     if (p?.dataset.path && p.dataset.path !== HOME && p.dataset.path !== PC && !ev.target.closest('[data-twisty]')) toggleTree(p.dataset.path);

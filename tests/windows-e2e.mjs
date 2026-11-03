@@ -496,7 +496,9 @@ await step('terminal tab', async () => {
     await sleep(800);
     r.sidebarTabs = (await tabsNow()).length === n;
     r.sidebarStays = await page.evaluate(() => document.body.classList.contains('term-mode') && !!document.activeElement?.closest('#terms'));
-    r.sidebarNoCommand = (await screen()) === before;
+    const after = await screen();
+    r.sidebarNoCommand = after === before;
+    if (!r.sidebarNoCommand) r.sidebarScreens = { before: before.slice(-300), after: after.slice(-300) };
     r.sidebarTreeRows = [rows, await page.$$eval('#places .place', (e) => e.length)];
   } else r.sidebarTabs = 'no Documents in the sidebar';
   await page.keyboard.type('Start-Sleep 60');
