@@ -5,6 +5,10 @@ name: Windows test
 # and desktop screenshots are in the run's "e2e" artifact.
 on:
   workflow_dispatch:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [fix/terminal-session-startup-race]
 
 jobs:
   windows:
