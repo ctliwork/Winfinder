@@ -1820,6 +1820,7 @@
     termsEl.appendChild(el);
     const xt = new window.Terminal({
       ...terminalFontOptions(),
+      ...(isWin ? { windowsPty: { backend: 'conpty', buildNumber: Number(env.windowsBuild) || 0 } } : {}),
       lineHeight: 1.15, cursorBlink: true, scrollback: 5000, allowProposedApi: false,
       theme: termColors(), macOptionIsMeta: false,
     });
