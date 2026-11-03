@@ -1838,6 +1838,7 @@
         xt.clearSelection();
         return false;
       }
+      if (ev.ctrlKey && k === ',') return false; // app settings
       if (ev.ctrlKey && k === 'v') return false; // the browser's paste reaches xterm's text box
       if (ev.ctrlKey && (ev.key === 'Tab' || ev.key === 'PageUp' || ev.key === 'PageDown')) return false; // tabs
       return true;
@@ -3454,9 +3455,12 @@
 
   document.addEventListener('keydown', async (ev) => {
     if (G.renaming) return;
-    // A terminal gets every key but switching tabs (Ctrl+Tab, Ctrl+PageUp/PageDown).
+    // Reserve settings and tab switching; other keys go to the terminal.
     if (ev.target.closest?.('#terms')) {
-      if (ev.ctrlKey && (ev.key === 'Tab' || ev.key === 'PageUp' || ev.key === 'PageDown')) {
+      if (ev.ctrlKey && ev.key === ',') {
+        ev.preventDefault();
+        openSettings('terminal');
+      } else if (ev.ctrlKey && (ev.key === 'Tab' || ev.key === 'PageUp' || ev.key === 'PageDown')) {
         ev.preventDefault();
         cycleTab(ev.key === 'PageUp' || (ev.key === 'Tab' && ev.shiftKey) ? -1 : 1);
       }
