@@ -55,6 +55,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         with:
+          releaseCommitish: ${{ github.event.workflow_run.head_sha || github.sha }}
           tagName: v__VERSION__
           releaseName: Winfinder v__VERSION__
           releaseBody: ${{ inputs.notes || (github.event_name == 'workflow_run' && '新增終端機字型與 8–48 px 字體大小設定，立即套用所有分頁並保留設定。終端機內按 Ctrl+, 開啟設定；關閉設定後可直接繼續輸入。已通過 Windows 實際 App 字型、PowerShell 操作與完整重啟測試。') || '下載 Winfinder_x64-setup.exe 安裝。已安裝的版本會自動提示更新。' }}
