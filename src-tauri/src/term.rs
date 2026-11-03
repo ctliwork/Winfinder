@@ -241,12 +241,20 @@ mod tests {
         }
         /// Starts a long command, presses Ctrl+C, and says whether the shell takes a command again.
         fn interrupts(&mut self, mark: &str) -> bool {
-            self.send("Start-Sleep 60\r");
-            std::thread::sleep(std::time::Duration::from_millis(2000));
+            // Wait for real command output, rather than assuming PowerShell
+            // and PSReadLine are ready after a fixed startup delay. Split the
+            // marker in the command so its echoed input cannot satisfy wait().
+            let started = format!("wf-sleep-{mark}");
+            self.send(&format!("Write-Output ('wf-sleep-' + '{mark}'); Start-Sleep 60\r"));
+            if !self.wait(|t| t.contains(&started)) {
+                return false;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(200));
             self.send("\x03");
             std::thread::sleep(std::time::Duration::from_millis(500));
-            self.send(&format!("echo {mark}\r"));
-            self.wait(|t| t.matches(mark).count() >= 2)
+            let after = format!("wf-after-{mark}");
+            self.send(&format!("Write-Output ('wf-after-' + '{mark}')\r"));
+            self.wait(|t| t.contains(&after))
         }
     }
     // Leaves nothing running (the shell, its console) for the tests after.
