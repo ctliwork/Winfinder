@@ -485,6 +485,15 @@ await step('terminal tab', async () => {
   await page.keyboard.press('ArrowUp');
   r.history = await until(async () => (await line()).includes('Get-ChildItem -Name'), 5000);
   await page.keyboard.press('Escape');
+  // A folder clicked in the sidebar: the shell goes there, no new tab, the terminal stays in front.
+  const docs = page.locator('#places .place', { hasText: 'Documents' }).first();
+  if (await docs.count()) {
+    const n = (await tabsNow()).length;
+    await docs.click();
+    r.sidebarCd = await wait((t) => /PS .*Documents>\s*$/m.test(t), 8000);
+    r.sidebarTabs = (await tabsNow()).length === n;
+    r.sidebarStays = await page.evaluate(() => document.body.classList.contains('term-mode') && !!document.activeElement?.closest('#terms'));
+  } else r.sidebarCd = 'no Documents in the sidebar';
   await page.keyboard.type('Start-Sleep 60');
   await page.keyboard.press('Enter');
   await sleep(1500);

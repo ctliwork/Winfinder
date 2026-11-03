@@ -504,7 +504,8 @@
   }
 
   async function navigate(dir, opts = {}) {
-    if (state.term) return openTab(dir); // from a terminal tab: the folder opens in a tab of its own
+    // In a terminal tab, a folder chosen (in the sidebar) is where the shell goes; the tab stays.
+    if (state.term) { termCd(state, dir); return true; }
     const { push = true, select = null, colActive = null, animate = true, silent = false } = opts;
     dir = canon(dir);
     const root = canon(opts.root || null);
@@ -1766,7 +1767,7 @@
     if (!api.termOpen) { openTerminal(dir); return; }
     const t = newTabState();
     t.cwd = dir;
-    t.term = { id: ++termSeq, dir, title: '' };
+    t.term = { id: ++termSeq, dir, title: '', shell: prefs.shell || 'auto' };
     tabs.splice(tabs.indexOf(state) + 1, 0, t);
     lastBg = null;
     if (!state.term) state.scroll = content.scrollTop;
@@ -1888,6 +1889,18 @@
     });
     applyTerminalFonts([t]);
     xt.focus();
+  }
+  // Types the command that takes the shell to `dir` (as if typed at its prompt).
+  function termCd(t, dir) {
+    const term = t.term;
+    if (!term?.alive || !dir || dir === HOME || dir.startsWith('shell:')) { term?.xt?.focus(); return; }
+    const cmd = !isWin ? `cd '${dir.replace(/'/g, "'\\''")}'`
+      : term.shell === 'cmd' ? `cd /d "${dir}"`
+        : `Set-Location -LiteralPath '${dir.replace(/'/g, "''")}'`;
+    api.termWrite(term.id, `${cmd}\r`);
+    term.dir = dir;
+    renderTabs();
+    term.xt.focus();
   }
   function fitTerm(t) {
     if (!t?.term?.fit || !t.term.el.classList.contains('on')) return;
@@ -3334,6 +3347,7 @@
     return [sf.query && `「${sf.query}」`, opt('kind', f.kind), opt('size', f.size), opt('date', f.date), `位置：${where}`].filter(Boolean).join('，');
   }
   async function openSmart(sf, { silent = false } = {}) {
+    if (state.term) { termCd(state, sf.root); return true; } // a terminal goes to its folder
     if (!(await navigate(sf.root, { root: sf.root, silent: true }))) return false;
     state.search = { query: sf.query, scope: sf.scope, results: null, busy: false, filters: { ...sf.filters }, smart: sf.id };
     if (silent) return true;
