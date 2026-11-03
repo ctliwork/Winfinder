@@ -485,6 +485,9 @@ await step('terminal tab', async () => {
   await page.keyboard.press('ArrowUp');
   r.history = await until(async () => (await line()).includes('Get-ChildItem -Name'), 5000);
   await page.keyboard.press('Escape');
+  // (the Escape clears the recalled line; wait for that before comparing screens)
+  await until(async () => /PS .*>\s*$/.test(await line()), 3000);
+  await sleep(300);
   // A folder clicked in the sidebar only opens in the tree: no new tab, no
   // command typed, the terminal stays in front with the keyboard.
   const docs = page.locator('#places .place', { hasText: 'Documents' }).first();
