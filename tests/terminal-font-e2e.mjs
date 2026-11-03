@@ -78,18 +78,25 @@ async function openTerminal() {
     return Array.from({ length: xt.buffer.active.length }, (_, i) => xt.buffer.active.getLine(i)?.translateToString(true) || '').some((s) => /PS .*>/.test(s));
   }, null, { timeout: 30000 });
 }
+async function selectTerminal(index) {
+  await page.locator('#tabs .tab[data-tab="' + terminalTabIds[index] + '"]').click();
+  await page.waitForFunction((index) => document.activeElement === window.__fontTestTerms[index].textarea, index);
+  // Let ConPTY/PSReadLine finish the resize redraw before sending a burst of keys.
+  await pause(300);
+}
 async function snapshot() {
   return page.evaluate(() => window.__fontTestTerms.map((xt) => {
     const styles = getComputedStyle(xt.element.querySelector('.xterm-rows'));
     return {
       family: xt.options.fontFamily, size: xt.options.fontSize,
       cssFamily: styles.fontFamily, cssSize: styles.fontSize,
-      cols: xt.cols, rows: xt.rows,
+      cols: xt.cols, rows: xt.rows, windowsPty: xt.options.windowsPty,
       text: Array.from({ length: xt.buffer.active.length }, (_, i) => xt.buffer.active.getLine(i)?.translateToString(true) || '').join('\n'),
     };
   }));
 }
 async function commandOutput(marker, command) {
+  await page.waitForFunction(() => document.activeElement === window.__fontTestTerms.at(-1).textarea);
   await page.keyboard.type(command);
   await page.keyboard.press('Enter');
   await page.waitForFunction((marker) => {
@@ -121,6 +128,8 @@ try {
     assert.equal(t.size, 13);
     assert.ok(t.family.startsWith('"Cascadia Mono"'));
     assert.equal(t.cssSize, '13px');
+    assert.equal(t.windowsPty.backend, 'conpty');
+    assert.ok(t.windowsPty.buildNumber > 0, 'Windows build must reach xterm');
     return { size: t.size, family: t.family, cols: t.cols };
   });
   await check('live font update and terminal refit', async () => {
@@ -151,7 +160,7 @@ try {
     await pause(300);
     ts = await snapshot();
     assert.ok(ts.every((t) => t.size === 16 && t.family.startsWith('"Courier New"')));
-    await page.locator('#tabs .tab[data-tab="' + terminalTabIds[0] + '"]').click();
+    await selectTerminal(0);
     await pause(300);
     const first = (await snapshot())[0];
     assert.equal(first.cssSize, '16px');
@@ -168,7 +177,7 @@ try {
     await settings();
     await setFont('Winfinder Missing Font 123456', 18);
     await closeSettings();
-    await page.locator('#tabs .tab[data-tab="' + terminalTabIds[1] + '"]').click();
+    await selectTerminal(1);
     await commandOutput('fallback-ok', 'Write-Output ("fallback-" + "ok")');
     await settings();
     await setFont('   ', 18);
