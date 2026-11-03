@@ -678,8 +678,14 @@ fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
     #[cfg(all(unix, not(target_os = "macos")))]
     let (platform, material) = ("linux", "none");
 
+    #[cfg(windows)]
+    let windows_build = windows_build();
+    #[cfg(not(windows))]
+    let windows_build = 0u32;
+
     let env = serde_json::json!({
         "platform": platform,
+        "windowsBuild": windows_build,
         "material": material,
         "dir": start_dir,
         "sep": std::path::MAIN_SEPARATOR.to_string(),
@@ -824,16 +830,24 @@ fn snap_layouts(window: tauri::WebviewWindow) {
     let _ = window;
 }
 
-/// Windows 11 (build 22000 on) with snap layouts on the maximize button not turned off.
+/// Actual Windows build, also used by xterm's ConPTY compatibility handling.
 #[cfg(windows)]
-fn snap_layouts_on() -> bool {
+fn windows_build() -> u32 {
     use windows::core::w;
-    use windows::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, RRF_RT_REG_DWORD, RRF_RT_REG_SZ};
+    use windows::Win32::System::Registry::{RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ};
     let mut buf = [0u16; 32];
     let mut size = (buf.len() * 2) as u32;
     let r = unsafe { RegGetValueW(HKEY_LOCAL_MACHINE, w!("SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion"), w!("CurrentBuildNumber"), RRF_RT_REG_SZ, None, Some(buf.as_mut_ptr() as _), Some(&mut size)) };
     let n = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
-    let build: u32 = if r.is_ok() { String::from_utf16_lossy(&buf[..n]).trim().parse().unwrap_or(0) } else { 0 };
+    if r.is_ok() { String::from_utf16_lossy(&buf[..n]).trim().parse().unwrap_or(0) } else { 0 }
+}
+
+/// Windows 11 (build 22000 on) with snap layouts on the maximize button not turned off.
+#[cfg(windows)]
+fn snap_layouts_on() -> bool {
+    use windows::core::w;
+    use windows::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD};
+    let build = windows_build();
     if build < 22000 {
         return false;
     }
