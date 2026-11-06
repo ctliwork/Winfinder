@@ -306,7 +306,18 @@ await step('file operations', async () => {
   r.pasteUndone = !has('新資料夾A', 'inner.txt');
   await page.keyboard.press('Alt+ArrowUp');
   await titleIs('子資料夾');
-  await page.locator('#view .lrow', { hasText: '新資料夾A' }).first().click();
+  const back = page.locator('#view .lrow', { hasText: '新資料夾A' }).first();
+  if (!(await back.waitFor({ timeout: 8000 }).then(() => true, () => false))) {
+    // what the list shows after going back up, and whether a refresh brings it back
+    r.upShown = await names();
+    r.upState = await page.evaluate(() => ({ title: document.title, view: document.querySelector('#view')?.className, rows: document.querySelectorAll('#view .lrow').length }));
+    r.onDisk = fs.readdirSync(sub);
+    desktop('up-missing', { log: true });
+    await page.keyboard.press('F5');
+    await sleep(1500);
+    r.afterRefresh = await names();
+  }
+  await back.click();
   await page.keyboard.press('Delete');
   await sleep(2000);
   r.trashed = !has('新資料夾A');
