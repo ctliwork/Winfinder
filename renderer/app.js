@@ -186,14 +186,19 @@
   }
 
   // Per-folder view and sort, like Explorer and Finder: a folder keeps the
-  // view it was last shown in; others use the defaults.
+  // view it was last shown in (Settings can turn that off); others use the defaults.
   function folderPref(dir = state.cwd) {
-    return prefs.rememberView && dir && dir !== HOME ? prefs.folderViews[norm(dir)] : null;
+    return prefs.rememberView ? folderOwn(dir) : null;
+  }
+  // A folder's own sort, grouping and 資料夾排在前面: always its own, whatever
+  // Settings says of views; folders never set use the defaults.
+  function folderOwn(dir = state.cwd) {
+    return dir && dir !== HOME && !String(dir).startsWith('shell:') ? prefs.folderViews[norm(dir)] : null;
   }
   function curView() { return state.view || prefs.view; }
-  function curSort() { return (!state.search.results && folderPref()?.sort) || prefs.sort; }
+  function curSort() { return (!state.search.results && folderOwn()?.sort) || prefs.sort; }
   // A folder's own sort: each column of the column view is in its folder's.
-  function sortOf(dir) { return folderPref(dir)?.sort || prefs.sort; }
+  function sortOf(dir) { return folderOwn(dir)?.sort || prefs.sort; }
   function rememberFolder(patch, dir = state.cwd) {
     const k = norm(dir);
     const next = { ...prefs.folderViews[k], ...patch };
@@ -212,7 +217,7 @@
   }
   function setSort(sort, dir = sortTarget()) {
     sort = { ...(dir ? sortOf(dir) : curSort()), ...sort }; // keeps the folder's 資料夾排在前面
-    if (dir && folderPref(dir) !== null) rememberFolder({ sort }, dir); else prefs.sort = sort;
+    if (dir && folderOwn(dir) !== null) rememberFolder({ sort }, dir); else prefs.sort = sort;
     savePrefs();
     flipIcons(async () => { computeEntries(); await render(); });
   }
@@ -317,10 +322,10 @@
   // Per folder like the sort: the list and icon views, and each column of the
   // column view, show their items in groups under a header with the count.
   const GROUPS = [['none', '無'], ['kind', '類型'], ['date', '修改日期'], ['created', '建立日期'], ['size', '大小']];
-  function groupFor(dir) { return (dir && folderPref(dir)?.group) || prefs.groupBy || 'none'; }
+  function groupFor(dir) { return (dir && folderOwn(dir)?.group) || prefs.groupBy || 'none'; }
   function curGroup() { return state.search.results ? prefs.groupBy || 'none' : groupFor(state.cwd); }
   function setGroup(group, dir = sortTarget()) {
-    if (dir && folderPref(dir) !== null) rememberFolder({ group }, dir); else prefs.groupBy = group;
+    if (dir && folderOwn(dir) !== null) rememberFolder({ group }, dir); else prefs.groupBy = group;
     savePrefs();
     flipIcons(async () => { computeEntries(); await render(); });
   }
@@ -2784,7 +2789,7 @@
     const cur = dir ? sortOf(dir) : curSort();
     const set = (sort) => setSort(sort, dir);
     const title = state.search.results ? '搜尋結果的排序方式'
-      : dir && folderPref(dir) !== null ? `「${displayName(dir)}」的排序方式` : '所有資料夾的排序方式';
+      : dir && folderOwn(dir) !== null ? `「${displayName(dir)}」的排序方式` : '所有資料夾的排序方式';
     return [
       { label: title, disabled: true },
       ...SORTS.map(([k, l]) => ({
@@ -2796,7 +2801,7 @@
       { label: '降冪（Z→A、新→舊、大→小）', check: cur.dir === -1, action: () => set({ key: cur.key, dir: -1 }) },
       '-',
       // Per folder like the order (Finder has one switch for all, in its settings).
-      { label: '資料夾排在前面', check: cur.foldersFirst ?? prefs.foldersFirst, action: () => (dir && folderPref(dir) !== null
+      { label: '資料夾排在前面', check: cur.foldersFirst ?? prefs.foldersFirst, action: () => (dir && folderOwn(dir) !== null
         ? set({ foldersFirst: !(cur.foldersFirst ?? prefs.foldersFirst) }) : setPref('foldersFirst', !prefs.foldersFirst)) },
       // Grouping, for the same folder (the gallery shows no groups).
       ...(groups && state.cwd !== HOME && viewMode() !== 'gallery' ? ['-', { html: '<div class="mlabel">分組依據</div>' },
@@ -4061,8 +4066,8 @@
         prefs.startup === 'custom' && ['指定的資料夾', null, `<div class="set-path"><input data-pref="startDir" value="${esc(prefs.startDir)}" placeholder="例如 D:\\Projects" spellcheck="false"><button data-act="use-cwd"${state.cwd === HOME ? ' disabled' : ''}>使用目前的資料夾</button></div>`],
         ['新分頁打開', null, sel('newTab', [['home', '常用'], ['current', '目前的資料夾']])],
         ['預設檢視', '沒有記住檢視方式的資料夾使用這個', sel('view', [['icons', '圖像'], ['list', '列表'], ['columns', '直欄'], ['gallery', '圖庫']])],
-        ['每個資料夾記住自己的檢視方式', `改變檢視或排序只套用到那個資料夾（目前記住 ${Object.keys(prefs.folderViews).length} 個）`, sw('rememberView')],
-        Object.keys(prefs.folderViews).length && ['', null, '<button data-act="reset-views">全部改回預設檢視</button>'],
+        ['每個資料夾記住自己的檢視方式', '圖像／列表／直欄／圖庫只套用到那個資料夾。排序、分組與「資料夾排在前面」一律每個資料夾各自記住', sw('rememberView')],
+        Object.keys(prefs.folderViews).length && ['', `目前 ${Object.keys(prefs.folderViews).length} 個資料夾有自己的設定`, '<button data-act="reset-views">全部改回預設</button>'],
         ['丟到資源回收筒前先確認', null, sw('confirmTrash')],
         api.checkUpdate && ['自動檢查更新', '啟動後在背景檢查一次', sw('autoUpdate')],
         api.setKeepRunning && ['關閉視窗後在背景執行', '按 × 只把視窗藏起來，程式留在通知區域，再打開就不用等待；要完全結束請在通知區域的圖示上按右鍵 →「結束」', sw('keepRunning')],
@@ -4163,7 +4168,7 @@
       const a = ev.target.closest('[data-act]')?.dataset.act;
       if (a === 'close') closeDialog();
       else if (a === 'use-cwd') { setPref('startDir', state.cwd); renderSettings(w); }
-      else if (a === 'reset-views') { prefs.folderViews = {}; savePrefs(); state.view = null; rerenderItems(); renderSettings(w); toast('所有資料夾已改回預設檢視'); }
+      else if (a === 'reset-views') { prefs.folderViews = {}; savePrefs(); state.view = null; rerenderItems(); renderSettings(w); toast('所有資料夾已改回預設的檢視、排序與分組'); }
       else if (a === 'reset-cols') { prefs.colWidths = {}; prefs.colW = 220; savePrefs(); rerenderItems(); renderSettings(w); toast('已還原所有直欄寬度'); }
       else if (a === 'check-update') checkUpdates(true);
       else if (a === 'reset-all') {

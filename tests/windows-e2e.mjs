@@ -324,7 +324,8 @@ await step('file operations', async () => {
 // sorts only that column, either way, with or without folders first.
 await step('sort menu', async () => {
   await backToTop();
-  await withPrefs({ rememberView: true, folderViews: {} });
+  // with folders' views not remembered: sort and grouping are each folder's all the same
+  await withPrefs({ rememberView: false, folderViews: {} });
   const col = (i) => page.$$eval('.col', (cs, i) => [...(cs[i]?.querySelectorAll('.crow .nm') || [])].map((e) => e.textContent), i);
   const pick = async (re) => { await page.locator('#menu .mi', { hasText: re }).first().click(); await sleep(700); };
   await page.locator('.col').first().locator('.crow', { hasText: '子資料夾' }).first().click();
