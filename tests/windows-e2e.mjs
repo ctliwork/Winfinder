@@ -361,6 +361,32 @@ await step('sort menu', async () => {
   return { title, before, desc, mixed, after, rootUnchanged: JSON.stringify(root) === JSON.stringify(rootAfter) };
 });
 
+// Column view: each column's header sorts that folder (a second click reverses
+// it), and the column 新增資料夾 goes into is tinted.
+await step('column header sort', async () => {
+  await backToTop();
+  await withPrefs({ rememberView: false, folderViews: {} });
+  const col = (i) => page.$$eval('.col', (cs, i) => [...(cs[i]?.querySelectorAll('.crow .nm') || [])].map((e) => e.textContent), i);
+  const heads = () => page.$$eval('.colw', (ws) => ws.map((w) => (w.classList.contains('active') ? '*' : '') + w.querySelector('.chead')?.textContent));
+  await page.locator('.col').first().locator('.crow', { hasText: '子資料夾' }).first().click();
+  await sleep(700);
+  const root = await col(0);
+  const before = await col(1);
+  const headsBefore = await heads();
+  await page.locator('.colw').nth(1).locator('.chead button', { hasText: '名稱' }).click();
+  await sleep(700);
+  const desc = await col(1);
+  await page.locator('.colw').nth(1).locator('.chead button', { hasText: '名稱' }).click();
+  await sleep(700);
+  const asc = await col(1);
+  await page.locator('.col').nth(1).locator('.crow', { hasText: 'inner.txt' }).first().click();
+  await sleep(500);
+  const headsAfter = await heads();
+  const rootAfter = await col(0);
+  await withPrefs({ rememberView: false, folderViews: {} });
+  return { headsBefore, headsAfter, before, desc, asc, reversed: JSON.stringify(desc) !== JSON.stringify(before), back: JSON.stringify(asc) === JSON.stringify(before), rootUnchanged: JSON.stringify(root) === JSON.stringify(rootAfter) };
+});
+
 // Grouping (Explorer's 分組依據) from the sort menu: the column view's column
 // gets a header per kind; the list view too, and clicking one selects its group.
 await step('group by', async () => {

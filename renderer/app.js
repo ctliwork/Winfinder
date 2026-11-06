@@ -1135,6 +1135,7 @@
   // Updates the column DOM in place: unchanged columns are kept as-is (scroll
   // position, thumbnails, no entry animation), so selecting a file no longer
   // redraws and re-animates every column.
+  const COL_SORTS = [['name', '名稱'], ['date', '日期'], ['size', '大小'], ['kind', '類型']];
   async function renderColumns() {
     const chain = ancestors(state.cwd, state.colRoot);
     await Promise.all(chain.map((d) => listDir(d)));
@@ -1165,12 +1166,24 @@
         w = document.createElement('div');
         w.className = 'colw enter'; // fades in once (styles.css)
         w.dataset.dir = dir;
-        w.innerHTML = `<div class="col" data-dir="${esc(dir)}"></div><div class="col-grip" title="拖曳調整欄寬（Alt：全部欄），按兩下自動調整"></div>`;
+        w.innerHTML = `<div class="chead"></div><div class="col" data-dir="${esc(dir)}"></div><div class="col-grip" title="拖曳調整欄寬（Alt：全部欄），按兩下自動調整"></div>`;
         view.insertBefore(w, preview);
         wraps[j] = w;
       }
       w.style.width = `${colWidth(dir)}px`;
-      const col = w.firstElementChild;
+      // The folder 新增資料夾 and paste go into (the last column: the
+      // selected folder's contents, or the folder of the selected files) is tinted.
+      w.classList.toggle('active', j === n);
+      // Its header sorts this folder only, like Explorer's: a click sorts by
+      // that, a second click turns the order around.
+      const so = sortOf(dir);
+      const headKey = `${so.key}|${so.dir}`;
+      const head = w.querySelector('.chead');
+      if (head._key !== headKey) {
+        head._key = headKey;
+        head.innerHTML = COL_SORTS.map(([k, label]) => `<button data-csort="${k}" class="${so.key === k ? 'sorted' : ''}" title="依${label}排序${so.key === k ? `（再按一下改為${so.dir > 0 ? '遞減' : '遞增'}）` : ''}">${label}${so.key === k ? `<span class="arrow">${so.dir > 0 ? '▲' : '▼'}</span>` : ''}</button>`).join('');
+      }
+      const col = w.querySelector('.col');
       const rowHtml = (i) => `<div class="${classes[i]}" data-col="${j}" data-i="${i}" draggable="true">
           ${iconHtml(list[i], 36)}<span class="nm">${esc(shownName(list[i]))}</span>${cloudBadge(list[i])}
           ${list[i].isDir ? '<svg class="chev" viewBox="0 0 10 10"><path d="M3.5 2l3 3-3 3"/></svg>' : ''}
@@ -1272,7 +1285,7 @@
 
   // Width that fits the longest name in a column.
   function fitColumn(w) {
-    const col = w.firstElementChild;
+    const col = w.querySelector('.col');
     const nm = $('.crow .nm', col);
     if (!nm) return COL_MIN;
     const ctx = (fitColumn.ctx ||= document.createElement('canvas').getContext('2d'));
@@ -2148,7 +2161,7 @@
     closeMenu();
     G.dragging = null;
     const it = itemFromEl(ev.target);
-    if (ev.target.closest('.lhead')) return;
+    if (ev.target.closest('.lhead, .chead')) return;
     if (!it?.entry) {
       cancelSlowRename();
       if (ev.target.closest('.g-stage, .col-preview, .g-caption')) return;
@@ -2190,6 +2203,7 @@
     if (pendingSingle) { state.anchor = pendingSingle; setSelection([pendingSingle]); pendingSingle = null; }
   });
   content.addEventListener('dblclick', (ev) => {
+    if (ev.target.closest('.chead')) return;
     const it = itemFromEl(ev.target);
     if (it?.col != null || (inColumnsMode() && ev.target.closest('.colw'))) {
       // Column view (like Finder): a folder already opened on the first click;
@@ -2203,6 +2217,14 @@
   content.addEventListener('click', (ev) => {
     const gh = ev.target.closest('.lgroup, .ggroup');
     if (gh && !ev.ctrlKey && !ev.shiftKey) { selectGroup(Number(gh.dataset.g)); return; }
+    const ch = ev.target.closest('.chead [data-csort]');
+    if (ch) {
+      const dir = ch.closest('.colw').dataset.dir;
+      const k = ch.dataset.csort;
+      const cur = sortOf(dir);
+      setSort(cur.key === k ? { key: k, dir: -cur.dir } : { key: k, dir: k === 'name' || k === 'kind' ? 1 : -1 }, dir);
+      return;
+    }
     const h = ev.target.closest('.lhead [data-sort]');
     if (!h || ev.target.closest('.lgrip')) return;
     const k = h.dataset.sort;
