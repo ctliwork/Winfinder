@@ -2450,7 +2450,17 @@
     undoStack.push({ label, run });
     if (undoStack.length > 50) undoStack.shift();
   }
+  // File actions still running: their undo isn't on the stack yet, so Ctrl+Z
+  // waits for them (else it would put back the action before: Ctrl+Z while a
+  // paste was still copying renamed the new folder back to 未命名資料夾).
+  const working = new Set();
+  function track(p) {
+    working.add(p);
+    p.finally(() => working.delete(p)).catch(() => {});
+    return p;
+  }
   async function undo() {
+    while (working.size) await Promise.allSettled([...working]);
     const u = undoStack.pop();
     if (!u) { toast('沒有可以復原的動作'); return; }
     let ok = false;
@@ -2461,7 +2471,8 @@
   }
   const trashUndo = (paths) => async () => (await api.trash(paths)).length === 0;
 
-  async function transfer(op, paths, dest) {
+  function transfer(op, paths, dest) { return track(transferNow(op, paths, dest)); }
+  async function transferNow(op, paths, dest) {
     // Name clashes: ask once, like Explorer (duplicates in the same folder never ask).
     let conflict = 'keep';
     const incoming = paths.filter((p) => norm(P.dirname(p)) !== norm(dest));
@@ -2506,7 +2517,8 @@
   }
 
   // ---------- file actions ----------
-  async function newFolder() {
+  function newFolder() { return track(newFolderNow()); }
+  async function newFolderNow() {
     if (state.search.results || state.cwd === HOME) return;
     const res = await api.mkdir(state.cwd);
     if (!res.ok) { toast(`無法新增資料夾：${errText(res.error)}`); return; }
@@ -2581,7 +2593,8 @@
     await refresh(false);
   }
 
-  async function trashSelected() {
+  function trashSelected() { return track(trashSelectedNow()); }
+  async function trashSelectedNow() {
     const items = selectedEntries().filter((e) => !isVirtual(e));
     if (!items.length) return;
     if (prefs.confirmTrash && !(await confirmDialog(
@@ -2689,10 +2702,13 @@
       el.draggable = true;
       const name = input.value.trim();
       if (commit && name && name !== e.name) {
-        const res = await api.rename(e.path, name);
+        const renamed = track(api.rename(e.path, name).then((res) => {
+          if (res.ok) pushUndo('重新命名', async () => (await api.rename(res.path, e.name)).ok);
+          return res;
+        }));
+        const res = await renamed;
         if (!res.ok) toast(`無法重新命名：${errText(res.error)}`);
         else {
-          pushUndo('重新命名', async () => (await api.rename(res.path, e.name)).ok);
           await listDir(P.dirname(e.path), true);
           if (inColumnsMode() && e.isDir && isUnder(state.cwd, e.path)) { await navigate(res.path, { push: false, colActive: state.colActive }); return; }
           state.sel = new Set([res.path]); state.focus = res.path; state.anchor = res.path;
