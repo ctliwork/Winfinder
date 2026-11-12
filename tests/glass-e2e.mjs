@@ -125,7 +125,7 @@ try {
     }, names);
     assert.deepEqual(await selectedNames(), names);
   };
-  const selectA = () => page.locator('.crow', { hasText: /^A[.]txt$/ }).first().click();
+  const selectA = () => page.locator('.crow .nm', { hasText: /^A[.]txt$/ }).first().click();
   await selectA();
   await page.keyboard.press('Shift+ArrowDown');
   await expectSelection(['A.txt', 'B.txt']);
@@ -146,7 +146,7 @@ try {
   await expectSelection(['Readme.txt']);
   // Starting in an ancestor column, then shrinking to one folder, must not
   // reopen that folder or discard the anchor.
-  await page.locator('.crow', { hasText: /^01-folder$/ }).first().click();
+  await page.locator('.crow .nm', { hasText: /^01-folder$/ }).first().click();
   await page.waitForFunction(() => document.querySelectorAll('.col').length === 2);
   await page.keyboard.press('Shift+ArrowDown');
   await expectSelection(['01-folder', '02-folder']);
@@ -155,7 +155,7 @@ try {
   await expectSelection(['01-folder']);
   assert.equal(await page.locator('.col').count(), 1);
   // Queue key repeats while navigating out of an ancestor column.
-  await page.locator('.crow', { hasText: /^01-folder$/ }).first().click();
+  await page.locator('.crow .nm', { hasText: /^01-folder$/ }).first().click();
   await page.waitForFunction(() => document.querySelectorAll('.col').length === 2);
   await page.keyboard.down('Shift');
   for (let i = 0; i < 2; i++) await page.keyboard.press('ArrowDown');
