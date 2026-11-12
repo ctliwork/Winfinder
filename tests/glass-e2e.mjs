@@ -28,7 +28,13 @@ try {
     } catch { await sleep(500); }
   }
   assert.ok(browser, 'WebView2 DevTools connection');
-  const page = browser.contexts()[0].pages().find((p) => !p.url().startsWith('devtools'));
+  // The DevTools port can be ready before WebView2 creates its first target.
+  let page;
+  for (let i = 0; i < 120; i++) {
+    page = browser.contexts().flatMap((c) => c.pages()).find((p) => !p.url().startsWith('devtools'));
+    if (page) break;
+    await sleep(250);
+  }
   assert.ok(page, 'app page');
   page.on('pageerror', (e) => errors.push(String(e)));
   await page.waitForSelector('#app');
