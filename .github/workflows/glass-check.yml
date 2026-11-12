@@ -1,0 +1,52 @@
+name: Glass interface check
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'renderer/styles.css'
+      - 'renderer/early.js'
+      - 'src-tauri/src/lib.rs'
+      - 'tests/glass-e2e.mjs'
+      - '.github/workflows/glass-check.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  interface:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci
+      - name: JavaScript syntax
+        run: |
+          node --check renderer/early.js
+          node --check renderer/app.js
+          node --check tests/glass-e2e.mjs
+      - name: Rust tests
+        working-directory: src-tauri
+        run: cargo test --locked
+      - name: Build Windows app
+        run: npx tauri build --debug --no-bundle
+      - name: Glass and layout smoke test
+        timeout-minutes: 5
+        run: |
+          npm install --no-save playwright-core@1.58.2
+          node tests/glass-e2e.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: glass-interface
+          path: e2e-glass

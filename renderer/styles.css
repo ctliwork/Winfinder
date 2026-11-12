@@ -6,10 +6,13 @@
 
   --text: #1d1d1f;
   --text2: #6e6e73;
-  --text3: #a1a1a6;
-  --content-bg: rgba(255, 255, 255, 0.94);
-  --glass: rgba(242, 242, 247, 0.66);
-  --glass-strong: rgba(250, 250, 252, 0.86);
+  --text3: #737982;
+  --content-bg: rgba(255, 255, 255, 0.97);
+  --chrome: rgba(247, 249, 253, 0.64);
+  --surface-edge: rgba(255, 255, 255, 0.78);
+  --panel-shadow: 0 8px 32px rgba(33, 45, 72, 0.06), inset 0 1px 0 var(--surface-edge);
+  --glass: rgba(241, 245, 252, 0.55);
+  --glass-strong: rgba(252, 253, 255, 0.88);
   --glass-border: rgba(255, 255, 255, 0.7);
   --hairline: rgba(0, 0, 0, 0.08);
   --capsule: rgba(255, 255, 255, 0.72);
@@ -29,9 +32,12 @@
   :root:not([data-theme="light"]) {
     --text: #f5f5f7;
     --text2: #a1a1a6;
-    --text3: #6e6e73;
-    --content-bg: rgba(30, 30, 32, 0.92);
-    --glass: rgba(44, 44, 48, 0.6);
+    --text3: #989da8;
+    --content-bg: rgba(28, 30, 35, 0.97);
+    --chrome: rgba(33, 37, 46, 0.58);
+    --surface-edge: rgba(255, 255, 255, 0.13);
+    --panel-shadow: 0 8px 32px rgba(0, 0, 0, 0.16), inset 0 1px 0 var(--surface-edge);
+    --glass: rgba(36, 41, 52, 0.52);
     --glass-strong: rgba(40, 40, 44, 0.88);
     --glass-border: rgba(255, 255, 255, 0.09);
     --hairline: rgba(255, 255, 255, 0.08);
@@ -52,9 +58,12 @@
 :root[data-theme="dark"] {
   --text: #f5f5f7;
   --text2: #a1a1a6;
-  --text3: #6e6e73;
-  --content-bg: rgba(30, 30, 32, 0.92);
-  --glass: rgba(44, 44, 48, 0.6);
+  --text3: #989da8;
+  --content-bg: rgba(28, 30, 35, 0.97);
+    --chrome: rgba(33, 37, 46, 0.58);
+    --surface-edge: rgba(255, 255, 255, 0.13);
+    --panel-shadow: 0 8px 32px rgba(0, 0, 0, 0.16), inset 0 1px 0 var(--surface-edge);
+  --glass: rgba(36, 41, 52, 0.52);
   --glass-strong: rgba(40, 40, 44, 0.88);
   --glass-border: rgba(255, 255, 255, 0.09);
   --hairline: rgba(255, 255, 255, 0.08);
@@ -81,8 +90,15 @@ body {
   color: var(--text);
   user-select: none;
   -webkit-font-smoothing: antialiased;
-  /* Opaque window: the same colour the native window starts with (lib.rs). */
-  background: var(--side-solid);
+  /* The opaque fallback keeps the same light/dark glass hierarchy. */
+  background:
+    radial-gradient(ellipse at 0 0, rgba(var(--accent-rgb), 0.13), transparent 58%),
+    radial-gradient(ellipse at 100% 100%, rgba(167, 139, 250, 0.10), transparent 62%),
+    var(--side-solid);
+}
+/* Set in early.js before the first paint; the native compositor blurs the desktop. */
+:root[data-material="acrylic"] body {
+  background: transparent;
 }
 button { font: inherit; color: inherit; border: 0; background: none; padding: 0; cursor: default; }
 svg { display: block; }
@@ -102,7 +118,7 @@ svg { display: block; }
   flex: none;
   margin: 8px 0 8px 8px;
   border-radius: 18px;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  box-shadow: var(--panel-shadow);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -139,12 +155,12 @@ body.sidebar-hidden #sidebar { width: 0; margin-left: 0; opacity: 0; border-widt
 .place.home-row { margin-bottom: 2px; }
 .place {
   display: flex; align-items: center; gap: 6px;
-  height: 28px; padding: 0 8px 0 calc(2px + var(--lvl, 0) * 14px); border-radius: 8px;
+  height: 30px; padding: 0 8px 0 calc(2px + var(--lvl, 0) * 14px); border-radius: 9px;
   color: var(--text); white-space: nowrap; overflow: hidden;
   transition: background 0.12s;
 }
 .place:hover { background: var(--hover); }
-.place.active { background: var(--sel-muted); font-weight: 500; }
+.place.active { background: rgba(var(--accent-rgb), 0.13); box-shadow: inset 0 0 0 0.5px rgba(var(--accent-rgb), 0.12); font-weight: 600; }
 .place.drop-target { background: rgba(var(--accent-rgb), 0.18); box-shadow: inset 0 0 0 1.5px var(--accent); }
 .place span { overflow: hidden; text-overflow: ellipsis; }
 .sico { width: 18px; height: 18px; flex: none; fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
@@ -157,27 +173,30 @@ body.sidebar-hidden #sidebar { width: 0; margin-left: 0; opacity: 0; border-widt
 #main {
   flex: 1; min-width: 0;
   display: flex; flex-direction: column;
-  background: var(--content-bg);
+  background: transparent;
   position: relative;
+  margin: 8px 8px 8px 0;
+  border-radius: 18px;
+  overflow: hidden;
+  border: 0.5px solid var(--glass-border);
+  box-shadow: var(--panel-shadow);
 }
-body.material-none #main { border-radius: 0; }
 
 #panes { flex: 1; min-height: 0; display: flex; }
 #pane1 { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
 
 /* ---------- tabs & caption ---------- */
 #tabbar {
-  height: 42px; flex: none; display: flex; align-items: flex-end;
-  padding-left: 8px; background: rgba(0, 0, 0, 0.08);
+  height: 46px; flex: none; display: flex; align-items: center;
+  padding-left: 8px; background: var(--chrome);
+  backdrop-filter: blur(28px) saturate(150%);
   -webkit-app-region: drag;
 }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) #tabbar { background: rgba(0, 0, 0, 0.4); } }
-:root[data-theme="dark"] #tabbar { background: rgba(0, 0, 0, 0.4); }
-#tabs { display: flex; align-items: flex-end; min-width: 0; height: 100%; overflow: hidden; }
+#tabs { display: flex; align-items: center; gap: 4px; min-width: 0; height: 100%; overflow: hidden; }
 .tab {
-  position: relative; height: 34px; flex: 0 1 210px; min-width: 96px;
+  position: relative; height: 30px; flex: 0 1 210px; min-width: 96px;
   display: flex; align-items: center; gap: 7px; padding: 0 14px;
-  border-radius: 10px 10px 0 0; color: var(--text2); font-size: 12.5px; white-space: nowrap;
+  border-radius: 9px; color: var(--text2); font-size: 12.5px; white-space: nowrap;
   -webkit-app-region: no-drag; transition: background 0.15s, color 0.15s;
 }
 .tab.new { animation: tabIn 0.22s cubic-bezier(.2, .8, .2, 1); }
@@ -185,31 +204,22 @@ body.material-none #main { border-radius: 0; }
 .tab span { overflow: hidden; text-overflow: ellipsis; }
 .tab .ico { width: 17px; height: 15px; flex: none; }
 .tab:hover { background: var(--hover); color: var(--text); }
-/* Background tabs sit back on the darker strip; the one in use joins the page,
-   in bold, underlined in the accent colour. */
+/* A quiet floating tab, with a fine glass edge instead of a coloured underline. */
 .tab:not(.active) .ico, .tab:not(.active) img.fico { opacity: 0.7; }
 .tab.active {
-  color: var(--text); font-weight: 600; box-shadow: 0.5px 0 0 var(--hairline), -0.5px 0 0 var(--hairline);
-  /* a blue underline along its bottom edge */
-  background: linear-gradient(var(--accent), var(--accent)) bottom center / calc(100% - 16px) 2.5px no-repeat, var(--content-bg);
-}
-.tab.active::before, .tab.active::after {
-  content: ""; position: absolute; bottom: 0; width: 10px; height: 10px; pointer-events: none;
-}
-.tab.active::before { left: -10px; background: radial-gradient(circle at 0 0, transparent 9.5px, var(--content-bg) 10px); }
-.tab.active::after { right: -10px; background: radial-gradient(circle at 100% 0, transparent 9.5px, var(--content-bg) 10px); }
-.tab:not(.active) + .tab:not(.active)::before {
-  content: ""; position: absolute; left: 0; top: 10px; bottom: 10px; width: 1px; background: var(--hairline);
+  color: var(--text); font-weight: 600;
+  background: var(--capsule);
+  box-shadow: var(--shadow-sm), inset 0 1px 0 var(--surface-edge);
 }
 .tab.dragging { opacity: 0.6; }
 .tab-new {
-  width: 30px; height: 30px; margin: 0 0 3px 6px; border-radius: 8px; flex: none;
+  width: 30px; height: 30px; margin: 0 0 0 6px; border-radius: 8px; flex: none;
   display: grid; place-items: center; color: var(--text2); -webkit-app-region: no-drag;
 }
 .tab-new:hover { background: var(--hover); color: var(--text); }
 .tab-new svg { width: 14px; height: 14px; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; }
 .tb-drag { flex: 1; align-self: stretch; }
-.caption { display: flex; align-self: flex-start; height: 42px; -webkit-app-region: no-drag; }
+.caption { display: flex; align-self: center; height: 42px; -webkit-app-region: no-drag; }
 .cap { width: 46px; height: 42px; display: grid; place-items: center; color: var(--text); transition: background 0.1s; }
 .cap svg { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 1; }
 /* caption-idle: the window was hidden or minimized from these buttons; the
@@ -227,6 +237,8 @@ body.blurred .cap { color: var(--text3); }
   height: 54px; flex: none;
   display: flex; align-items: center; gap: 10px;
   padding: 0 14px 0 12px;
+  background: var(--chrome);
+  backdrop-filter: blur(28px) saturate(150%);
   -webkit-app-region: drag;
   border-bottom: 0.5px solid var(--hairline);
 }
@@ -241,7 +253,7 @@ body.blurred .cap { color: var(--text3); }
   display: flex; align-items: center; height: 34px; padding: 2px;
   border-radius: 999px;
   background: var(--capsule);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-sm), inset 0 1px 0 var(--surface-edge);
   position: relative;
 }
 .tb {
@@ -256,13 +268,13 @@ body.blurred .cap { color: var(--text3); }
 .tb svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 .nav .tb { width: 32px; }
 .seg .tb { width: 38px; }
-.seg .tb.active { color: #fff; }
+.seg .tb.active { color: var(--accent); }
 .seg .tb.active:hover { background: transparent; }
 .seg-pill {
   position: absolute; top: 2px; left: 2px; height: 30px; width: 38px;
   border-radius: 999px;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 82%, white), var(--accent));
-  box-shadow: 0 2px 8px rgba(var(--accent-rgb), 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  background: rgba(var(--accent-rgb), 0.13);
+  box-shadow: inset 0 0 0 0.5px rgba(var(--accent-rgb), 0.12);
   transition: transform 0.32s cubic-bezier(.3, 1.4, .5, 1);
 }
 
@@ -295,7 +307,7 @@ body.blurred .cap { color: var(--text3); }
 .chip.active { background: var(--accent); color: #fff; }
 #search-status { margin-left: auto; color: var(--text3); }
 
-#body { flex: 1; min-height: 0; display: flex; }
+#body { flex: 1; min-height: 0; display: flex; background: var(--content-bg); }
 #content { flex: 1; min-width: 0; overflow: auto; position: relative; outline: none; }
 #pane-resizer, #preview-pane { display: none; }
 body.pane-open #pane-resizer { display: block; width: 5px; margin-right: -5px; cursor: col-resize; position: relative; z-index: 3; flex: none; }
@@ -862,8 +874,31 @@ img.panning, video.panning { cursor: grabbing; transition: none; }
 .cp-media .ql-info > .pv-name, .cp-media .ql-info > .pv-kind { display: none; } /* shown below the preview */
 
 
-/* Solid sidebar (no glass): nothing in the window is see-through. */
-#sidebar { background: var(--side-solid); backdrop-filter: none; border-color: var(--hairline); }
+/* Chrome alone uses translucency; text-heavy content keeps an almost opaque surface. */
+#pathbar, #statusbar {
+  background: var(--chrome);
+  backdrop-filter: blur(24px) saturate(150%);
+}
+#menu, #dlg-window, #ql-window, #update, #progress {
+  border: 0.5px solid var(--glass-border);
+}
+#menu { box-shadow: var(--shadow-lg), inset 0 1px 0 var(--surface-edge); }
+button:focus-visible, .place:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+/* Maximise cleanly to the screen edges without losing the native caption buttons. */
+body.maximized #main { margin-top: 0; margin-right: 0; margin-bottom: 0; border-radius: 0; }
+body.maximized #sidebar { margin-top: 0; margin-bottom: 0; border-radius: 0; }
+@media (prefers-reduced-transparency: reduce), (forced-colors: active) {
+  :root[data-material="acrylic"] body { background: var(--side-solid); }
+  #sidebar, #tabbar, #toolbar, #pathbar, #statusbar,
+  #menu, #dlg-window, #ql-window, #update, #progress { background: var(--solid); backdrop-filter: none; }
+  #body { background: var(--solid); }
+}
+@media (forced-colors: active) {
+  .tab.active, .place.active { outline: 1px solid Highlight; outline-offset: -1px; }
+}
 
 /* spring-loaded folders: a soft pulse while waiting, a double blink on open */
 .springing { animation: springWait 0.7s ease-in-out; }

@@ -1,6 +1,8 @@
 // Runs in <head>, before the first paint: applies the saved theme and sidebar
 // width so the first frame already looks right.
 (() => {
+  const env = window.__finderEnv || Object.fromEntries(new URLSearchParams(location.search));
+  document.documentElement.dataset.material = env.material || 'none';
   try {
     // Saved under the app's earlier name (finder-win) before: move it over once.
     const old = localStorage.getItem('finder-win:prefs');

@@ -669,19 +669,19 @@ fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
     let start_dir = dir_arg(&args);
     let background = args.iter().any(|a| a == BACKGROUND_ARG);
 
-    // Opaque on every platform: a transparent (Mica) window can show white
-    // for a moment at startup while its layers catch up.
-    #[cfg(windows)]
-    let (platform, material) = ("win32", "none");
-    #[cfg(target_os = "macos")]
-    let (platform, material) = ("darwin", "none");
-    #[cfg(all(unix, not(target_os = "macos")))]
-    let (platform, material) = ("linux", "none");
-
     #[cfg(windows)]
     let windows_build = windows_build();
     #[cfg(not(windows))]
     let windows_build = 0u32;
+
+    // Native Acrylic on Windows 11 22H2+. Older builds use the opaque glass
+    // palette: Acrylic on Windows 10 / Windows 11 21H2 stalls window dragging.
+    #[cfg(windows)]
+    let (platform, material) = ("win32", if windows_build >= 22621 { "acrylic" } else { "none" });
+    #[cfg(target_os = "macos")]
+    let (platform, material) = ("darwin", "none");
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let (platform, material) = ("linux", "none");
 
     let env = serde_json::json!({
         "platform": platform,
@@ -705,6 +705,14 @@ fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
     #[cfg(windows)]
     {
         builder = builder.shadow(true);
+        if material == "acrylic" {
+            builder = builder
+                .transparent(true)
+                .no_redirection_bitmap(true)
+                .effects(tauri::window::EffectsBuilder::new()
+                    .effect(tauri::window::Effect::Acrylic)
+                    .build());
+        }
     }
     // The Windows end-to-end test (tests/windows-e2e.mjs) drives a debug build
     // through WebView2's DevTools port; release builds never open one.
@@ -713,14 +721,16 @@ fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
         // wry's own arguments, which these replace, plus the port.
         builder = builder.additional_browser_args(&format!("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --remote-debugging-port={port}"));
     }
-    // The window and the webview start out in the page's own background colour
-    // (body / --side-solid in styles.css), so the first frame already matches.
+    // The compositor supplies the glass background. Opaque fallback windows
+    // start in the saved palette, avoiding a white first frame in dark mode.
     let dark = match saved_theme(app) {
         Some(tauri::Theme::Dark) => true,
         Some(tauri::Theme::Light) => false,
         _ => system_dark(),
     };
-    builder = builder.background_color(if dark {
+    builder = builder.background_color(if material == "acrylic" {
+        tauri::window::Color(0, 0, 0, 0)
+    } else if dark {
         tauri::window::Color(0x26, 0x27, 0x2b, 0xff)
     } else {
         tauri::window::Color(0xee, 0xf0, 0xf5, 0xff)
