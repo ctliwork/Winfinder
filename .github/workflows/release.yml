@@ -3,11 +3,10 @@ name: Release
 # Normally manual (Actions tab → Release → Run workflow), to save Actions minutes.
 # Each run publishes v0.3.<run number>; installed apps pick it up through the updater.
 on:
-  # One-time glass UI release authorized by the owner; only attempt 2 of this validated run.
-  workflow_run:
-    workflows: ["Glass interface check"]
-    types: [completed]
+  # One-time owner-authorized publication. Removed again after the release succeeds.
+  push:
     branches: [main]
+    paths: ['.github/workflows/release.yml']
   workflow_dispatch:
     inputs:
       notes:
@@ -20,14 +19,20 @@ permissions:
 
 jobs:
   windows:
-    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.id == 43139348486 && github.event.workflow_run.run_attempt == 2 && github.event.workflow_run.conclusion == 'success') }}
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.event.head_commit.message == 'release: publish validated frosted glass interface') }}
     runs-on: windows-latest
     env:
       ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      VALIDATED_SHA: "99b8611a5ff8bdec88786d49ff43385150ecc238"
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Verify validated application source
+        if: github.event_name == 'push'
+        shell: bash
+        run: git diff --exit-code "$VALIDATED_SHA" "$GITHUB_SHA" -- renderer src-tauri package.json package-lock.json main.js preload.js
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -35,6 +40,7 @@ jobs:
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          cache-on-failure: true
       - run: npm ci
 
       - name: Rust tests on Windows
@@ -55,10 +61,10 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         with:
-          releaseCommitish: ${{ github.event.workflow_run.head_sha || github.sha }}
+          releaseCommitish: ${{ github.sha }}
           tagName: v__VERSION__
           releaseName: Winfinder v__VERSION__
-          releaseBody: ${{ inputs.notes || (github.event_name == 'workflow_run' && '更新為 macOS 風格霧面玻璃介面：半透明側欄與工具列、浮起的圓角分頁、柔和陰影與細緻邊框。Windows 11 22H2 以上使用原生 Acrylic 背景模糊，較舊版本使用相同風格的實色底色。支援深淺色與降低透明度／高對比模式，檔案內容區保持清晰。已通過 34 項 Rust 測試與 Windows 實際介面、導覽、預覽及分頁檢查。') || '下載 Winfinder_x64-setup.exe 安裝。已安裝的版本會自動提示更新。' }}
+          releaseBody: ${{ inputs.notes || (github.event_name == 'push' && '更新為 macOS 風格霧面玻璃介面：半透明側欄與工具列、浮起的圓角分頁、柔和陰影與細緻邊框。Windows 11 22H2 以上使用原生 Acrylic 背景模糊，較舊版本使用相同風格的實色底色。支援深淺色與降低透明度／高對比模式，檔案內容區保持清晰。已通過 34 項 Rust 測試與 Windows 實際介面、導覽、預覽及分頁檢查。') || '下載 Winfinder_x64-setup.exe 安裝。已安裝的版本會自動提示更新。' }}
           releaseDraft: false
           prerelease: false
           includeUpdaterJson: true
