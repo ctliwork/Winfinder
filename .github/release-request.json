@@ -1,6 +1,6 @@
 {
-  "request_id": "2026-11-12-glass-shift-selection",
-  "validation_run_id": 43148061546,
-  "validated_sha": "3cbdefab8ef30fc401d319fba4b348cfded0e8f6",
-  "notes": "更新為 macOS 風格霧面玻璃介面：半透明側欄與工具列、圓角分頁、柔和陰影與細緻邊框；支援深淺色及降低透明度／高對比模式。Windows 11 22H2 以上使用原生 Acrylic 背景模糊。修正直欄檢視 Shift＋↑／↓ 多選，支援範圍擴大、縮小、反向延伸與按鍵連發，選取縮至單一資料夾時不會誤開資料夾。已通過 34 項 Rust 測試及 Windows 實際介面與多選操作檢查。"
+  "request_id": "2026-11-12-immersive-black",
+  "validation_run_id": 43152849651,
+  "validated_sha": "b4c1d803376f7547ea14e0ebe147dfdb7c2bbb15",
+  "notes": "深色模式改為更沉浸的近黑配色：壓暗檔案區、側欄、工具列、選單與分頁按鈕，減少灰白色塊、環境漸層及分隔線的干擾，保留檔名與操作狀態的閱讀對比。原生 Acrylic 玻璃效果會跟隨 Windows「透明效果」設定。保留 Shift＋方向鍵多選修正，並已通過 Windows 深淺色、窄視窗及多選操作檢查。"
 }
