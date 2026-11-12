@@ -125,8 +125,7 @@ try {
     }, names);
     assert.deepEqual(await selectedNames(), names);
   };
-  const fileA = page.locator('.crow').filter({ has: page.locator('.nm', { hasText: /^A\\.txt$/ }) });
-  const selectA = () => page.locator('.crow', { hasText: /^A\\.txt$/ }).first().click();
+  const selectA = () => page.locator('.crow', { hasText: /^A[.]txt$/ }).first().click();
   await selectA();
   await page.keyboard.press('Shift+ArrowDown');
   await expectSelection(['A.txt', 'B.txt']);
