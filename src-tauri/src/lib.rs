@@ -731,7 +731,7 @@ fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
     builder = builder.background_color(if material == "acrylic" {
         tauri::window::Color(0, 0, 0, 0)
     } else if dark {
-        tauri::window::Color(0x26, 0x27, 0x2b, 0xff)
+        tauri::window::Color(0x08, 0x0a, 0x0e, 0xff)
     } else {
         tauri::window::Color(0xee, 0xf0, 0xf5, 0xff)
     });

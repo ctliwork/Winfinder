@@ -3,6 +3,9 @@
   --accent-rgb: 10, 132, 255;
   --icon: 72px;
   --sidebar-w: 220px;
+  --ambient-accent: 0.13;
+  --ambient-violet: 0.10;
+  --column-tint: 6%;
 
   --text: #1d1d1f;
   --text2: #6e6e73;
@@ -30,52 +33,58 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --text: #f5f5f7;
-    --text2: #a1a1a6;
-    --text3: #989da8;
-    --content-bg: rgba(28, 30, 35, 0.97);
-    --chrome: rgba(33, 37, 46, 0.58);
-    --surface-edge: rgba(255, 255, 255, 0.13);
+    --text: #e8ecf4;
+    --text2: #a6adba;
+    --text3: #858e9e;
+    --content-bg: rgba(10, 11, 14, 0.97);
+    --ambient-accent: 0.04;
+    --ambient-violet: 0.025;
+    --column-tint: 3%;
+    --chrome: rgba(5, 7, 10, 0.50);
+    --surface-edge: rgba(255, 255, 255, 0.09);
     --panel-shadow: 0 8px 32px rgba(0, 0, 0, 0.16), inset 0 1px 0 var(--surface-edge);
-    --glass: rgba(36, 41, 52, 0.52);
-    --glass-strong: rgba(40, 40, 44, 0.88);
-    --glass-border: rgba(255, 255, 255, 0.09);
-    --hairline: rgba(255, 255, 255, 0.08);
-    --capsule: rgba(255, 255, 255, 0.08);
-    --capsule-border: rgba(255, 255, 255, 0.08);
+    --glass: rgba(5, 7, 10, 0.44);
+    --glass-strong: rgba(14, 16, 20, 0.92);
+    --glass-border: rgba(255, 255, 255, 0.075);
+    --hairline: rgba(255, 255, 255, 0.065);
+    --capsule: rgba(255, 255, 255, 0.045);
+    --capsule-border: rgba(255, 255, 255, 0.06);
     --hover: rgba(255, 255, 255, 0.06);
     --sel-muted: rgba(255, 255, 255, 0.1);
     --stripe: rgba(255, 255, 255, 0.025);
     --shadow-lg: 0 24px 80px rgba(0, 0, 0, 0.6), 0 0 0 0.5px rgba(255, 255, 255, 0.12);
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4), 0 0 0 0.5px rgba(255, 255, 255, 0.08);
-    --solid: #2c2c2e;
-    --side-solid: #26272b;
+    --solid: #0e1015;
+    --side-solid: #080a0e;
     color-scheme: dark;
   }
   :root:not([data-theme="light"]) .ico.file .page { fill: url(#g-page-dark); }
 }
 /* Theme picked in Settings (Tauri also switches the window theme; this covers the page itself) */
 :root[data-theme="dark"] {
-  --text: #f5f5f7;
-  --text2: #a1a1a6;
-  --text3: #989da8;
-  --content-bg: rgba(28, 30, 35, 0.97);
-    --chrome: rgba(33, 37, 46, 0.58);
-    --surface-edge: rgba(255, 255, 255, 0.13);
+  --text: #e8ecf4;
+  --text2: #a6adba;
+  --text3: #858e9e;
+  --content-bg: rgba(10, 11, 14, 0.97);
+    --ambient-accent: 0.04;
+    --ambient-violet: 0.025;
+    --column-tint: 3%;
+    --chrome: rgba(5, 7, 10, 0.50);
+    --surface-edge: rgba(255, 255, 255, 0.09);
     --panel-shadow: 0 8px 32px rgba(0, 0, 0, 0.16), inset 0 1px 0 var(--surface-edge);
-  --glass: rgba(36, 41, 52, 0.52);
-  --glass-strong: rgba(40, 40, 44, 0.88);
-  --glass-border: rgba(255, 255, 255, 0.09);
-  --hairline: rgba(255, 255, 255, 0.08);
-  --capsule: rgba(255, 255, 255, 0.08);
-  --capsule-border: rgba(255, 255, 255, 0.08);
+  --glass: rgba(5, 7, 10, 0.44);
+  --glass-strong: rgba(14, 16, 20, 0.92);
+  --glass-border: rgba(255, 255, 255, 0.075);
+  --hairline: rgba(255, 255, 255, 0.065);
+  --capsule: rgba(255, 255, 255, 0.045);
+  --capsule-border: rgba(255, 255, 255, 0.06);
   --hover: rgba(255, 255, 255, 0.06);
   --sel-muted: rgba(255, 255, 255, 0.1);
   --stripe: rgba(255, 255, 255, 0.025);
   --shadow-lg: 0 24px 80px rgba(0, 0, 0, 0.6), 0 0 0 0.5px rgba(255, 255, 255, 0.12);
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4), 0 0 0 0.5px rgba(255, 255, 255, 0.08);
-  --solid: #2c2c2e;
-    --side-solid: #26272b;
+  --solid: #0e1015;
+    --side-solid: #080a0e;
     color-scheme: dark;
 }
 :root[data-theme="dark"] .ico.file .page { fill: url(#g-page-dark); }
@@ -92,8 +101,8 @@ body {
   -webkit-font-smoothing: antialiased;
   /* The opaque fallback keeps the same light/dark glass hierarchy. */
   background:
-    radial-gradient(ellipse at 0 0, rgba(var(--accent-rgb), 0.13), transparent 58%),
-    radial-gradient(ellipse at 100% 100%, rgba(167, 139, 250, 0.10), transparent 62%),
+    radial-gradient(ellipse at 0 0, rgba(var(--accent-rgb), var(--ambient-accent)), transparent 58%),
+    radial-gradient(ellipse at 100% 100%, rgba(167, 139, 250, var(--ambient-violet)), transparent 62%),
     var(--side-solid);
 }
 /* Set in early.js before the first paint; the native compositor blurs the desktop. */
@@ -478,7 +487,7 @@ body.pane-open #preview-pane {
 .colw { position: relative; flex: none; width: 220px; height: 100%; border-right: 0.5px solid var(--hairline); display: flex; flex-direction: column; container-type: inline-size; transition: background-color 0.18s; }
 .col { position: relative; flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 6px; }
 /* The folder 新增資料夾 and paste go into. */
-.colw.active { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.colw.active { background: color-mix(in srgb, var(--accent) var(--column-tint), transparent); }
 /* Each column's sort header, like Explorer's: click to sort, again to reverse. */
 .chead { flex: none; display: flex; gap: 2px; padding: 4px 6px 3px; border-bottom: 0.5px solid var(--hairline); overflow: hidden; white-space: nowrap; }
 .chead button { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; border: 0; background: none; color: var(--text3); font: inherit; font-size: 11px; line-height: 16px; padding: 1px 6px; border-radius: 5px; cursor: default; }
