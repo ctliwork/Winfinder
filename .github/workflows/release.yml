@@ -1,12 +1,11 @@
 name: Release
 
-# Normally manual (Actions tab → Release → Run workflow), to save Actions minutes.
-# Each run publishes v0.3.<run number>; installed apps pick it up through the updater.
+# Manual UI dispatch, or an explicit versioned request committed by the owner.
+# Ordinary code pushes do not publish a release.
 on:
-  # One-time owner-authorized publication. Removed again after the release succeeds.
   push:
     branches: [main]
-    paths: ['.github/workflows/release.yml']
+    paths: ['.github/release-request.json']
   workflow_dispatch:
     inputs:
       notes:
@@ -16,44 +15,42 @@ on:
 
 permissions:
   contents: write
+  actions: read
+
+# Never run two publishers at once; do not cancel an upload already in progress.
+concurrency:
+  group: winfinder-release
+  cancel-in-progress: false
 
 jobs:
   windows:
-    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.event.head_commit.message == 'release: publish validated frosted glass interface') }}
     runs-on: windows-latest
+    timeout-minutes: 35
     env:
       ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
-      VALIDATED_SHA: "99b8611a5ff8bdec88786d49ff43385150ecc238"
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
-      - name: Verify validated application source
-        if: github.event_name == 'push'
-        shell: bash
-        run: git diff --exit-code "$VALIDATED_SHA" "$GITHUB_SHA" -- renderer src-tauri package.json package-lock.json main.js preload.js
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Validate source and reserve release tag
+        id: prepare
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_NOTES: ${{ inputs.notes }}
+        run: node .github/scripts/prepare-release.mjs
       - uses: dtolnay/rust-toolchain@stable
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
           cache-on-failure: true
       - run: npm ci
-
       - name: Rust tests on Windows
         working-directory: src-tauri
-        run: cargo test
-
-      - name: Set version
-        shell: bash
-        run: |
-          VERSION="0.3.${{ github.run_number }}"
-          node -e "const fs=require('fs');const f='src-tauri/tauri.conf.json';const j=JSON.parse(fs.readFileSync(f));j.version=process.argv[1];fs.writeFileSync(f,JSON.stringify(j,null,2))" "$VERSION"
-          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-
+        run: cargo test --locked
       - name: Build, sign and publish
         uses: tauri-apps/tauri-action@v0
         env:
@@ -62,22 +59,28 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         with:
           releaseCommitish: ${{ github.sha }}
-          tagName: v__VERSION__
-          releaseName: Winfinder v__VERSION__
-          releaseBody: ${{ inputs.notes || (github.event_name == 'push' && '更新為 macOS 風格霧面玻璃介面：半透明側欄與工具列、浮起的圓角分頁、柔和陰影與細緻邊框。Windows 11 22H2 以上使用原生 Acrylic 背景模糊，較舊版本使用相同風格的實色底色。支援深淺色與降低透明度／高對比模式，檔案內容區保持清晰。已通過 34 項 Rust 測試與 Windows 實際介面、導覽、預覽及分頁檢查。') || '下載 Winfinder_x64-setup.exe 安裝。已安裝的版本會自動提示更新。' }}
+          tagName: ${{ steps.prepare.outputs.tag }}
+          releaseName: Winfinder v${{ steps.prepare.outputs.version }}
+          releaseBody: ${{ steps.prepare.outputs.notes }}
           releaseDraft: false
           prerelease: false
           includeUpdaterJson: true
           updaterJsonPreferNsis: true
-
-      # A fixed file name so /releases/latest/download/... always points at the newest installer.
-      - name: Add stable-name installer
+      - name: Add stable-name installer and verify updater
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           cp src-tauri/target/release/bundle/nsis/*.exe Winfinder_x64-setup.exe
-          # The old name too, for links made before the app was renamed.
           cp Winfinder_x64-setup.exe Finder-for-Windows_x64-setup.exe
-          gh release upload "v$VERSION" Winfinder_x64-setup.exe Finder-for-Windows_x64-setup.exe --clobber
+          gh release upload "$TAG" Winfinder_x64-setup.exe Finder-for-Windows_x64-setup.exe --clobber
+          gh release download "$TAG" --pattern latest.json --dir updater-check --clobber
+          node .github/scripts/verify-release.mjs
+      - name: Preserve built bundles if publication fails
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-bundles-${{ steps.prepare.outputs.version || github.run_number }}
+          path: src-tauri/target/release/bundle/
+          if-no-files-found: ignore

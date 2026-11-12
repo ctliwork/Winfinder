@@ -4,10 +4,14 @@ on:
   push:
     branches: [main]
     paths:
+      - 'renderer/app.js'
       - 'renderer/styles.css'
       - 'renderer/early.js'
       - 'src-tauri/src/lib.rs'
       - 'tests/glass-e2e.mjs'
+      - '.github/scripts/prepare-release.mjs'
+      - '.github/scripts/verify-release.mjs'
+      - '.github/workflows/release.yml'
       - '.github/workflows/glass-check.yml'
   workflow_dispatch:
 
@@ -35,6 +39,8 @@ jobs:
           node --check renderer/early.js
           node --check renderer/app.js
           node --check tests/glass-e2e.mjs
+          node --check .github/scripts/prepare-release.mjs
+          node --check .github/scripts/verify-release.mjs
       - name: Rust tests
         working-directory: src-tauri
         run: cargo test --locked

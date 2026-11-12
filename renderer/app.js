@@ -2062,12 +2062,12 @@
 
   // Selection inside one column (Finder): several items, the whole column, or
   // nothing. Columns to the right of it close, as in Finder.
-  async function selectInColumn(j, paths, { focus = paths[paths.length - 1] ?? null, anchor = null } = {}) {
+  async function selectInColumn(j, paths, { focus = paths[paths.length - 1] ?? null, anchor = null, openFolder = true } = {}) {
     const chain = ancestors(state.cwd, state.colRoot);
     const dir = chain[j];
     if (!dir) return;
     const list = state.colLists[j] || [];
-    if (paths.length === 1) {
+    if (openFolder && paths.length === 1) {
       const e = list.find((x) => x.path === paths[0]);
       if (e?.isDir) { await columnClick(e, j); return; } // one folder: open it
     }
@@ -2096,7 +2096,7 @@
       const a = list.indexOf(anchor); const b = list.indexOf(entry.path);
       const range = a < 0 ? [entry.path] : list.slice(Math.min(a, b), Math.max(a, b) + 1);
       const next = ev.ctrlKey || ev.metaKey ? [...new Set([...current, ...range])] : range;
-      return selectInColumn(j, next, { focus: entry.path, anchor });
+      return selectInColumn(j, next, { focus: entry.path, anchor, openFolder: false });
     }
     const next = current.includes(entry.path) ? current.filter((p) => p !== entry.path) : [...current, entry.path];
     return selectInColumn(j, next, { focus: entry.path, anchor: entry.path });
@@ -3465,10 +3465,20 @@
 
   // ---------- keyboard ----------
   let typeBuf = ''; let typeTimer = null;
+  let columnMoveQueue = Promise.resolve();
 
   function moveSelection(dir, ev) {
     const mode = viewMode();
-    if (mode === 'columns') { moveColumns(dir); return; }
+    if (mode === 'columns') {
+      // Folder navigation is asynchronous. Keep key repeats in order and retain
+      // the modifier state of each keypress, even after Shift has been released.
+      const tab = state;
+      const shiftKey = !!ev?.shiftKey;
+      columnMoveQueue = columnMoveQueue.then(() => {
+        if (state === tab && inColumnsMode()) return moveColumns(dir, { shiftKey });
+      }).catch((err) => { console.error(err); toast('無法變更選取項目'); });
+      return;
+    }
     const list = state.entries;
     if (!list.length) return;
     let idx = list.findIndex((e) => e.path === state.focus);
@@ -3503,7 +3513,7 @@
     if (ql.isOpen) ql.update();
   }
 
-  async function moveColumns(dir) {
+  async function moveColumns(dir, ev) {
     const chain = ancestors(state.cwd, state.colRoot);
     const n = chain.length - 1;
     const a = state.colActive;
@@ -3513,7 +3523,19 @@
       const curPath = a === n ? state.focus : chain[a + 1];
       let idx = list.findIndex((e) => e.path === curPath);
       idx = idx < 0 ? 0 : Math.max(0, Math.min(list.length - 1, idx + (dir === 'up' ? -1 : 1)));
-      await columnClick(list[idx], a);
+      const target = list[idx];
+      if (ev?.shiftKey) {
+        const paths = list.map((e) => e.path);
+        const anchor = a === n && paths.includes(state.anchor) ? state.anchor : curPath || target.path;
+        const start = paths.indexOf(anchor);
+        const range = paths.slice(Math.min(start, idx), Math.max(start, idx) + 1);
+        // Range selection stays in this column, including when it shrinks to
+        // one folder. Opening that folder here would lose the range anchor.
+        await selectInColumn(a, range, { focus: target.path, anchor, openFolder: false });
+      } else {
+        await columnClick(target, a);
+      }
+      revealPath(target.path);
     } else if (dir === 'right') {
       if (a === n - 1 || (a === n && state.focus && entryOf(state.focus)?.isDir)) {
         const list = state.colLists[n] || [];

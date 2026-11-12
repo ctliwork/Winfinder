@@ -9,6 +9,8 @@ import { chromium } from 'playwright-core';
 const out = path.resolve('e2e-glass');
 const files = path.join(out, 'files');
 fs.mkdirSync(path.join(files, 'Projects'), { recursive: true });
+for (const name of ['A.txt', 'B.txt', 'C.txt']) fs.writeFileSync(path.join(files, name), name);
+for (const name of ['01-folder', '02-folder', '03-folder']) fs.mkdirSync(path.join(files, name), { recursive: true });
 fs.writeFileSync(path.join(files, 'Readme.txt'), 'Winfinder\nGlass interface preview\n');
 const exe = path.resolve('src-tauri/target/debug/Winfinder.exe');
 const port = 9223;
@@ -114,6 +116,62 @@ try {
     }
   }
   await cdp.send('Emulation.clearDeviceMetricsOverride');
+  // Shift+arrows must extend/shrink a range without navigating into folders.
+  const selectedNames = () => page.locator('.crow.sel .nm').allTextContents();
+  const expectSelection = async (names) => {
+    await page.waitForFunction((names) => {
+      const actual = [...document.querySelectorAll('.crow.sel .nm')].map((e) => e.textContent);
+      return JSON.stringify(actual) === JSON.stringify(names);
+    }, names);
+    assert.deepEqual(await selectedNames(), names);
+  };
+  const fileA = page.locator('.crow').filter({ has: page.locator('.nm', { hasText: /^A\\.txt$/ }) });
+  const selectA = () => page.locator('.crow', { hasText: /^A\\.txt$/ }).first().click();
+  await selectA();
+  await page.keyboard.press('Shift+ArrowDown');
+  await expectSelection(['A.txt', 'B.txt']);
+  await page.keyboard.press('Shift+ArrowDown');
+  await expectSelection(['A.txt', 'B.txt', 'C.txt']);
+  await page.keyboard.press('Shift+ArrowUp');
+  await expectSelection(['A.txt', 'B.txt']);
+  await page.keyboard.press('Shift+ArrowUp');
+  await expectSelection(['A.txt']);
+  await page.keyboard.press('Shift+ArrowUp');
+  // The anchor stays A.txt when extending in the opposite direction.
+  await expectSelection(['Projects', 'A.txt']);
+  await selectA();
+  await page.keyboard.press('Shift+ArrowDown');
+  await page.keyboard.press('Shift+ArrowDown');
+  await expectSelection(['A.txt', 'B.txt', 'C.txt']);
+  await page.keyboard.press('ArrowDown');
+  await expectSelection(['Readme.txt']);
+  // Starting in an ancestor column, then shrinking to one folder, must not
+  // reopen that folder or discard the anchor.
+  await page.locator('.crow', { hasText: /^01-folder$/ }).first().click();
+  await page.waitForFunction(() => document.querySelectorAll('.col').length === 2);
+  await page.keyboard.press('Shift+ArrowDown');
+  await expectSelection(['01-folder', '02-folder']);
+  assert.equal(await page.locator('.col').count(), 1);
+  await page.keyboard.press('Shift+ArrowUp');
+  await expectSelection(['01-folder']);
+  assert.equal(await page.locator('.col').count(), 1);
+  // Queue key repeats while navigating out of an ancestor column.
+  await page.locator('.crow', { hasText: /^01-folder$/ }).first().click();
+  await page.waitForFunction(() => document.querySelectorAll('.col').length === 2);
+  await page.keyboard.down('Shift');
+  for (let i = 0; i < 2; i++) await page.keyboard.press('ArrowDown');
+  await page.keyboard.up('Shift');
+  await expectSelection(['01-folder', '02-folder', '03-folder']);
+  // List view retains the same range semantics.
+  await page.click('#view-seg [data-view="list"]');
+  await page.locator('.lrow', { hasText: 'A.txt' }).first().click();
+  await page.keyboard.press('Shift+ArrowDown');
+  await page.waitForFunction(() => document.querySelectorAll('.lrow.sel').length === 2);
+  assert.deepEqual(await page.locator('.lrow.sel .nm').allTextContents(), ['A.txt', 'B.txt']);
+  await page.keyboard.press('Shift+ArrowUp');
+  await page.waitForFunction(() => document.querySelectorAll('.lrow.sel').length === 1);
+  await page.click('#view-seg [data-view="columns"]');
+  report.push({ name: 'shift-arrow-selection', passed: true });
   // Check file navigation and preview after the shell/layout changes.
   await page.locator('.crow', { hasText: 'Projects' }).first().click();
   await page.waitForFunction(() => document.querySelectorAll('.col').length >= 2);

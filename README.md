@@ -62,16 +62,17 @@ npm test         # Rust 單元測試
 
 ## 發布新版本與自動更新
 
-發布是手動的：到 GitHub 的 **Actions → Release → Run workflow**（可以填更新說明）。流程會：
+發布可到 GitHub 的 **Actions → Release → Run workflow**（可以填更新說明），或更新 `.github/release-request.json` 提出一次明確的發布請求；一般程式碼推送不會發布。流程會：
 
-1. 在 Windows 上跑 Rust 測試
-2. 把版本設成 `0.3.<執行編號>`，每次自動遞增
-3. 打包安裝檔，用更新私鑰簽章，發布成 GitHub Release，附上 `latest.json`
-4. 另外上傳固定檔名的 `Winfinder_x64-setup.exe`（也上傳一份改名前的 `Finder-for-Windows_x64-setup.exe`，舊連結不會失效），讓上面的下載連結永遠指向最新版
+1. 固定使用觸發發布的 `main` 提交；發布請求須指定已成功的 Windows 驗證 run，並確認應用原始碼與該驗證版本一致。編譯前先建立／確認版本標籤，提早發現標籤或權限問題
+2. 在 Windows 上跑 Rust 測試
+3. 把版本設成 `0.3.<執行編號>`，每次自動遞增
+4. 打包安裝檔，用更新私鑰簽章，發布成 GitHub Release，附上 `latest.json`
+5. 另外上傳固定檔名的 `Winfinder_x64-setup.exe`（也上傳一份改名前的 `Finder-for-Windows_x64-setup.exe`，舊連結不會失效），讓上面的下載連結永遠指向最新版
 
 已安裝的 App 啟動後幾秒會讀 `releases/latest/download/latest.json`，有新版就在右下角提示；也可以從「⋯」選單手動「檢查更新…」。下載的更新會用 `tauri.conf.json` 裡的公鑰驗證簽章，對不上就不會安裝。
 
-**一次性設定：** repo 的 Settings → Secrets and variables → Actions 要有 `TAURI_SIGNING_PRIVATE_KEY`（更新簽章私鑰，無密碼）。私鑰不在 repo 裡，請另外備份；遺失後已安裝的版本就收不到更新，只能手動重裝新版。推送程式碼不會自動打包。
+**一次性設定：** repo 的 Settings → Secrets and variables → Actions 要有 `TAURI_SIGNING_PRIVATE_KEY`（更新簽章私鑰，無密碼）。私鑰不在 repo 裡，請另外備份；遺失後已安裝的版本就收不到更新，只能手動重裝新版。一般程式碼推送不會自動打包。發布請求檔包含新的 `request_id`、成功驗證的 `validation_run_id`、該 run 的 `validated_sha` 與 `notes`；不用為每次發布修改 workflow。既有標籤不得改指向其他提交；同時只執行一個發布工作，失敗時保留編譯快取與已產生的安裝包。上傳後會確認固定檔名安裝檔、更新版本與簽章是否齊全。
 
 ## 功能
 
@@ -85,7 +86,7 @@ npm test         # Rust 單元測試
 - 工具列的上層資料夾按鈕（Alt+↑），與上一頁不同
 - 列表檢視：拖曳標題邊線調整欄寬；在標題上按右鍵可加上「建立日期」「副檔名」欄，或設定分組
 - 直欄檢視：每一欄頂端有排序標題（名稱／日期／大小／類型），點一下依該欄位排序、再點一下切換遞增／遞減，只排那一欄的資料夾；新增資料夾、貼上會放進去的那一欄整欄淡淡上色，一眼看出現在在哪一層
-- 直欄檢視：點選逐層展開、右側預覽欄（圖片、影片、Word／Excel／PowerPoint、PDF、文字直接預覽）、方向鍵上下選取、左右切換欄位
+- 直欄檢視：點選逐層展開、右側預覽欄（圖片、影片、Word／Excel／PowerPoint、PDF、文字直接預覽）、方向鍵上下選取、Shift＋↑／↓ 延伸或縮小同一欄的選取範圍、左右切換欄位
 - 直欄選取跟 Finder 一樣：Ctrl／Shift＋點選多選、Ctrl+A 全選該欄、多選一起拖曳、預覽欄顯示「已選取 N 個項目」、點欄位空白處取消選取、在欄內框選、Alt+P 隱藏預覽欄、選取後停頓再點名稱即重新命名
 - 直欄寬度：拖曳欄位右邊線調整（按住 Alt 一次調整全部欄）、按兩下自動符合最長檔名；寬度會依資料夾記住
 - 空白鍵 Quick Look：圖片、影片、音訊、PDF、文字／原始碼，開關有縮放動畫
