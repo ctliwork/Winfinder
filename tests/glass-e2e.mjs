@@ -61,7 +61,7 @@ try {
     }, theme);
     await page.reload();
     await page.waitForSelector('.crow');
-    for (const width of [1180, 680]) {
+    for (const width of [1180, 900, 680]) {
       await cdp.send('Emulation.setDeviceMetricsOverride', {
         width, height: 740, deviceScaleFactor: 1, mobile: false,
       });
@@ -108,6 +108,17 @@ try {
         console.log(`GLASS_SHOT ${name} ${jpeg.toString('base64')}`);
       }
       report.push({ name, ...layout, screenshotBytes: image.length });
+      // Expanding search must not push the new delete button off-screen.
+      await page.click('#search');
+      const trashFitsSearch = await page.evaluate(() => {
+        const main = document.querySelector('#main').getBoundingClientRect();
+        const trash = document.querySelector('#btn-trash').getBoundingClientRect();
+        const more = document.querySelector('#btn-more').getBoundingClientRect();
+        return trash.width > 0 && trash.left >= main.left && trash.right <= main.right + 1 &&
+          more.right <= main.right + 1;
+      });
+      assert.ok(trashFitsSearch, 'delete and more remain visible with search expanded');
+      await page.keyboard.press('Escape');
       // Menus must remain legible and wholly on-screen at both widths.
       await page.click('#btn-more');
       await page.waitForSelector('#menu:not([hidden])');
