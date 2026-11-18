@@ -1,6 +1,6 @@
 {
-  "request_id": "2026-11-12-immersive-black",
-  "validation_run_id": 43152849651,
-  "validated_sha": "b4c1d803376f7547ea14e0ebe147dfdb7c2bbb15",
-  "notes": "深色模式改為更沉浸的近黑配色：壓暗檔案區、側欄、工具列、選單與分頁按鈕，減少灰白色塊、環境漸層及分隔線的干擾，保留檔名與操作狀態的閱讀對比。原生 Acrylic 玻璃效果會跟隨 Windows「透明效果」設定。保留 Shift＋方向鍵多選修正，並已通過 Windows 深淺色、窄視窗及多選操作檢查。"
+  "request_id": "2026-11-18-toolbar-delete",
+  "validation_run_id": 44247805733,
+  "validated_sha": "6b403f0a073fe74f04b54ee7ef1d9f4a49857d5d",
+  "notes": "新增工具列「刪除」按鈕，將選取的檔案或資料夾移至資源回收筒，支援多選、既有刪除確認設定與 Ctrl＋Z 復原。未選取可刪除項目時自動停用；窄視窗及搜尋框展開時仍保持可見。已通過 Windows 刪除／復原、Shift 多選與深淺色工具列排列檢查。"
 }
