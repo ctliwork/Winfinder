@@ -621,7 +621,12 @@
     fillShellIcons();
   }
 
+  function updateTrashButton() {
+    $('#btn-trash').disabled = !selectedEntries().some((e) => !isVirtual(e));
+  }
+
   function renderToolbar() {
+    updateTrashButton();
     const title = $('#title');
     const text = tabTitle(state);
     if (title.textContent !== text) {
@@ -1954,6 +1959,7 @@
   }
 
   function paintSelection() {
+    updateTrashButton();
     const mode = viewMode();
     if (mode === 'gallery' || mode === 'columns') { renderView(false).then(() => { renderStatus(); }); return; }
     for (const el of $$('.item[data-i]', view)) {
@@ -1981,6 +1987,7 @@
 
   const freeCache = new Map();
   async function renderStatus() {
+    updateTrashButton();
     const n = state.entries.length;
     const s = selectedEntries().length;
     let text = s ? `已選取 ${s} 個項目，共 ${n} 個` : `${n} 個項目`;
@@ -3270,6 +3277,7 @@
     openMenu(sortItems(), r.left, r.bottom + 6);
   });
   $('#btn-newfolder').addEventListener('click', newFolder);
+  $('#btn-trash').addEventListener('click', trashSelected);
   $('#btn-terminal').addEventListener('click', () => openTerminalTab());
   // The arrow turns once while the folder is read again.
   $('#btn-refresh').addEventListener('click', (ev) => {

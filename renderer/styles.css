@@ -306,7 +306,7 @@ body.blurred .cap { color: var(--text3); }
   .search:focus-within, .search.has-text { width: 170px; }
 }
 @container (max-width: 540px) { #view-seg { display: none; } }
-@container (max-width: 400px) { #btn-newfolder { display: none; } }
+@container (max-width: 500px) { #btn-newfolder { display: none; } }
 
 #search-scope {
   display: flex; align-items: center; gap: 6px; padding: 6px 16px;

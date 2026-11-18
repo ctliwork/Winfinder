@@ -51,6 +51,7 @@ try {
   await page.waitForSelector('.crow');
   const cdp = await page.context().newCDPSession(page);
   const nativeMaterial = await page.evaluate(() => window.__finderEnv.material);
+  assert.equal(await page.locator('#btn-trash').isDisabled(), true, 'delete disabled without a selection');
   for (const theme of ['light', 'dark', 'system']) {
     await page.evaluate((theme) => {
       const k = 'winfinder:prefs';
@@ -73,7 +74,7 @@ try {
         const style = (selector) => getComputedStyle(document.querySelector(selector));
         return {
           width: innerWidth, height: innerHeight,
-          main: rect('#main'), toolbar: rect('#toolbar'), more: rect('#btn-more'),
+          main: rect('#main'), toolbar: rect('#toolbar'), more: rect('#btn-more'), trash: rect('#btn-trash'),
           close: rect('.cap.close'), status: rect('#statusbar'),
           tab: rect('.tab.active'), content: rect('#content'),
           sidebarFilter: style('#sidebar').backdropFilter,
@@ -89,6 +90,7 @@ try {
       assert.equal(layout.material, nativeMaterial);
       assert.ok(layout.sidebarFilter.includes('blur'), 'sidebar blur');
       assert.ok(layout.more.right <= layout.main.right + 1, 'more button fits');
+      assert.ok(layout.trash.width > 0 && layout.trash.x >= layout.main.x && layout.trash.right <= layout.main.right + 1, 'delete button remains visible at both widths');
       assert.ok(layout.close.right <= layout.main.right + 1, 'caption fits');
       assert.ok(layout.more.x >= layout.main.x, 'more button remains visible');
       assert.ok(layout.status.bottom <= layout.height + 1, 'status stays in window');
@@ -171,6 +173,23 @@ try {
   await page.waitForFunction(() => document.querySelectorAll('.lrow.sel').length === 1);
   await page.click('#view-seg [data-view="columns"]');
   report.push({ name: 'shift-arrow-selection', passed: true });
+  // Toolbar delete uses the existing recycle-bin operation and remains undoable.
+  await selectA();
+  await page.keyboard.press('Shift+ArrowDown');
+  await expectSelection(['A.txt', 'B.txt']);
+  assert.equal(await page.locator('#btn-trash').isEnabled(), true, 'delete enabled for selected files');
+  await page.click('#btn-trash');
+  await page.waitForFunction(() => document.querySelector('#btn-trash').disabled &&
+    ![...document.querySelectorAll('.crow .nm')].some((e) => ['A.txt', 'B.txt'].includes(e.textContent)) &&
+    document.querySelector('#toast').textContent.includes('已將 2 個項目丟到資源回收筒'));
+  assert.equal(fs.existsSync(path.join(files, 'A.txt')), false, 'A moved to recycle bin');
+  assert.equal(fs.existsSync(path.join(files, 'B.txt')), false, 'B moved to recycle bin');
+  await page.keyboard.press('Control+z');
+  await page.waitForFunction(() => ['A.txt', 'B.txt'].every((name) =>
+    [...document.querySelectorAll('.crow .nm')].some((e) => e.textContent === name)));
+  assert.equal(fs.readFileSync(path.join(files, 'A.txt'), 'utf8'), 'A.txt', 'undo restores file contents');
+  assert.equal(fs.readFileSync(path.join(files, 'B.txt'), 'utf8'), 'B.txt', 'undo restores both files');
+  report.push({ name: 'toolbar-delete-and-undo', passed: true });
   // Check file navigation and preview after the shell/layout changes.
   await page.locator('.crow', { hasText: 'Projects' }).first().click();
   await page.waitForFunction(() => document.querySelectorAll('.col').length >= 2);

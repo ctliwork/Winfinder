@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
     paths:
+      - 'renderer/index.html'
       - 'renderer/app.js'
       - 'renderer/styles.css'
       - 'renderer/early.js'
