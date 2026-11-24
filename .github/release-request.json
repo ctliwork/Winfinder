@@ -1,6 +1,6 @@
 {
-  "request_id": "2026-11-18-toolbar-delete",
-  "validation_run_id": 44247805733,
-  "validated_sha": "6b403f0a073fe74f04b54ee7ef1d9f4a49857d5d",
-  "notes": "新增工具列「刪除」按鈕，將選取的檔案或資料夾移至資源回收筒，支援多選、既有刪除確認設定與 Ctrl＋Z 復原。未選取可刪除項目時自動停用；窄視窗及搜尋框展開時仍保持可見。已通過 Windows 刪除／復原、Shift 多選與深淺色工具列排列檢查。"
+  "request_id": "2026-11-24-folder-rename-flat-frame",
+  "validation_run_id": 45404743694,
+  "validated_sha": "f93fa64ea269c222f3eda9022fb541faf8da20f6",
+  "notes": "修正 Windows 右鍵「新增資料夾」未進入重新命名的問題，改用 Winfinder 既有新增流程，建立後選取名稱並等待輸入，支援既有復原操作。\n移除主內容及側邊欄外層的圓弧底框、陰影、邊框與外圍留白，保留深色透明與玻璃模糊效果。\n已通過 Windows 建置、36 項 Rust 測試、3 項新增資料夾回歸測試，以及 WebView2 介面檢查（包含輸入期間的資料夾更新、深淺色與不同視窗寬度）。原生 Windows 選單的實際點選仍待人工確認。"
 }
