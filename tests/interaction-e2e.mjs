@@ -84,6 +84,13 @@ try {
   await page.reload();
   await page.waitForSelector('.item');
   await page.evaluate(() => {
+    window.__fileClipboardKeys = [];
+    document.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && ['c', 'x', 'v'].includes(e.key.toLowerCase()) &&
+        !e.target.matches('input, textarea, select') && !e.target.closest('#terms')) {
+        window.__fileClipboardKeys.push({ key: e.key, prevented: e.defaultPrevented });
+      }
+    });
     const original = window.fsApi.transfer;
     window.__transfersCompleted = 0;
     window.fsApi.transfer = async (...args) => {
@@ -327,6 +334,9 @@ try {
     await page.waitForFunction(() => document.querySelectorAll('#tabs .tab').length === 2);
     await page.waitForFunction(() => [...document.querySelectorAll('#pathbar .crumb')].at(-1)?.textContent === 'Destination');
   });
+  const fileKeys = await page.evaluate(() => window.__fileClipboardKeys);
+  assert.ok(fileKeys.length >= 6, 'real copy, cut and paste keys were exercised');
+  assert.ok(fileKeys.every((e) => e.prevented), 'file keys must suppress browser clipboard defaults');
   assert.deepEqual(errors, [], 'no renderer errors');
   console.log('INTERACTION RESULT', JSON.stringify({ passed: true, results }));
 } catch (error) {

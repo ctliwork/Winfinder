@@ -81,7 +81,7 @@
 
 - 嚴重度：Major；狀態：修正後本機通過，Windows 重測待執行。
 - 發現：Windows 45420339959 的 ST-008 在貼上時未進入 transfer；以可控 clipboardWrite Promise 獨立重現順序缺口。
-- 根因：copySelected 發出非同步 clipboardWrite 後立即返回；clipboardFiles 未等待寫入完成即呼叫 clipboardRead。
-- 修正：本視窗的剪貼簿寫入以 Promise 依序執行；貼上與選單查詢先等待最新寫入，再讀取真實系統剪貼簿。
-- 證據：IT-015 修正前 transfer=0（預期 1）；修正後通過。ST-012 暫停原生剪貼簿寫入，確認貼上不提前讀取，釋放後才複製正確檔案及內容。
+- 根因：copySelected 發出非同步 clipboardWrite 後立即返回；clipboardFiles 未等待寫入完成即呼叫 clipboardRead；檔案 Ctrl+C/X/V 同時未阻止 WebView 的預設文字剪貼簿行為。
+- 修正：本視窗的剪貼簿寫入以 Promise 依序執行；貼上與選單查詢先等待最新寫入，再讀取真實系統剪貼簿。檔案快捷鍵 preventDefault，文字輸入框保留正常 Ctrl+C/X/V。
+- 證據：IT-015 修正前 transfer=0（預期 1）；IT-016 修正前未 preventDefault，修正後檔案快捷鍵與文字輸入的對照案例均通過。ST-012 暫停原生剪貼簿寫入，確認貼上不提前讀取，釋放後才複製正確檔案及內容。
 - 異動：CHG-007。

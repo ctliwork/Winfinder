@@ -248,3 +248,30 @@ test('[IT-015/BUG-009] paste waits for the preceding asynchronous clipboard writ
   assert.equal(transfers.length, 1);
   assert.equal(transfers[0][1][0], '/source/B.txt');
 });
+
+test('[IT-016/BUG-009] file copy, cut and paste suppress WebView default clipboard actions', async () => {
+  let handler;
+  const calls = [];
+  const context = vm.createContext({
+    G: {}, state: {}, dialogOpen: () => false,
+    document: { addEventListener: (_name, cb) => { handler = cb; } },
+    copySelected: (op) => calls.push(op), paste: () => calls.push('paste'),
+  });
+  const start = source.indexOf("  document.addEventListener('keydown', async (ev) => {");
+  const end = source.indexOf("  window.addEventListener('mouseup'", start);
+  vm.runInContext(source.slice(start, end), context);
+  for (const key of ['c', 'x', 'v']) {
+    let prevented = false;
+    await handler({ key, ctrlKey: true, target: { closest: () => null, matches: () => false },
+      preventDefault() { prevented = true; } });
+    assert.equal(prevented, true, key + ' must not also modify the browser text clipboard');
+  }
+  assert.deepEqual(calls, ['copy', 'move', 'paste']);
+  for (const key of ['c', 'x', 'v']) {
+    let prevented = false;
+    await handler({ key, ctrlKey: true, target: { closest: () => null, matches: () => true },
+      preventDefault() { prevented = true; } });
+    assert.equal(prevented, false, 'text inputs keep their normal clipboard keys');
+  }
+  assert.deepEqual(calls, ['copy', 'move', 'paste']);
+});

@@ -3662,9 +3662,9 @@
       else selectInColumn(state.colActive, (state.colLists[state.colActive] || []).map((e) => e.path));
       return;
     }
-    if (ctrl && k.toLowerCase() === 'c') { copySelected('copy'); return; }
-    if (ctrl && k.toLowerCase() === 'x') { copySelected('move'); return; }
-    if (ctrl && k.toLowerCase() === 'v') { paste(); return; }
+    if (ctrl && k.toLowerCase() === 'c') { ev.preventDefault(); copySelected('copy'); return; }
+    if (ctrl && k.toLowerCase() === 'x') { ev.preventDefault(); copySelected('move'); return; }
+    if (ctrl && k.toLowerCase() === 'v') { ev.preventDefault(); paste(); return; }
     if (ctrl && !ev.shiftKey && k.toLowerCase() === 'z') { ev.preventDefault(); undo(); return; }
     if (ev.altKey && k === 'Enter') {
       ev.preventDefault();
