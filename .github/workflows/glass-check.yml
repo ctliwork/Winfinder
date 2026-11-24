@@ -11,6 +11,8 @@ on:
       - 'src-tauri/src/lib.rs'
       - 'src-tauri/src/winshell.rs'
       - 'tests/new-folder-rename.mjs'
+      - 'tests/interaction-regression.mjs'
+      - 'tests/interaction-e2e.mjs'
       - 'tests/glass-e2e.mjs'
       - '.github/scripts/prepare-release.mjs'
       - '.github/scripts/verify-release.mjs'
@@ -45,7 +47,7 @@ jobs:
           node --check .github/scripts/prepare-release.mjs
           node --check .github/scripts/verify-release.mjs
       - name: New folder rename regression
-        run: node --test tests/new-folder-rename.mjs
+        run: node --test tests/new-folder-rename.mjs tests/interaction-regression.mjs
       - name: Rust tests
         working-directory: src-tauri
         run: cargo test --locked
@@ -56,8 +58,13 @@ jobs:
         run: |
           npm install --no-save playwright-core@1.58.2
           node tests/glass-e2e.mjs
+      - name: File interaction regression (real Windows app)
+        timeout-minutes: 6
+        run: node tests/interaction-e2e.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: glass-interface
-          path: e2e-glass
+          path: |
+            e2e-glass
+            e2e-interactions

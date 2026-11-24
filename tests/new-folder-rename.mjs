@@ -5,7 +5,7 @@ import test from 'node:test';
 
 const source = fs.readFileSync(new URL('../renderer/app.js', import.meta.url), 'utf8');
 const nativeMenu = source.slice(source.indexOf('  async function nativeMenu('), source.indexOf('  async function showProperties('));
-const createFolder = source.slice(source.indexOf('  async function newFolderNow('), source.indexOf('  async function newFile('));
+const createFolder = source.slice(source.indexOf('  async function newFolderNow('), source.indexOf('  function newFile('));
 
 function fixture(verb) {
   const calls = [];

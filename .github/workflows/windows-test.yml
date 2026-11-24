@@ -1,9 +1,14 @@
 name: Windows test
 
-# Manual only (Actions tab → Windows test → Run workflow): the Rust tests on
+# Manual dispatch or test workflow updates: the Rust tests on
 # Windows, then the real app end to end (tests/windows-e2e.mjs). The report
 # and desktop screenshots are in the run's "e2e" artifact.
 on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/windows-test.yml'
+      - 'tests/windows-e2e.mjs'
   workflow_dispatch:
     inputs:
       terminal_only:

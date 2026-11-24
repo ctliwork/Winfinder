@@ -585,11 +585,18 @@
     const dirs = [...refreshQueued];
     refreshQueued = new Set();
     await Promise.all(dirs.map((d) => listDir(d, true)));
+    // Editing may have started while the filesystem read was in flight.
+    if (G.renaming) {
+      dirs.forEach((d) => refreshQueued.add(d));
+      refreshTimer = setTimeout(flushRefresh, 400);
+      return;
+    }
     await refresh(false);
   }
 
   async function refresh(reload = true) {
     if (state.term) return;
+    if (G.renaming) return;
     if (state.cwd === HOME) {
       if (reload) await loadHome();
       computeEntries();
@@ -597,6 +604,7 @@
       return;
     }
     if (reload) await listDir(state.cwd, true);
+    if (G.renaming) return;
     const valid = new Set((dirCache.get(state.cwd)?.entries || []).map((e) => e.path));
     if (!state.search.results) for (const p of [...state.sel]) if (!valid.has(p)) state.sel.delete(p);
     computeEntries();
@@ -1079,6 +1087,7 @@
   }
 
   async function renderView(animate) {
+    if (G.renaming) return;
     const mode = viewMode();
     view._v = null;
     queueFolderSizes();
@@ -1144,6 +1153,7 @@
   async function renderColumns() {
     const chain = ancestors(state.cwd, state.colRoot);
     await Promise.all(chain.map((d) => listDir(d)));
+    if (G.renaming) return;
     state.colLists = chain.map((d) => groupItems(visibleOf(dirCache.get(d)?.entries || [], sortOf(d)), groupFor(d)));
     const n = chain.length - 1;
     const fresh = view._colsTab !== state.id || !view.classList.contains('columns') || !$('.col-preview', view);
@@ -2560,7 +2570,8 @@
     startRename(entryOf(res.path));
   }
 
-  async function newFile() {
+  function newFile() { return track(newFileNow()); }
+  async function newFileNow() {
     if (state.search.results || state.cwd === HOME || !api.newFile) return;
     const res = await api.newFile(state.cwd);
     if (!res.ok) { toast(`無法新增檔案：${errText(res.error)}`); return; }
@@ -2635,8 +2646,9 @@
     if (gone.length && api.restoreTrash) pushUndo('丟到資源回收筒', async () => (await api.restoreTrash(gone)).length === 0);
     if (ok) toast(`已將 ${ok} 個項目丟到資源回收筒`);
     if (failed.length) toast(`有 ${failed.length} 個項目無法刪除`);
-    if (inColumnsMode() && state.colActive < ancestors(state.cwd, state.colRoot).length - 1) {
-      await navigate(P.dirname(state.cwd), { push: false });
+    const deletedAncestor = gone.filter((p) => isUnder(state.cwd, p)).sort((a, b) => a.length - b.length)[0];
+    if (deletedAncestor) {
+      await navigate(P.dirname(deletedAncestor), { push: false });
       return;
     }
     state.sel.clear();
@@ -2748,6 +2760,7 @@
     };
     input.addEventListener('keydown', (ev) => {
       ev.stopPropagation();
+      if (ev.isComposing || ev.keyCode === 229) return;
       if (ev.key === 'Enter') finish(true);
       else if (ev.key === 'Escape') finish(false);
     });
@@ -3025,6 +3038,12 @@
       if (!(native && await nativeMenu(entries, { shift: ev.shiftKey, items: appItemsFor(entries) }))) itemMenu(entries, ev.clientX, ev.clientY);
     } else {
       const colDir = inColumnsMode() ? ev.target.closest('.col')?.dataset.dir || null : null; // that column's folder
+      // Background commands act on the column under the pointer, including
+      // when columns to its right are showing a descendant folder.
+      if (colDir && norm(colDir) !== norm(state.cwd)) {
+        const tab = state;
+        if (!(await navigate(colDir, { animate: false })) || state !== tab) return;
+      }
       if (!(native && await nativeMenu([], { background: true, shift: ev.shiftKey, items: appItemsForBackground(colDir) }))) backgroundMenu(ev.clientX, ev.clientY, colDir);
     }
   });
@@ -3358,31 +3377,50 @@
   }
 
   async function runDeepSearch() {
-    const q = state.search.query.trim();
-    if (!q && !filtersOn()) return;
-    state.search.busy = true;
+    const tab = state;
+    const search = tab.search;
+    const request = Symbol('search');
+    const scope = search.scope;
+    search.request = request;
+    const q = search.query.trim();
+    if (!q && !filtersOn()) {
+      search.busy = false;
+      search.results = null;
+      $('#search-status').textContent = '';
+      computeEntries();
+      render();
+      return;
+    }
+    search.busy = true;
     $('#search-status').textContent = '搜尋中…';
     renderStatus();
-    const tab = state;
-    const pc = state.search.scope === 'pc';
-    const inside = state.search.scope === 'content';
-    const f = state.search.filters || {};
-    const root = state.cwd === HOME ? G.places.home : state.cwd;
+    const pc = scope === 'pc';
+    const inside = scope === 'content';
+    const f = search.filters || {};
+    const root = tab.cwd === HOME ? G.places.home : tab.cwd;
     let res;
     if (pc) res = await api.everything(everythingQuery(q, f));
     else if (inside && api.contentSearch) res = q ? await api.contentSearch(root, q, searchFilter(f)) : { entries: [], indexed: true };
     else res = await api.search(root, q, prefs.showHidden, searchFilter(f));
-    if (tab !== state || state.search.query.trim() !== q) return;
+    // Query text alone cannot identify a request: filters or scope can change
+    // while an older read is still running, even with the same search text.
+    if (tab.search !== search || search.request !== request || search.query.trim() !== q || search.scope !== scope) {
+      if (search.request === request) search.busy = false;
+      return;
+    }
+    search.busy = false;
+    if (tab !== state) {
+      if (res && !res.error && res.indexed !== false) search.results = res.entries;
+      return;
+    }
     if (!res || res.error || res.indexed === false) {
-      state.search.busy = false;
       $('#search-status').textContent = pc ? '無法使用 Everything（請確認它正在執行）'
         : res?.indexed === false ? '這個資料夾沒有 Windows 搜尋索引，無法搜尋內容（可在 Windows 設定 →「搜尋 Windows」加入）'
           : res?.error ? `無法搜尋內容：${res.error}` : '';
-      if (inside) { state.search.results = []; computeEntries(); render(); } else renderStatus();
+      if (inside) { search.results = []; computeEntries(); render(); } else renderStatus();
       return;
     }
-    state.search.busy = false;
-    state.search.results = res.entries;
+    search.results = res.entries;
     $('#search-status').textContent = res.partial ? `顯示前 ${res.entries.length} 個結果` : `${res.entries.length} 個結果`;
     state.sel.clear();
     computeEntries();
@@ -4329,3 +4367,4 @@
     if (prefs.autoUpdate) setTimeout(() => checkUpdates(false), 4000);
   })();
 })();
+
