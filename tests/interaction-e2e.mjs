@@ -30,7 +30,7 @@ async function check(name, run) {
 async function goto(dir, mode = 'list') {
   await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
-  const current = await page.locator('#pathbar .crumb[data-path]').last().getAttribute('data-path').catch(() => null);
+  const current = await page.evaluate(() => [...document.querySelectorAll('#pathbar .crumb[data-path]')].at(-1)?.dataset.path);
   if (current?.toLowerCase() !== dir.toLowerCase()) {
     await page.keyboard.press('Control+l');
     await page.locator('#path-input').fill(dir);
@@ -42,7 +42,8 @@ async function goto(dir, mode = 'list') {
   }
   await page.click(`#view-seg [data-view="${mode}"]`);
   await page.waitForFunction((mode) => document.body.classList.contains(`view-${mode}`) &&
-    document.querySelector('#view').classList.contains(mode === 'icons' ? 'grid' : mode), mode);
+    (!document.querySelector('#empty').hidden ||
+      document.querySelector('#view').classList.contains(mode === 'icons' ? 'grid' : mode)), mode);
 }
 const row = (name) => page.locator('.item .nm, .item .label').filter({ hasText: new RegExp('^' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$') }).first();
 async function blankMenu(selector = '#content') {
