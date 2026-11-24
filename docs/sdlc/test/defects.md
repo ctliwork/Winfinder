@@ -15,7 +15,7 @@
 
 ## BUG-002：檔案監看讀取完成後重繪改名輸入框
 
-- 嚴重度：Major；狀態：修正後本機通過，Windows 驗證待執行。
+- 嚴重度：Major；狀態：VERIFIED（RUN-003）。
 - 重現：watcher 開始讀取資料夾後按 F2，再讓讀取完成。
 - 根因：`flushRefresh()` 僅在 await 前檢查 G.renaming；讀取完成時可移除正在編輯的 DOM。
 - 修正：讀取完成後再次檢查；保留通知並延後繪製；refresh / renderView / renderColumns 保護正在改名的畫面。
@@ -24,7 +24,7 @@
 
 ## BUG-003：過期搜尋回應覆蓋目前的範圍與篩選
 
-- 嚴重度：Major；狀態：修正後本機通過，Windows 驗證待執行。
+- 嚴重度：Major；狀態：VERIFIED（RUN-003）。
 - 重現：同一關鍵字啟動搜尋後切回目前資料夾，或連續更改篩選並讓舊請求最後回傳。
 - 根因：`runDeepSearch()` 僅檢查分頁與文字相同，無法區分同文字的多次請求。
 - 修正：以搜尋物件、唯一請求及 scope 判定有效性；清空搜尋時使舊請求失效；背景分頁只更新自己的結果。
@@ -33,7 +33,7 @@
 
 ## BUG-004：新增文字檔尚未完成時復原到前一個動作
 
-- 嚴重度：Major；狀態：修正後本機通過，Windows 驗證待執行。
+- 嚴重度：Major；狀態：VERIFIED（RUN-003）。
 - 重現：新增文字檔尚未完成時立即 Ctrl+Z。
 - 根因：`newFile()` 未透過既有 track / working 登記，undo 不會等待建立完成。
 - 修正：與新增資料夾一樣追蹤建立作業；undo 等待完成後先結束該作業剛開啟的編輯器，避免留下已刪除檔案的輸入框。
@@ -42,7 +42,7 @@
 
 ## BUG-005：祖先欄位的背景選單作用於最深目錄
 
-- 嚴重度：Major；狀態：修正後本機通過，Windows 驗證待執行。
+- 嚴重度：Major；狀態：VERIFIED（RUN-003）。
 - 重現：直欄向右開啟子資料夾，在左側上層欄位空白處按右鍵新增資料夾。
 - 根因：`colDir` 只交給排序選項；新增、貼上、原生背景選單仍使用 state.cwd。
 - 修正：背景選單建立前切換到點選的欄位；失敗或分頁已變更時不繼續開啟選單。
@@ -51,7 +51,7 @@
 
 ## BUG-006：刪除祖先目錄後可能回到已刪除路徑
 
-- 嚴重度：Major；狀態：修正後本機通過，Windows 驗證待執行。
+- 嚴重度：Major；狀態：VERIFIED（RUN-003）。
 - 重現條件：目前路徑 /files/parent/child，操作對象是 ancestor /files/parent，刪除成功。
 - 根因：`trashSelectedNow()` 以目前路徑向上一層，未依實際成功刪除的祖先決定目的地。
 - 修正：找出已刪除且包含目前路徑的最上層項目，回到該項目的父目錄；刪除失敗不跳轉。
@@ -60,7 +60,7 @@
 
 ## BUG-007：中文輸入法確認候選字會提前提交重新命名
 
-- 嚴重度：Major；狀態：修正後本機通過；實際輸入法需人工確認。
+- 嚴重度：Major；狀態：MANUAL_VERIFY_REQUIRED（自動化回歸 VERIFIED，RUN-003；實際輸入法需人工確認）。
 - 重現：改名時輸入中文，組字事件 isComposing=true 的 Enter 送達輸入框。
 - 根因：`startRename()` 未區分輸入法組字 Enter 與一般確認 Enter。
 - 修正：忽略 isComposing 或 keyCode=229 的按鍵；保留事件隔離。
@@ -70,7 +70,7 @@
 
 ## BUG-008：非同步更新關閉路徑輸入框或移走焦點
 
-- 嚴重度：Major；狀態：修正後本機通過，Windows 重測待執行。
+- 嚴重度：Major；狀態：VERIFIED（RUN-003）。
 - 發現：Windows 執行 45418394415 在改名完成後 Ctrl+L 前往路徑時，輸入框消失造成 ST-006 前置操作逾時。
 - 根因：renderPathbar 每次重繪都替換內容，未保護 editing；startRename 的完成回呼會在 await 後無條件將焦點移至 content。
 - 修正：路徑輸入期間保留 DOM；已有其他文字欄位取得焦點時不搶回。
@@ -79,9 +79,11 @@
 
 ## BUG-009：快速複製後貼上讀取尚未寫好的系統剪貼簿
 
-- 嚴重度：Major；狀態：修正後本機通過，Windows 重測待執行。
+- 嚴重度：Major；狀態：VERIFIED（RUN-003）。
 - 發現：Windows 45420339959 的 ST-008 在貼上時未進入 transfer；以可控 clipboardWrite Promise 獨立重現順序缺口。
 - 根因：copySelected 發出非同步 clipboardWrite 後立即返回；clipboardFiles 未等待寫入完成即呼叫 clipboardRead；檔案 Ctrl+C/X/V 同時未阻止 WebView 的預設文字剪貼簿行為。
 - 修正：本視窗的剪貼簿寫入以 Promise 依序執行；貼上與選單查詢先等待最新寫入，再讀取真實系統剪貼簿。檔案快捷鍵 preventDefault，文字輸入框保留正常 Ctrl+C/X/V。
 - 證據：IT-015 修正前 transfer=0（預期 1）；IT-016 修正前未 preventDefault，修正後檔案快捷鍵與文字輸入的對照案例均通過。ST-012 暫停原生剪貼簿寫入，確認貼上不提前讀取，釋放後才複製正確檔案及內容。
 - 異動：CHG-007。
+
+共同驗證證據：[RUN-003](reports/RUN-003.md)。產品程式基線 0ddf1b2b1ce57cd024e9eac661cc71ff8a5a0d5f；完整 Windows 與終端機檢查均成功。後續測試基線 08dde3b2d913695c97652c6cc9fecd92ce060426 另通過全部介面／互動與四項原生視窗可見性檢查，產品程式未變更。

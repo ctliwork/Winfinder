@@ -2,8 +2,9 @@
 
 | 文件 | 用途 | 狀態 |
 | --- | --- | --- |
-| [異動紀錄](sdlc/changes.md) | 一般異動與影響分析 | 已記錄 |
-| [缺陷紀錄](sdlc/test/defects.md) | 重現、根因與驗證證據 | BUG-002～007 本機回歸通過；Windows 驗證中 |
-| [RUN-002](sdlc/test/reports/RUN-002.md) | Windows 建置與回歸證據 | VERIFIED；原生 popup 操作另待確認 |
+| [異動紀錄](sdlc/changes.md) | CHG-001～007 與影響分析 | 已記錄 |
+| [缺陷紀錄](sdlc/test/defects.md) | BUG-001～009 與回歸證據 | BUG-002～006、008、009 VERIFIED；實際 IME 與原生新增選單保留人工確認 |
+| [RUN-002](sdlc/test/reports/RUN-002.md) | 上一輪 Windows 建置與外框檢查 | 已記錄 |
+| [RUN-003](sdlc/test/reports/RUN-003.md) | 互動、競態、預覽、終端機與原生可見性檢查 | 自動化通過；限制見報告 |
 
-本次為 C 類缺陷修正及外觀調整，保留既有新增資料夾後立即重新命名的預期行為；未建立或修改 PRD、SRS、SDD 需求與設計 ID。
+本輪為 C 類缺陷與測試修正，未建立或修改 PRD、SRS、SDD 需求與設計 ID。
