@@ -2671,8 +2671,10 @@
   function copySelected(op) {
     const items = selectedEntries().filter((e) => op === 'copy' || !isVirtual(e));
     if (!items.length) return;
-    G.clip = { op, paths: items.map((e) => e.path) };
-    api.clipboardWrite?.(G.clip.paths, op === 'move'); // shared with Explorer and the desktop
+    const clip = { op, paths: items.map((e) => e.path) };
+    G.clip = clip;
+    // Keep quick copy/cut/paste commands ordered across asynchronous IPC.
+    G.clipWrite = (G.clipWrite || Promise.resolve()).then(() => api.clipboardWrite?.(clip.paths, op === 'move'));
     toast(op === 'move' ? `已剪下 ${items.length} 個項目` : `已拷貝 ${items.length} 個項目`);
     if (op === 'move') render();
   }
@@ -2680,6 +2682,7 @@
   // Files on the clipboard: on Windows the system clipboard (so files copied
   // in Explorer paste here and the other way round), elsewhere our own.
   async function clipboardFiles() {
+    await G.clipWrite;
     if (!api.clipboardRead) return G.clip;
     const c = await api.clipboardRead();
     return c?.paths?.length ? { op: c.cut ? 'move' : 'copy', paths: c.paths } : null;

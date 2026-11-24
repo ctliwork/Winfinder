@@ -76,3 +76,12 @@
 - 修正：路徑輸入期間保留 DOM；已有其他文字欄位取得焦點時不搶回。
 - 證據：IT-013 修正前替換 input 為 crumbs；IT-014 修正前 focus=1（預期 0）。ST-011 暫停真實 rename 回應、開啟路徑欄，再讓檔案操作與 watcher 完成，驗證草稿及焦點。
 - 異動：CHG-005。
+
+## BUG-009：快速複製後貼上讀取尚未寫好的系統剪貼簿
+
+- 嚴重度：Major；狀態：修正後本機通過，Windows 重測待執行。
+- 發現：Windows 45420339959 的 ST-008 在貼上時未進入 transfer；以可控 clipboardWrite Promise 獨立重現順序缺口。
+- 根因：copySelected 發出非同步 clipboardWrite 後立即返回；clipboardFiles 未等待寫入完成即呼叫 clipboardRead。
+- 修正：本視窗的剪貼簿寫入以 Promise 依序執行；貼上與選單查詢先等待最新寫入，再讀取真實系統剪貼簿。
+- 證據：IT-015 修正前 transfer=0（預期 1）；修正後通過。ST-012 暫停原生剪貼簿寫入，確認貼上不提前讀取，釋放後才複製正確檔案及內容。
+- 異動：CHG-007。

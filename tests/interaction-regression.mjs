@@ -225,3 +225,26 @@ test('[IT-014/BUG-008] finishing a rename does not steal focus from another text
   await new Promise((r) => setImmediate(r));
   assert.equal(focuses, 0);
 });
+
+test('[IT-015/BUG-009] paste waits for the preceding asynchronous clipboard write', async () => {
+  const write = deferred();
+  let clipboard = null;
+  const transfers = [];
+  const context = vm.createContext({
+    G: {}, state: { cwd: '/destination', search: {} }, HOME: 'home',
+    selectedEntries: () => [{ path: '/source/B.txt' }], isVirtual: () => false,
+    toast() {}, render() {},
+    api: {
+      clipboardWrite: async (paths, cut) => { await write.promise; clipboard = { paths, cut }; },
+      clipboardRead: async () => clipboard,
+    },
+    transfer: async (...args) => { transfers.push(args); },
+  });
+  vm.runInContext(fn('copySelected') + '\n' + fn('clipboardFiles') + '\n' + fn('paste'), context);
+  context.copySelected('copy');
+  const pasting = context.paste();
+  write.resolve();
+  await pasting;
+  assert.equal(transfers.length, 1);
+  assert.equal(transfers[0][1][0], '/source/B.txt');
+});

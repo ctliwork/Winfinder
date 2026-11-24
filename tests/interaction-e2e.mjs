@@ -239,6 +239,37 @@ try {
     await page.locator('#search').press('Escape');
   });
 
+  await check('[ST-012/BUG-009] immediate paste waits for the real clipboard write', async () => {
+    await goto(path.join(files, 'Source'));
+    await row('B.txt').click();
+    await page.evaluate(() => {
+      const write = window.fsApi.clipboardWrite;
+      const read = window.fsApi.clipboardRead;
+      window.__clipboardReads = 0;
+      window.fsApi.clipboardWrite = async (...args) => {
+        await new Promise((resolve) => { window.__releaseClipboard = resolve; });
+        return write(...args);
+      };
+      window.fsApi.clipboardRead = (...args) => { window.__clipboardReads++; return read(...args); };
+      window.__restoreClipboard = () => {
+        window.fsApi.clipboardWrite = write;
+        window.fsApi.clipboardRead = read;
+      };
+    });
+    await page.keyboard.press('Control+c');
+    await page.waitForFunction(() => !!window.__releaseClipboard);
+    await goto(path.join(files, 'Destination'));
+    const completed = await page.evaluate(() => window.__transfersCompleted);
+    await page.keyboard.press('Control+v');
+    assert.equal(await page.evaluate(() => window.__clipboardReads), 0, 'paste cannot read before copy finishes');
+    await page.evaluate(() => window.__releaseClipboard());
+    await page.waitForFunction((before) => window.__transfersCompleted > before, completed);
+    assert.equal(fs.readFileSync(path.join(files, 'Destination', 'B.txt'), 'utf8'), 'beta');
+    await page.evaluate(() => window.__restoreClipboard());
+    await page.keyboard.press('Control+z');
+    await waitFile(path.join(files, 'Destination', 'B.txt'), false);
+  });
+
   await check('[ST-008] copy, paste, duplicate and undo preserve file contents', async () => {
     await goto(path.join(files, 'Source'));
     await row('B.txt').click();
@@ -302,6 +333,9 @@ try {
     title: document.querySelector('#title')?.textContent,
     pathbar: document.querySelector('#pathbar')?.outerHTML,
     renaming: document.querySelector('input.rename')?.outerHTML,
+    clipboardReads: window.__clipboardReads,
+    completedTransfers: window.__transfersCompleted,
+    toast: document.querySelector('#toast')?.textContent,
   })).catch(() => null));
   process.exitCode = 1;
 } finally {
