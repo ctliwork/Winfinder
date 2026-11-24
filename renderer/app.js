@@ -2500,6 +2500,8 @@
   }
   async function undo() {
     while (working.size) await Promise.allSettled([...working]);
+    // A create may have opened its editor while undo was waiting for it.
+    await G.cancelRename?.();
     const u = undoStack.pop();
     if (!u) { toast('沒有可以復原的動作'); return; }
     let ok = false;
@@ -2737,6 +2739,7 @@
       if (done) return;
       done = true;
       G.renaming = null;
+      G.cancelRename = null;
       // Put the name back now: the column view keeps unchanged rows as they
       // are, so it wouldn't redraw this one and the box would stay behind.
       if (input.isConnected) input.replaceWith(label);
@@ -2758,6 +2761,7 @@
       await refresh(false);
       content.focus();
     };
+    G.cancelRename = () => finish(false);
     input.addEventListener('keydown', (ev) => {
       ev.stopPropagation();
       if (ev.isComposing || ev.keyCode === 229) return;

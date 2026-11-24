@@ -77,9 +77,13 @@ test('[IT-007/BUG-004] Ctrl+Z waits for an in-flight new text file instead of un
   const effects = [];
   const context = vm.createContext({
     state: { cwd: '/files', search: {}, sel: new Set() }, HOME: 'home', Set,
+    G: { renaming: null },
     api: { newFile: () => created.promise, trash: async (paths) => { effects.push(paths[0]); return []; } },
     listDir: async () => {}, inColumnsMode: () => false, computeEntries() {}, render: async () => {},
-    startRename() {}, entryOf: () => null, toast() {}, dirCache: new Map(), refresh: async () => {},
+    startRename() {
+      context.G.renaming = '/files/new.txt';
+      context.G.cancelRename = async () => { context.G.renaming = null; };
+    }, entryOf: () => null, toast() {}, dirCache: new Map(), refresh: async () => {},
     errText: (s) => s,
   });
   const undoStart = source.indexOf('  const undoStack = []');
@@ -93,6 +97,7 @@ test('[IT-007/BUG-004] Ctrl+Z waits for an in-flight new text file instead of un
   created.resolve({ ok: true, path: '/files/new.txt' });
   await Promise.all([creating, undoing]);
   assert.deepEqual(effects, ['/files/new.txt']);
+  assert.equal(context.G.renaming, null, 'undo must close the editor before deleting its new file');
 });
 
 test('[IT-008/BUG-005] right-clicking empty space in an ancestor column targets that column', async () => {

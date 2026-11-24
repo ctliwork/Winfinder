@@ -143,7 +143,6 @@ try {
     await page.evaluate(() => { window.__releaseCreate(); window.__restoreCreate(); });
     await page.waitForFunction(() => document.querySelector('#toast').textContent.includes('已復原新增文字文件'));
     assert.equal(fs.existsSync(path.join(files, 'Source', '新文字文件.txt')), false);
-    await page.keyboard.press('Escape');
     await page.waitForFunction(() => !document.querySelector('input.rename'));
   });
 

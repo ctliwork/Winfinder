@@ -9,6 +9,7 @@ on:
     paths:
       - '.github/workflows/windows-test.yml'
       - 'tests/windows-e2e.mjs'
+      - 'tests/interaction-e2e.mjs'
   workflow_dispatch:
     inputs:
       terminal_only:
