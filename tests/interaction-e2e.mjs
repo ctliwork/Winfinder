@@ -52,6 +52,11 @@ async function waitFile(file, exists = true) {
   }
   assert.equal(fs.existsSync(file), exists, file);
 }
+async function transferKey(key) {
+  const completed = await page.evaluate(() => window.__transfersCompleted);
+  await page.keyboard.press(key);
+  await page.waitForFunction((before) => window.__transfersCompleted > before, completed);
+}
 try {
   for (let i = 0; i < 100; i++) {
     try {
@@ -73,6 +78,15 @@ try {
   }, files);
   await page.reload();
   await page.waitForSelector('.item');
+  await page.evaluate(() => {
+    const original = window.fsApi.transfer;
+    window.__transfersCompleted = 0;
+    window.fsApi.transfer = async (...args) => {
+      const result = await original(...args);
+      window.__transfersCompleted++;
+      return result;
+    };
+  });
 
   await check('[ST-002/BUG-007] IME confirmation, Escape cancellation, and Enter commit', async () => {
     await goto(path.join(files, 'Source'));
@@ -230,11 +244,11 @@ try {
     await row('B.txt').click();
     await page.keyboard.press('Control+c');
     await goto(path.join(files, 'Destination'));
-    await page.keyboard.press('Control+v');
+    await transferKey('Control+v');
     await waitFile(path.join(files, 'Destination', 'B.txt'));
     assert.equal(fs.readFileSync(path.join(files, 'Destination', 'B.txt'), 'utf8'), 'beta');
     await row('B.txt').click();
-    await page.keyboard.press('Control+d');
+    await transferKey('Control+d');
     await waitFile(path.join(files, 'Destination', 'B 2.txt'));
     assert.equal(fs.readFileSync(path.join(files, 'Destination', 'B 2.txt'), 'utf8'), 'beta');
     await page.keyboard.press('Control+z');
@@ -249,7 +263,7 @@ try {
     await row('C.txt').click();
     await page.keyboard.press('Control+x');
     await goto(path.join(files, 'Destination'));
-    await page.keyboard.press('Control+v');
+    await transferKey('Control+v');
     await waitFile(path.join(files, 'Destination', 'C.txt'));
     assert.equal(fs.existsSync(path.join(files, 'Source', 'C.txt')), false);
     await page.keyboard.press('Control+z');
@@ -284,7 +298,7 @@ try {
   await page?.screenshot({ path: path.join(out, 'failure.png') }).catch(() => {});
   console.error('INTERACTION FAILED', error);
   console.error('INTERACTION UI', await page?.evaluate(() => ({
-    active: document.activeElement?.outerHTML,
+    active: document.activeElement?.outerHTML.slice(0, 500),
     title: document.querySelector('#title')?.textContent,
     pathbar: document.querySelector('#pathbar')?.outerHTML,
     renaming: document.querySelector('input.rename')?.outerHTML,
