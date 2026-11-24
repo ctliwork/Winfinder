@@ -9,6 +9,8 @@ on:
       - 'renderer/styles.css'
       - 'renderer/early.js'
       - 'src-tauri/src/lib.rs'
+      - 'src-tauri/src/winshell.rs'
+      - 'tests/new-folder-rename.mjs'
       - 'tests/glass-e2e.mjs'
       - '.github/scripts/prepare-release.mjs'
       - '.github/scripts/verify-release.mjs'
@@ -42,6 +44,8 @@ jobs:
           node --check tests/glass-e2e.mjs
           node --check .github/scripts/prepare-release.mjs
           node --check .github/scripts/verify-release.mjs
+      - name: New folder rename regression
+        run: node --test tests/new-folder-rename.mjs
       - name: Rust tests
         working-directory: src-tauri
         run: cargo test --locked

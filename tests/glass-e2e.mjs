@@ -82,6 +82,10 @@ try {
           contentBackground: style('#body').backgroundColor,
           text: style('body').color,
           tabRadius: style('.tab.active').borderRadius,
+          outerPanels: ['#main', '#sidebar'].map((s) => ({
+            radius: style(s).borderRadius, shadow: style(s).boxShadow,
+            border: style(s).borderWidth, margin: style(s).margin,
+          })),
           material: document.documentElement.dataset.material,
           theme: document.documentElement.dataset.theme || 'system',
         };
@@ -96,6 +100,10 @@ try {
       assert.ok(layout.status.bottom <= layout.height + 1, 'status stays in window');
       assert.ok(layout.content.height > 200, 'usable file area');
       assert.equal(layout.tabRadius, '9px', 'floating rounded tab');
+      for (const panel of layout.outerPanels) {
+        assert.deepEqual(panel, { radius: '0px', shadow: 'none', border: '0px', margin: '0px' },
+          'outer panels have no inset rounded frame');
+      }
       if (nativeMaterial === 'acrylic') {
         assert.equal(layout.bodyBackground, 'rgba(0, 0, 0, 0)', 'desktop can show through shell');
       }
@@ -216,6 +224,47 @@ try {
   await page.locator('[data-pref="theme"]').selectOption('dark');
   assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), 'dark');
   await page.keyboard.press('Escape');
+  // [ST-001/BUG-001] New folders keep their selected name and input focus
+  // across watcher notifications until the user explicitly completes editing.
+  // The native popup itself is outside WebView2; inject its command result.
+  for (const [menuStyle, mode] of [['finder', 'columns'], ['windows', 'list']]) {
+    await page.evaluate(({ menuStyle, mode }) => {
+      const prefs = JSON.parse(localStorage.getItem('winfinder:prefs'));
+      Object.assign(prefs, { menuStyle, view: mode, rememberView: false });
+      localStorage.setItem('winfinder:prefs', JSON.stringify(prefs));
+    }, { menuStyle, mode });
+    await page.reload();
+    await page.waitForSelector(mode === 'columns' ? '.crow' : '.lrow');
+    if (menuStyle === 'windows') {
+      await page.evaluate(() => { window.fsApi.nativeMenu = async () => 'newfolder'; });
+    }
+    const area = await page.locator(mode === 'columns' ? '.col' : '#content').first().boundingBox();
+    await page.mouse.click(area.x + 20, area.y + area.height - 20, { button: 'right' });
+    if (menuStyle === 'finder') {
+      await page.locator('#menu .mi', { hasText: '新增資料夾' }).click();
+    }
+    const input = page.locator('input.rename');
+    await input.waitFor({ state: 'visible' });
+    const original = await input.inputValue();
+    assert.ok(original.length > 0, 'new folder has an editable default name');
+    assert.equal(fs.existsSync(path.join(files, original)), true, 'folder is created once before editing');
+    assert.deepEqual(await input.evaluate((e) => [e.selectionStart, e.selectionEnd]),
+      [0, original.length], 'whole folder name is selected');
+    const typed = `Renamed-${menuStyle}`;
+    await input.fill(typed);
+    // A real filesystem notification during editing must not replace the input.
+    fs.writeFileSync(path.join(files, `watch-${menuStyle}.txt`), 'watcher notification');
+    await page.waitForTimeout(1200);
+    assert.equal(await input.inputValue(), typed, 'draft survives watcher updates');
+    assert.equal(await input.evaluate((e) => document.activeElement === e), true, 'rename keeps focus');
+    assert.equal(fs.existsSync(path.join(files, typed)), false, 'typing alone does not commit');
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(() => !document.querySelector('input.rename'));
+    await page.waitForFunction((name) => [...document.querySelectorAll('.nm, .label')].some((e) => e.textContent === name), typed);
+    assert.equal(fs.existsSync(path.join(files, typed)), true, 'Enter commits the folder name');
+    assert.equal(fs.existsSync(path.join(files, original)), false, 'temporary name is replaced');
+    report.push({ name: `new-folder-rename-${menuStyle}-${mode}`, passed: true });
+  }
   // Reduced transparency and high contrast must offer opaque readable surfaces.
   await cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-transparency', value: 'reduce' }] });
   assert.equal(await page.locator('#sidebar').evaluate((e) => getComputedStyle(e).backdropFilter), 'none');

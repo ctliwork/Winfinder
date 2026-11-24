@@ -2960,6 +2960,9 @@
     let verb = '';
     try { verb = await api.nativeMenu(paths, background, shift, extras); } catch (err) { toast(`無法顯示選單：${err}`); return true; }
     if (verb.startsWith('app:')) { await actions[Number(verb.slice(4))]?.(); return true; }
+    // Shell cannot request inline editing in our custom view. Create here so
+    // the native menu and Ctrl+Shift+N share selection, rename, and undo.
+    if (background && verb === 'newfolder') { await newFolder(); return true; }
     if (verb === 'rename') {
       const items = entries.filter((e) => paths.includes(e.path));
       if (items.length === 1) startRename(items[0]); else batchRename(items);

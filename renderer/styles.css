@@ -125,9 +125,10 @@ svg { display: block; }
 #sidebar {
   width: var(--sidebar-w);
   flex: none;
-  margin: 8px 0 8px 8px;
-  border-radius: 18px;
-  box-shadow: var(--panel-shadow);
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -184,11 +185,11 @@ body.sidebar-hidden #sidebar { width: 0; margin-left: 0; opacity: 0; border-widt
   display: flex; flex-direction: column;
   background: transparent;
   position: relative;
-  margin: 8px 8px 8px 0;
-  border-radius: 18px;
+  margin: 0;
+  border-radius: 0;
   overflow: hidden;
-  border: 0.5px solid var(--glass-border);
-  box-shadow: var(--panel-shadow);
+  border: 0;
+  box-shadow: none;
 }
 
 #panes { flex: 1; min-height: 0; display: flex; }

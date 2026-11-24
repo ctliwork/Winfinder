@@ -174,9 +174,20 @@ unsafe fn add_extras(menu: HMENU, extras: &[Extra], pos: Option<u32>) -> u32 {
     n
 }
 
+// Inline editing belongs to the renderer, not Explorer's folder view.
+fn inline_command(verb: &str, background: bool) -> Option<&'static str> {
+    if verb.eq_ignore_ascii_case("rename") {
+        Some("rename")
+    } else if background && verb.eq_ignore_ascii_case("NewFolder") {
+        Some("newfolder")
+    } else {
+        None
+    }
+}
+
 /// Shows Explorer's context menu at the cursor, with the app's own items at
 /// the top, and runs the chosen shell command. Returns "app:<id>" for an app
-/// item, "rename" when the app should rename inline, otherwise "".
+/// item, "rename" or "newfolder" for renderer-managed inline editing, otherwise "".
 pub fn show_menu(hwnd: HWND, paths: &[String], background: bool, shift: bool, extras: &[Extra]) -> Result<String, String> {
     let cm = context_menu(hwnd, paths, background)?;
     unsafe {
@@ -204,8 +215,8 @@ pub fn show_menu(hwnd: HWND, paths: &[String], background: bool, shift: bool, ex
         } else if cmd >= FIRST {
             let id = cmd - FIRST;
             let verb = verb_of(&cm, id);
-            if verb.eq_ignore_ascii_case("rename") {
-                Ok("rename".into())
+            if let Some(command) = inline_command(&verb, background) {
+                Ok(command.into())
             } else {
                 // MAKEINTRESOURCE: the command offset travels in the pointer.
                 invoke(&cm, hwnd, PCSTR(id as usize as *const u8), PCWSTR(id as usize as *const u16), pt, shift).map(|_| String::new())
@@ -381,5 +392,26 @@ pub fn drag_files(hwnd: HWND, paths: &[String]) -> Result<(), String> {
             ILFree(Some(p));
         }
         res.map_err(|e| e.message())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::inline_command;
+
+    #[test]
+    fn native_new_folder_is_managed_by_renderer_only_in_background() {
+        assert_eq!(inline_command("NewFolder", true), Some("newfolder"));
+        assert_eq!(inline_command("newfolder", true), Some("newfolder"));
+        assert_eq!(inline_command("NewFolder", false), None);
+    }
+
+    #[test]
+    fn existing_shell_commands_keep_their_routing() {
+        assert_eq!(inline_command("rename", false), Some("rename"));
+        assert_eq!(inline_command("RENAME", true), Some("rename"));
+        for verb in ["", "copy", "cut", "delete", "NewTextDocument"] {
+            assert_eq!(inline_command(verb, true), None);
+        }
     }
 }
