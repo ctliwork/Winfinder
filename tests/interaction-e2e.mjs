@@ -128,6 +128,34 @@ try {
     assert.equal(fs.existsSync(path.join(files, 'Source', 'Draft.txt')), false);
   });
 
+  await check('[ST-011/BUG-008] rename completion and watcher updates preserve address input', async () => {
+    await page.evaluate(() => {
+      const original = window.fsApi.rename;
+      window.fsApi.rename = async (...args) => {
+        await new Promise((resolve) => { window.__releaseRename = resolve; });
+        return original(...args);
+      };
+      window.__restoreRename = () => { window.fsApi.rename = original; };
+    });
+    await row('A.txt').click();
+    await page.keyboard.press('F2');
+    await page.locator('input.rename').fill('Address-race.txt');
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(() => !!window.__releaseRename);
+    await page.keyboard.press('Control+l');
+    await page.locator('#path-input').fill('partial path being typed');
+    await page.evaluate(() => { window.__releaseRename(); window.__restoreRename(); });
+    await waitFile(path.join(files, 'Source', 'Address-race.txt'));
+    fs.writeFileSync(path.join(files, 'Source', 'address-watch.txt'), 'notification');
+    await pause(700);
+    assert.equal(await page.locator('#path-input').inputValue(), 'partial path being typed');
+    assert.equal(await page.locator('#path-input').evaluate((e) => document.activeElement === e), true);
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('Control+z');
+    await waitFile(path.join(files, 'Source', 'A.txt'));
+    await row('A.txt').waitFor();
+  });
+
   await check('[ST-004/BUG-004] new text file and immediate Ctrl+Z undo the new file', async () => {
     await page.evaluate(() => {
       const original = window.fsApi.newFile;
@@ -255,6 +283,12 @@ try {
   results.push({ passed: false, error: error.stack || String(error) });
   await page?.screenshot({ path: path.join(out, 'failure.png') }).catch(() => {});
   console.error('INTERACTION FAILED', error);
+  console.error('INTERACTION UI', await page?.evaluate(() => ({
+    active: document.activeElement?.outerHTML,
+    title: document.querySelector('#title')?.textContent,
+    pathbar: document.querySelector('#pathbar')?.outerHTML,
+    renaming: document.querySelector('input.rename')?.outerHTML,
+  })).catch(() => null));
   process.exitCode = 1;
 } finally {
   fs.writeFileSync(path.join(out, 'report.json'), JSON.stringify({ results, errors }, null, 2));

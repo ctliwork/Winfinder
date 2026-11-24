@@ -187,3 +187,41 @@ test('[IT-012/BUG-003] clearing a deep search invalidates its pending response',
   assert.equal(tab.search.busy, false);
   assert.equal(status.textContent, '');
 });
+
+test('[IT-013/BUG-008] background pathbar updates preserve a path being typed', () => {
+  const original = '<input id="path-input" value="/typing">';
+  let editing = true;
+  const bar = { classList: { contains: () => editing }, innerHTML: original, scrollWidth: 100 };
+  const context = vm.createContext({
+    state: { cwd: '/files', search: {} }, HOME: 'home', $: () => bar,
+    P: { root: () => '/' }, ancestors: () => ['/', '/files'],
+    shellIco: () => '', folderIco: () => '', I: { drive: () => '' },
+    esc: (s) => s, displayName: (s) => s,
+  });
+  vm.runInContext(fn('renderPathbar'), context);
+  context.renderPathbar();
+  assert.equal(bar.innerHTML, original, 'an async redraw must not replace the active address editor');
+  editing = false;
+  context.renderPathbar();
+  assert.ok(bar.innerHTML.includes('data-path="/files"'), 'path breadcrumbs update after editing finishes');
+});
+
+test('[IT-014/BUG-008] finishing a rename does not steal focus from another text editor', async () => {
+  const read = deferred();
+  const listeners = {};
+  let focuses = 0;
+  const input = { isConnected: true, focus() {}, setSelectionRange() {}, replaceWith() {},
+    addEventListener: (name, cb) => { listeners[name] = cb; } };
+  const label = { replaceWith() {} };
+  const context = vm.createContext({
+    G: {}, isVirtual: () => false, revealPath: () => ({}), $: () => label,
+    document: { createElement: () => input, activeElement: { matches: () => true } },
+    refresh: () => read.promise, content: { focus: () => { focuses++; } },
+  });
+  vm.runInContext(fn('startRename'), context);
+  context.startRename({ path: '/files/a', name: 'a' });
+  listeners.keydown({ key: 'Escape', stopPropagation() {} });
+  read.resolve();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(focuses, 0);
+});

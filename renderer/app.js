@@ -1982,6 +1982,7 @@
 
   function renderPathbar() {
     const bar = $('#pathbar');
+    if (bar.classList.contains('editing')) return;
     if (state.search.results || state.search.smart) {
       const label = state.search.smart ? tabTitle(state) : '搜尋結果';
       bar.innerHTML = `<span class="crumb">${I.sidebar(state.search.smart ? 'smart' : 'recent')}<span>${esc(label)}：${state.entries.length} 個項目</span></span>`;
@@ -2759,7 +2760,7 @@
         }
       }
       await refresh(false);
-      content.focus();
+      if (!document.activeElement?.matches('input, textarea, select')) content.focus();
     };
     G.cancelRename = () => finish(false);
     input.addEventListener('keydown', (ev) => {
