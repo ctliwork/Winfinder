@@ -30,15 +30,19 @@ async function check(name, run) {
 async function goto(dir, mode = 'list') {
   await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
-  await page.keyboard.press('Control+l');
-  await page.locator('#path-input').fill(dir);
-  await page.keyboard.press('Enter');
-  await page.waitForFunction((dir) => {
-    const last = [...document.querySelectorAll('#pathbar .crumb[data-path]')].at(-1);
-    return last?.dataset.path.toLowerCase() === dir.toLowerCase();
-  }, dir);
+  const current = await page.locator('#pathbar .crumb[data-path]').last().getAttribute('data-path').catch(() => null);
+  if (current?.toLowerCase() !== dir.toLowerCase()) {
+    await page.keyboard.press('Control+l');
+    await page.locator('#path-input').fill(dir);
+    await page.keyboard.press('Enter');
+    await page.waitForFunction((dir) => {
+      const last = [...document.querySelectorAll('#pathbar .crumb[data-path]')].at(-1);
+      return last?.dataset.path.toLowerCase() === dir.toLowerCase();
+    }, dir);
+  }
   await page.click(`#view-seg [data-view="${mode}"]`);
-  await page.waitForFunction((mode) => document.body.classList.contains(`view-${mode}`), mode);
+  await page.waitForFunction((mode) => document.body.classList.contains(`view-${mode}`) &&
+    document.querySelector('#view').classList.contains(mode === 'icons' ? 'grid' : mode), mode);
 }
 const row = (name) => page.locator('.item .nm, .item .label').filter({ hasText: new RegExp('^' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$') }).first();
 async function blankMenu(selector = '#content') {
