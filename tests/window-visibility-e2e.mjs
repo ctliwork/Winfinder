@@ -25,11 +25,10 @@ async function boot(args) {
   }
   assert.ok(page, 'app page');
   await page.waitForSelector('#pathbar .crumb');
-  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
 }
 async function visible(value) {
   await page.waitForFunction(async (value) =>
-    (await window.__TAURI__.window.getCurrentWindow().isVisible()) === value, value, { timeout: 10000 });
+    (await window.__TAURI__.window.getCurrentWindow().isVisible()) === value, value, { timeout: 10000, polling: 100 });
   assert.equal(await page.evaluate(() => window.__TAURI__.window.getCurrentWindow().isVisible()), value);
 }
 async function stop() {
