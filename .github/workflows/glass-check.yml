@@ -13,6 +13,7 @@ on:
       - 'tests/new-folder-rename.mjs'
       - 'tests/interaction-regression.mjs'
       - 'tests/interaction-e2e.mjs'
+      - 'tests/window-visibility-e2e.mjs'
       - 'tests/glass-e2e.mjs'
       - '.github/scripts/prepare-release.mjs'
       - '.github/scripts/verify-release.mjs'
@@ -61,6 +62,9 @@ jobs:
       - name: File interaction regression (real Windows app)
         timeout-minutes: 6
         run: node tests/interaction-e2e.mjs
+      - name: Native window visibility regression
+        timeout-minutes: 3
+        run: node tests/window-visibility-e2e.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -68,3 +72,4 @@ jobs:
           path: |
             e2e-glass
             e2e-interactions
+            e2e-visibility
