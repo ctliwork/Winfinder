@@ -27,9 +27,13 @@ async function boot(args) {
   await page.waitForSelector('#pathbar .crumb');
 }
 async function visible(value) {
-  await page.waitForFunction(async (value) =>
-    (await window.__TAURI__.window.getCurrentWindow().isVisible()) === value, value, { timeout: 10000, polling: 100 });
-  assert.equal(await page.evaluate(() => window.__TAURI__.window.getCurrentWindow().isVisible()), value);
+  let actual;
+  for (const deadline = Date.now() + 10000; Date.now() < deadline;) {
+    actual = await page.evaluate(() => window.__TAURI__.window.getCurrentWindow().isVisible());
+    if (actual === value) break;
+    await pause(100);
+  }
+  assert.equal(actual, value);
 }
 async function stop() {
   await browser?.close().catch(() => {});
