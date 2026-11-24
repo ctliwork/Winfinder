@@ -207,7 +207,7 @@ try {
     const ancestor = page.locator('.col').filter({ has: page.locator('.nm', { hasText: /^Child$/ }) }).first();
     await ancestor.scrollIntoViewIfNeeded();
     const box = await ancestor.boundingBox();
-    await page.mouse.click(box.x + 20, box.y + box.height - 20, { button: 'right' });
+    await ancestor.click({ button: 'right', position: { x: 20, y: box.height - 20 } });
     await page.locator('#menu .mi', { hasText: '新增資料夾' }).click();
     const input = page.locator('input.rename');
     await input.waitFor();
