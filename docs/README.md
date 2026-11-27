@@ -9,4 +9,4 @@
 
 本輪為 C 類缺陷與測試修正，未建立或修改 PRD、SRS、SDD 需求與設計 ID。
 
-CHG-008：Windows 右鍵選單調整為傳統完整選單；回歸驗證中。
+CHG-008：Windows 右鍵選單調整為傳統完整選單；[RUN-004](sdlc/test/reports/RUN-004.md) 自動化驗證通過。
