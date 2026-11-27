@@ -11,6 +11,8 @@ on:
       - 'src-tauri/src/lib.rs'
       - 'src-tauri/src/winshell.rs'
       - 'tests/new-folder-rename.mjs'
+      - 'tests/native-menu-regression.mjs'
+      - 'tests/native-menu-e2e.mjs'
       - 'tests/interaction-regression.mjs'
       - 'tests/interaction-e2e.mjs'
       - 'tests/window-visibility-e2e.mjs'
@@ -48,7 +50,7 @@ jobs:
           node --check .github/scripts/prepare-release.mjs
           node --check .github/scripts/verify-release.mjs
       - name: New folder rename regression
-        run: node --test tests/new-folder-rename.mjs tests/interaction-regression.mjs
+        run: node --test tests/new-folder-rename.mjs tests/interaction-regression.mjs tests/native-menu-regression.mjs
       - name: Rust tests
         working-directory: src-tauri
         run: cargo test --locked
@@ -65,6 +67,9 @@ jobs:
       - name: Native window visibility regression
         timeout-minutes: 3
         run: node tests/window-visibility-e2e.mjs
+      - name: Traditional native context menu regression
+        timeout-minutes: 3
+        run: node tests/native-menu-e2e.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -73,3 +78,4 @@ jobs:
             e2e-glass
             e2e-interactions
             e2e-visibility
+            e2e-native-menu

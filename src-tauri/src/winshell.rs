@@ -16,7 +16,7 @@ use windows::Win32::System::Ole::CF_HDROP;
 use windows::Win32::UI::Shell::Common::ITEMIDLIST;
 use windows::Win32::UI::Shell::{
     DefSubclassProc, DragQueryFileW, IContextMenu, IContextMenu2, IContextMenu3, ILFindLastID, IShellFolder, RemoveWindowSubclass,
-    SHBindToParent, SHGetDesktopFolder, SHParseDisplayName, SetWindowSubclass, CMF_EXTENDEDVERBS, CMF_NORMAL, CMIC_MASK_PTINVOKE,
+    SHBindToParent, SHGetDesktopFolder, SHParseDisplayName, SetWindowSubclass, CMF_CANRENAME, CMF_ITEMMENU, CMF_EXTENDEDVERBS, CMF_NORMAL, CMIC_MASK_PTINVOKE,
     CMIC_MASK_SHIFT_DOWN, CMINVOKECOMMANDINFO, CMINVOKECOMMANDINFOEX, DROPFILES, GCS_VERBW, HDROP,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -185,6 +185,12 @@ fn inline_command(verb: &str, background: bool) -> Option<&'static str> {
     }
 }
 
+fn menu_flags(background: bool, shift: bool) -> u32 {
+    CMF_NORMAL
+        | if background { 0 } else { CMF_CANRENAME | CMF_ITEMMENU }
+        | if shift { CMF_EXTENDEDVERBS } else { 0 }
+}
+
 /// Shows Explorer's context menu at the cursor, with the app's own items at
 /// the top, and runs the chosen shell command. Returns "app:<id>" for an app
 /// item, "rename" or "newfolder" for renderer-managed inline editing, otherwise "".
@@ -193,7 +199,7 @@ pub fn show_menu(hwnd: HWND, paths: &[String], background: bool, shift: bool, ex
     unsafe {
         let menu = CreatePopupMenu().map_err(|e| e.message())?;
         const FIRST: u32 = 1;
-        let flags = CMF_NORMAL | if shift { CMF_EXTENDEDVERBS } else { 0 };
+        let flags = menu_flags(background, shift);
         let hr = cm.QueryContextMenu(menu, 0, FIRST, 0x7FFF, flags);
         if hr.is_err() {
             let _ = DestroyMenu(menu);
@@ -397,13 +403,41 @@ pub fn drag_files(hwnd: HWND, paths: &[String]) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::inline_command;
+    use super::{inline_command, menu_flags};
 
     #[test]
     fn native_new_folder_is_managed_by_renderer_only_in_background() {
         assert_eq!(inline_command("NewFolder", true), Some("newfolder"));
         assert_eq!(inline_command("newfolder", true), Some("newfolder"));
         assert_eq!(inline_command("NewFolder", false), None);
+    }
+
+    #[test]
+    fn shell_file_menu_includes_rename_for_an_inline_capable_view() {
+        use super::{context_menu, verb_of};
+        use windows::Win32::Foundation::HWND;
+        use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
+        use windows::Win32::UI::WindowsAndMessaging::{CreatePopupMenu, DestroyMenu};
+
+        let dir = std::env::temp_dir().join(format!("winfinder-shell-menu-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("menu-test.txt");
+        std::fs::write(&file, "test").unwrap();
+        unsafe {
+            assert!(CoInitializeEx(None, COINIT_APARTMENTTHREADED).is_ok());
+            let cm = context_menu(HWND::default(), &[file.to_string_lossy().into_owned()], false).unwrap();
+            let menu = CreatePopupMenu().unwrap();
+            let result = cm.QueryContextMenu(menu, 0, 1, 0x7FFF, menu_flags(false, false));
+            assert!(result.is_ok(), "{result:?}");
+            let count = (result.0 as u32) & 0xFFFF;
+            let has_rename = (0..count).any(|id| verb_of(&cm, id).eq_ignore_ascii_case("rename"));
+            DestroyMenu(menu).unwrap();
+            drop(cm);
+            CoUninitialize();
+            assert!(has_rename, "the real Shell menu must expose Rename");
+        }
+        std::fs::remove_file(file).unwrap();
+        std::fs::remove_dir(dir).unwrap();
     }
 
     #[test]

@@ -2923,50 +2923,10 @@
     refresh(true);
   }
 
-  // Explorer's own context menu (7-Zip, VS Code, Git, OneDrive… entries).
-  // Our menu items (with actions) -> the plain list the native side inserts.
-  function toExtras(items) {
-    const actions = [];
-    // Windows' menu has text items only: our menus' headings and rows of buttons (html) are left out.
-    const conv = (list) => list.filter((it) => it && !it.html).map((it) => {
-      if (it === '-') return { label: '-' };
-      if (it.children) return { label: it.label, children: conv(it.children) };
-      return { id: actions.push(it.action) - 1, label: it.label, checked: !!it.check, disabled: !!it.disabled };
-    });
-    return { extras: conv(items), actions };
-  }
-
-  // What Explorer's menu lacks, shown above its own items.
-  function appItemsFor(entries) {
-    const one = entries.length === 1 ? entries[0] : null;
-    return [
-      one?.isDir && { label: '在新分頁中打開', action: () => openTab(one.path, { activate: false }) },
-      { label: one ? '快速查看' : `快速查看 ${entries.length} 個項目`, action: () => ql.open() },
-      entries.length > 1 && { label: `批次重新命名 ${entries.length} 個項目…`, action: () => batchRename(entries) },
-      { label: '拷貝路徑', action: copyPath },
-      one?.isDir && api.dirSize && { label: '計算大小', action: () => calcSize(one) },
-      one?.ext === 'lnk' && api.resolveLink && { label: '顯示原始項目', action: () => showOriginal(one) },
-    ];
-  }
-  function appItemsForBackground(colDir = null) {
-    const views = [['icons', '圖像'], ['list', '列表'], ['columns', '直欄'], ['gallery', '圖庫']];
-    const dir = sortTarget(colDir);
-    return [
-      { label: '檢視', children: views.map(([v, l]) => ({ label: l, check: curView() === v, action: () => setView(v) })) },
-      { label: '排序方式', children: sortItems(colDir, { groups: false }) },
-      viewMode() !== 'gallery' && { label: '分組依據', children: GROUPS.map(([g, l]) => ({ label: g === 'none' ? '（無）' : l, check: groupFor(dir) === g, action: () => setGroup(g, dir) })) },
-      { label: '重新整理', action: () => refresh(true) },
-      '-',
-      undoStack.length && { label: `復原${undoStack[undoStack.length - 1].label}`, action: undo },
-      { label: '顯示隱藏的項目', check: prefs.showHidden, action: toggleHidden },
-      api.openTerminal && { label: '在終端機中開啟', action: () => openTerminalTab(state.cwd) },
-      isWin && api.openTerminal && { label: '在 Windows Terminal 中開啟', action: () => openTerminal(state.cwd) },
-    ];
-  }
   // Right-click on Windows shows Explorer's own menu unless Settings say otherwise.
   function useWinMenu() { return !!api.nativeMenu && prefs.menuStyle !== 'finder'; }
 
-  async function nativeMenu(entries, { background = false, shift = false, items = null } = {}) {
+  async function nativeMenu(entries, { background = false, shift = false } = {}) {
     if (!api.nativeMenu) return false;
     let paths = [state.cwd];
     if (!background) {
@@ -2977,10 +2937,9 @@
       paths = items.filter((e) => norm(P.dirname(e.path)) === dir).map((e) => e.path);
     } else if (state.cwd === HOME || state.search.results) return false;
     closeMenu();
-    const { extras, actions } = toExtras(items || []);
     let verb = '';
-    try { verb = await api.nativeMenu(paths, background, shift, extras); } catch (err) { toast(`無法顯示選單：${err}`); return true; }
-    if (verb.startsWith('app:')) { await actions[Number(verb.slice(4))]?.(); return true; }
+    // Let Windows supply the complete traditional menu, without app additions.
+    try { verb = await api.nativeMenu(paths, background, shift, []); } catch (err) { toast(`無法顯示選單：${err}`); return true; }
     // Shell cannot request inline editing in our custom view. Create here so
     // the native menu and Ctrl+Shift+N share selection, rename, and undo.
     if (background && verb === 'newfolder') { await newFolder(); return true; }
@@ -3043,7 +3002,7 @@
       if (it.col != null && !inSel) await columnClick(it.entry, it.col);
       else if (!inSel) { state.anchor = it.entry.path; setSelection([it.entry.path]); }
       const entries = it.col != null && !inSel ? [it.entry] : selectedEntries();
-      if (!(native && await nativeMenu(entries, { shift: ev.shiftKey, items: appItemsFor(entries) }))) itemMenu(entries, ev.clientX, ev.clientY);
+      if (!(native && await nativeMenu(entries, { shift: ev.shiftKey }))) itemMenu(entries, ev.clientX, ev.clientY);
     } else {
       const colDir = inColumnsMode() ? ev.target.closest('.col')?.dataset.dir || null : null; // that column's folder
       // Background commands act on the column under the pointer, including
@@ -3052,7 +3011,7 @@
         const tab = state;
         if (!(await navigate(colDir, { animate: false })) || state !== tab) return;
       }
-      if (!(native && await nativeMenu([], { background: true, shift: ev.shiftKey, items: appItemsForBackground(colDir) }))) backgroundMenu(ev.clientX, ev.clientY, colDir);
+      if (!(native && await nativeMenu([], { background: true, shift: ev.shiftKey }))) backgroundMenu(ev.clientX, ev.clientY, colDir);
     }
   });
 
@@ -3675,7 +3634,7 @@
     if ((ev.shiftKey && k === 'F10') || k === 'ContextMenu') {
       ev.preventDefault();
       const s = selectedEntries();
-      if (s.length) nativeMenu(s, { items: appItemsFor(s) }); else nativeMenu([], { background: true, items: appItemsForBackground() });
+      if (s.length) nativeMenu(s); else nativeMenu([], { background: true });
       return;
     }
     if (ctrl && k.toLowerCase() === 'd') { ev.preventDefault(); duplicateSelected(); return; }
@@ -4194,7 +4153,7 @@
       { id: 'look', title: '外觀', rows: [
         ['主題', null, sel('theme', [['system', '跟隨系統'], ['light', '淺色'], ['dark', '深色']])],
         ['強調色', null, swatches],
-        api.nativeMenu && ['右鍵選單', 'Windows：檔案總管的選單（含 7-Zip、VS Code 等加入的項目），上方加上本程式的功能', sel('menuStyle', [['windows', 'Windows'], ['finder', 'Finder 風格']])],
+        api.nativeMenu && ['右鍵選單', '直接顯示檔案總管「顯示更多選項」的傳統完整選單，保留系統與第三方擴充項目', sel('menuStyle', [['windows', 'Windows（傳統完整選單）'], ['finder', 'Finder 風格']])],
         isWin && api.shellIcon && ['使用 Windows 圖示', '應用程式、檔案類型、資料夾與磁碟機都用檔案總管的圖示', sw('folderIcons')],
         api.setUiScale && ['介面與字體大小', '整個視窗的文字、按鈕與圖示一起放大或縮小', sel('uiScale', [[0.9, '90%'], [1, '100%（預設）'], [1.1, '110%'], [1.25, '125%'], [1.4, '140%'], [1.5, '150%'], [1.75, '175%']])],
         ['列表密度', '列表與直欄的行高', sel('density', [['compact', '精簡'], ['normal', '標準'], ['roomy', '寬鬆']])],
