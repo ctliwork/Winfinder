@@ -17,7 +17,7 @@
 //! `host`.
 
 use serde::Deserialize;
-use std::sync::atomic::{AtomicIsize, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::TryRecvError;
 use std::sync::Arc;
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -54,7 +54,7 @@ impl Rect {
 }
 
 enum Cmd {
-    Show { parent: isize, path: String, gen: u64, host: Rect, inner: Rect, dark: bool, reply: Sender<Result<(), String>> },
+    Show { parent: isize, path: String, gen: u64, host: Rect, inner: Rect, dark: bool, stage: Arc<Mutex<&'static str>>, reply: Sender<Result<(), String>> },
     /// None: hide for now (something is drawn over the preview), keeping it loaded.
     Move(Option<(Rect, Rect)>),
     Hide(u64),
@@ -71,6 +71,7 @@ struct Worker {
     thread: u32,
     /// Its host window (0 until made), so it can be hidden if the thread is given up on.
     host: Arc<AtomicIsize>,
+    retired: Arc<AtomicBool>,
 }
 static WORKER_IDS: AtomicU64 = AtomicU64::new(0);
 
@@ -118,18 +119,23 @@ const GIVE_UP: std::time::Duration = std::time::Duration::from_secs(15);
 pub fn show(parent: isize, path: String, gen: u64, host: Rect, inner: Rect, dark: bool) -> Result<(), String> {
     LATEST.fetch_max(gen, Ordering::SeqCst);
     let (reply, rx) = channel();
-    let id = send(Cmd::Show { parent, path, gen, host, inner, dark, reply })?;
-    match rx.recv_timeout(GIVE_UP) {
+    let path_extension = std::path::Path::new(&path).extension().map(|ext| ext.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    let stage = Arc::new(Mutex::new("QUEUE"));
+    let id = send(Cmd::Show { parent, path, gen, host, inner, dark, stage: stage.clone(), reply })?;
+    // Surface Office's failing stage before the PowerPoint pane's 8 s UI deadline.
+    let wait = if matches!(path_extension.as_str(), "ppt" | "pptx" | "pptm" | "pps" | "ppsx" | "ppsm" | "pot" | "potx" | "potm") { std::time::Duration::from_secs(7) } else { GIVE_UP };
+    match rx.recv_timeout(wait) {
         Ok(r) => r,
         Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
             // The handler is stuck inside the thread, and every later preview
             // would wait behind it. Leave that thread to it (unless it was
             // already replaced) and start a new one. Its window is hidden from
             // here, without waiting on it; whatever it finishes is stale.
-            LATEST.fetch_add(1, Ordering::SeqCst);
+            let timed_out_stage = stage.lock().map(|value| *value).unwrap_or("UNKNOWN");
             if let Some(w) = WORKER.get() {
                 if let Ok(mut w) = w.lock() {
                     if w.id == id {
+                        w.retired.store(true, Ordering::SeqCst);
                         let h = w.host.load(Ordering::SeqCst);
                         if h != 0 {
                             unsafe {
@@ -140,7 +146,7 @@ pub fn show(parent: isize, path: String, gen: u64, host: Rect, inner: Rect, dark
                     }
                 }
             }
-            Err("TIMEOUT".into())
+            Err(format!("TIMEOUT: {timed_out_stage}"))
         }
         Err(e) => Err(e.to_string()),
     }
@@ -166,6 +172,8 @@ fn spawn() -> Worker {
     let (ready_tx, ready_rx) = channel();
     let host = Arc::new(AtomicIsize::new(0));
     let shared = host.clone();
+    let retired = Arc::new(AtomicBool::new(false));
+    let worker_retired = retired.clone();
     std::thread::spawn(move || {
         unsafe {
             let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
@@ -174,15 +182,16 @@ fn spawn() -> Worker {
             let _ = PeekMessageW(&mut msg, None, 0, 0, PM_NOREMOVE);
         }
         let _ = ready_tx.send(unsafe { GetCurrentThreadId() });
-        run(rx, shared);
+        run(rx, shared, worker_retired);
     });
-    Worker { id: WORKER_IDS.fetch_add(1, Ordering::SeqCst), tx, thread: ready_rx.recv().unwrap_or(0), host }
+    Worker { id: WORKER_IDS.fetch_add(1, Ordering::SeqCst), tx, thread: ready_rx.recv().unwrap_or(0), host, retired }
 }
 
 #[derive(Default)]
 struct State {
     host: Option<HWND>,
     shared_host: Arc<AtomicIsize>,
+    retired: Arc<AtomicBool>,
     /// The handler showing the current file.
     handler: Option<IPreviewHandler>,
     /// One handler per recent type, kept alive so its prevhost.exe and DLL stay
@@ -192,8 +201,8 @@ struct State {
     warm: Vec<String>,
 }
 
-fn run(rx: Receiver<Cmd>, shared_host: Arc<AtomicIsize>) {
-    let mut st = State { shared_host, ..Default::default() };
+fn run(rx: Receiver<Cmd>, shared_host: Arc<AtomicIsize>, retired: Arc<AtomicBool>) {
+    let mut st = State { shared_host, retired, ..Default::default() };
     let mut msg = MSG::default();
     unsafe {
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {
@@ -204,6 +213,7 @@ fn run(rx: Receiver<Cmd>, shared_host: Arc<AtomicIsize>) {
                 loop {
                     match rx.try_recv() {
                         Ok(cmd) => handle(&mut st, cmd),
+                        Err(TryRecvError::Empty) if st.retired.load(Ordering::SeqCst) => break,
                         Err(TryRecvError::Empty) => match st.warm.pop() {
                             Some(ext) => warm_one(&mut st, &ext),
                             None => break,
@@ -229,14 +239,15 @@ fn run(rx: Receiver<Cmd>, shared_host: Arc<AtomicIsize>) {
 }
 
 fn handle(st: &mut State, cmd: Cmd) {
+    if st.retired.load(Ordering::SeqCst) { return; }
     match cmd {
-        Cmd::Show { parent, path, gen, host, inner, dark, reply } => {
+        Cmd::Show { parent, path, gen, host, inner, dark, stage, reply } => {
             // Reject stale queued work without unloading a newer preview.
-            if gen < LATEST.load(Ordering::SeqCst) {
+            if st.retired.load(Ordering::SeqCst) || gen < LATEST.load(Ordering::SeqCst) {
                 let _ = reply.send(Err("STALE".into()));
                 return;
             }
-            let r = load(st, parent, &path, gen, host, inner, dark);
+            let r = load(st, parent, &path, gen, host, inner, dark, &stage);
             if r.is_err() {
                 hide_host(st);
                 unload(st);
@@ -253,7 +264,7 @@ fn handle(st: &mut State, cmd: Cmd) {
         }
         Cmd::Move(None) => hide_host(st),
         Cmd::Hide(gen) => {
-            if gen < LATEST.load(Ordering::SeqCst) { return; }
+            if st.retired.load(Ordering::SeqCst) || gen < LATEST.load(Ordering::SeqCst) { return; }
             hide_host(st);
             unload(st);
         }
@@ -280,8 +291,13 @@ fn warm_one(st: &mut State, ext: &str) {
 fn create(clsid: &GUID) -> Result<IPreviewHandler, String> {
     // Out of process in prevhost.exe, like Explorer (asking for both lets COM
     // pick in-process); in-process only for a handler registered without it.
-    unsafe { CoCreateInstance(clsid, None, CLSCTX_LOCAL_SERVER).or_else(|_| CoCreateInstance(clsid, None, CLSCTX_INPROC_SERVER)) }
-        .map_err(|e| format!("CREATE_HANDLER 0x{:08X}: {}", e.code().0 as u32, e.message()))
+    unsafe {
+        match CoCreateInstance(clsid, None, CLSCTX_LOCAL_SERVER) {
+            Ok(handler) => Ok(handler),
+            Err(local_error) => CoCreateInstance(clsid, None, CLSCTX_INPROC_SERVER)
+                .map_err(|error| format!("CREATE_HANDLER local 0x{:08X}, in-process 0x{:08X}", local_error.code().0 as u32, error.code().0 as u32)),
+        }
+    }
 }
 
 fn hide_host(st: &State) {
@@ -300,11 +316,14 @@ fn unload(st: &mut State) {
     }
 }
 
-fn load(st: &mut State, parent: isize, path: &str, gen: u64, host: Rect, inner: Rect, dark: bool) -> Result<(), String> {
+fn load(st: &mut State, parent: isize, path: &str, gen: u64, host: Rect, inner: Rect, dark: bool, stage: &Mutex<&'static str>) -> Result<(), String> {
+    let update_stage = |name| { if let Ok(mut value) = stage.lock() { *value = name; } };
     // Hidden while the handler works (PowerPoint takes a while): the page's own
     // preview of the file shows meanwhile, not a blank box or the last file.
+    update_stage("UNLOAD");
     hide_host(st);
     unload(st);
+    update_stage("LOOKUP");
     let ext = std::path::Path::new(path).extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
     let clsid = handler_clsid(&ext).ok_or("NO_HANDLER")?;
     let (bg, fg) = if dark { (0x002B_2A28u32, 0x00EB_EBEBu32) } else { (0x00FF_FFFF, 0x001F_1D1D) };
@@ -312,26 +331,31 @@ fn load(st: &mut State, parent: isize, path: &str, gen: u64, host: Rect, inner: 
     unsafe {
         // A warmed-up handler is used as it is; otherwise a new one, quick to
         // make while the kept one of its type holds prevhost.exe and the DLL.
+        update_stage("CREATE_HANDLER");
         let ph = match st.kept.iter().position(|(c, _, fresh)| *c == clsid && *fresh) {
             Some(i) => st.kept.remove(i).1,
             None => create(&clsid)?,
         };
+        update_stage("INITIALIZE");
         init(&ph, path).map_err(|e| format!("INITIALIZE: {e}"))?;
+        update_stage("SET_WINDOW");
         let h = host_window(st, HWND(parent as _))?;
         SetWindowPos(h, Some(HWND_TOP), host.x, host.y, host.w, host.h, SWP_NOACTIVATE).map_err(|e| e.message())?;
         ph.SetWindow(h, &inner.win()).map_err(|e| format!("SET_WINDOW 0x{:08X}: {}", e.code().0 as u32, e.message()))?;
+        update_stage("VISUALS");
         if let Ok(v) = ph.cast::<IPreviewHandlerVisuals>() {
             let _ = v.SetBackgroundColor(COLORREF(bg));
             let _ = v.SetTextColor(COLORREF(fg));
         }
         st.handler = Some(ph.clone());
+        update_stage("DO_PREVIEW");
         ph.DoPreview().map_err(|e| format!("DO_PREVIEW 0x{:08X}: {}", e.code().0 as u32, e.message()))?;
         // Kept in place of the older one of its type; the oldest type is let go.
         st.kept.retain(|(c, ..)| *c != clsid);
         st.kept.insert(0, (clsid, ph, false));
         st.kept.truncate(KEEP);
         // Another file was picked (or this one was given up on) while it drew: don't show it.
-        if gen < LATEST.load(Ordering::SeqCst) {
+        if st.retired.load(Ordering::SeqCst) || gen < LATEST.load(Ordering::SeqCst) {
             return Err("STALE".into());
         }
         let _ = SetWindowPos(h, Some(HWND_TOP), host.x, host.y, host.w, host.h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
