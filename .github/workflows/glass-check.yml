@@ -12,6 +12,7 @@ on:
       - 'src-tauri/src/winshell.rs'
       - 'tests/new-folder-rename.mjs'
       - 'tests/native-preview-regression.mjs'
+      - 'tests/native-preview-e2e.mjs'
       - 'src-tauri/src/prevhost.rs'
       - 'tests/native-menu-regression.mjs'
       - 'tests/native-menu-e2e.mjs'
@@ -72,6 +73,9 @@ jobs:
       - name: Traditional native context menu regression
         timeout-minutes: 3
         run: node tests/native-menu-e2e.mjs
+      - name: Native preview host regression
+        timeout-minutes: 3
+        run: node tests/native-preview-e2e.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -81,3 +85,4 @@ jobs:
             e2e-interactions
             e2e-visibility
             e2e-native-menu
+            e2e-native-preview
