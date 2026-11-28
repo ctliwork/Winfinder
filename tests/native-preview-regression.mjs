@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import test from 'node:test';
 
+const createContext = (sandbox) => vm.createContext({ setTimeout, clearTimeout, ...sandbox });
 const source = fs.readFileSync(new URL('../renderer/app.js', import.meta.url), 'utf8');
 function fn(name) {
   const start = source.search(new RegExp(`^  (?:async )?function ${name}\\(`, 'm'));
@@ -14,7 +15,7 @@ function fn(name) {
 const deferred = () => { let resolve; const promise = new Promise((r) => { resolve = r; }); return { promise, resolve }; };
 
 test('[IT-019/CHG-009] Windows preview takes priority for registered PDF handlers', () => {
-  const context = vm.createContext({ api: { previewShow() {} }, prefs: { nativePreview: true },
+  const context = createContext({ api: { previewShow() {} }, prefs: { nativePreview: true },
     I: { category: () => 'pdf' }, BUILTIN_FIRST: new Set(['pdf']) });
   vm.runInContext(fn('nativeWanted'), context);
   assert.equal(!!context.nativeWanted({ ext: 'pdf', isDir: false }), true);
@@ -23,7 +24,7 @@ test('[IT-019/CHG-009] Windows preview takes priority for registered PDF handler
 test('[IT-020/CHG-009] an old availability response cannot replace the selected preview', async () => {
   const checks = new Map([['pptx', deferred()], ['docx', deferred()]]);
   const shown = [];
-  const context = vm.createContext({ native: { gen: 0 }, Symbol, previewHelpers: {},
+  const context = createContext({ native: { gen: 0 }, Symbol, previewHelpers: {},
     api: { previewShow: async (path) => { shown.push(path); return true; } },
     prefetchAround() {}, nativeWanted: () => true, nativeAvailable: (ext) => checks.get(ext).promise,
     nativeRects: () => ({ host: {}, inner: {} }), isDark: () => true, trackNative() {},
@@ -39,7 +40,7 @@ test('[IT-020/CHG-009] an old availability response cannot replace the selected 
 
 test('[IT-021/CHG-009] missing handlers are rechecked after availability changes', async () => {
   let available = false, calls = 0;
-  const context = vm.createContext({ native: { avail: new Map() },
+  const context = createContext({ native: { avail: new Map() },
     api: { previewAvailable: async () => { calls++; return available; } } });
   vm.runInContext(fn('nativeAvailable'), context);
   assert.equal(await context.nativeAvailable('pptx'), false);
@@ -51,7 +52,7 @@ test('[IT-021/CHG-009] missing handlers are rechecked after availability changes
 test('[IT-022/CHG-009] hiding during handler discovery prevents the pending preview from opening', async () => {
   const availability = deferred();
   const shown = [];
-  const context = vm.createContext({ native: { gen: 0, el: null }, previewHelpers: {},
+  const context = createContext({ native: { gen: 0, el: null }, previewHelpers: {},
     api: { previewHide() {}, previewShow: async (path) => { shown.push(path); return true; } },
     cancelAnimationFrame() {}, prefetchAround() {}, nativeWanted: () => true,
     nativeAvailable: () => availability.promise, nativeRects: () => ({ host: {}, inner: {} }),
@@ -66,7 +67,7 @@ test('[IT-022/CHG-009] hiding during handler discovery prevents the pending prev
 });
 
 test('[IT-023/CHG-009] a native failure is labelled as fallback without discarding its error', async () => {
-  const context = vm.createContext({ native: { gen: 0 }, previewHelpers: {},
+  const context = createContext({ native: { gen: 0 }, previewHelpers: {},
     api: { previewShow: async () => 'DO_PREVIEW 0x80070005' }, prefetchAround() {},
     nativeWanted: () => true, nativeAvailable: async () => true,
     nativeRects: () => ({ host: {}, inner: {} }), isDark: () => true,
@@ -88,7 +89,7 @@ function listener(target, event) {
 
 test('[IT-024/CHG-009] Ctrl-click leaving one column folder selected never opens it', async () => {
   let options;
-  const context = vm.createContext({ state: { cwd: '/parent', colRoot: '/', colLists: [[{ path: '/parent/Folder' }]] },
+  const context = createContext({ state: { cwd: '/parent', colRoot: '/', colLists: [[{ path: '/parent/Folder' }]] },
     columnSelection: () => [], selectInColumn: async (j, paths, opts) => { options = opts; }, Set });
   vm.runInContext(fn('columnModifierClick'), context);
   await context.columnModifierClick({ path: '/parent/Folder', isDir: true }, 0, { ctrlKey: true });
@@ -97,7 +98,7 @@ test('[IT-024/CHG-009] Ctrl-click leaving one column folder selected never opens
 
 test('[IT-025/CHG-009] right-click selects a column folder without opening it', async () => {
   let handler, opened = 0, selected;
-  const context = vm.createContext({
+  const context = createContext({
     content: { addEventListener: (name, cb) => { handler = cb; } },
     state: { cwd: '/parent', sel: new Set(), colActive: 0 }, api: {},
     itemFromEl: () => ({ col: 0, entry: { path: '/parent/Folder', isDir: true } }),
@@ -115,7 +116,7 @@ test('[IT-025/CHG-009] right-click selects a column folder without opening it', 
 test('[IT-026/CHG-009] showing a preview waits until the previous native host is hidden', async () => {
   const hidden = deferred();
   const shown = [];
-  const context = vm.createContext({ native: { gen: 0 }, previewHelpers: {},
+  const context = createContext({ native: { gen: 0 }, previewHelpers: {},
     api: { previewHide: () => hidden.promise, previewShow: async (path) => { shown.push(path); return true; } },
     prefetchAround() {}, nativeWanted: () => true, nativeAvailable: async () => true,
     nativeRects: () => ({ host: {}, inner: {} }), isDark: () => true,
@@ -130,7 +131,7 @@ test('[IT-026/CHG-009] showing a preview waits until the previous native host is
 
 test('[IT-027/BUG-014] right pane prioritizes the PowerPoint handler and uses a shell slide thumbnail on failure', async () => {
   const events = [];
-  const context = vm.createContext({ native: { gen: 0 }, previewHelpers: {},
+  const context = createContext({ native: { gen: 0 }, previewHelpers: {},
     api: { previewShow: async () => { events.push('native'); return 'DO_PREVIEW 0x80070005'; } },
     prefetchAround() {}, nativeWanted: () => true, nativeAvailable: async () => true,
     nativeRects: () => ({ host: {}, inner: {} }), isDark: () => true, trackNative() {},
@@ -142,7 +143,7 @@ test('[IT-027/BUG-014] right pane prioritizes the PowerPoint handler and uses a 
 
 test('[IT-028/BUG-014] right pane never extracts slide text before a successful native preview', async () => {
   let filled = 0;
-  const context = vm.createContext({ native: { gen: 0 }, previewHelpers: {},
+  const context = createContext({ native: { gen: 0 }, previewHelpers: {},
     api: { previewShow: async () => true }, prefetchAround() {}, nativeWanted: () => true,
     nativeAvailable: async () => true, nativeRects: () => ({ host: {}, inner: {} }), isDark: () => true,
     trackNative() {}, window: { Preview: { fill: () => { filled++; } } } });
@@ -157,7 +158,7 @@ test('[IT-029/BUG-014] the right pane draws the shell slide image and never subs
   const preview = fs.readFileSync(new URL('../renderer/preview.js', import.meta.url), 'utf8');
   let extracted = 0;
   let image = 'data:image/png;base64,fixture';
-  const context = vm.createContext({
+  const context = createContext({
     window: {
       Icons: { esc: String, category: () => 'slides', kindLabel: () => 'PowerPoint', file: () => '' },
       fsApi: { contentThumbnail: async () => image, richPreview: async () => { extracted++; } },
@@ -179,7 +180,7 @@ test('[IT-029/BUG-014] the right pane draws the shell slide image and never subs
 
 test('[IT-030/BUG-014] the rightmost column uses the slide image instead of extracted text', async () => {
   const options = [];
-  const context = vm.createContext({ native: { gen: 0 }, previewHelpers: {}, api: {},
+  const context = createContext({ native: { gen: 0 }, previewHelpers: {}, api: {},
     prefetchAround() {}, nativeWanted: () => false,
     window: { Preview: { fill: (_media, _entry, optionsUsed) => options.push(optionsUsed) } } });
   vm.runInContext(fn('fillPreview'), context);
@@ -192,7 +193,7 @@ test('[IT-031/BUG-014] column previews load when the slide column scrolls into v
   const frames = [];
   let visible = false;
   let rendered = 0;
-  const context = vm.createContext({ native: { gen: 0 }, previewHelpers: {},
+  const context = createContext({ native: { gen: 0 }, previewHelpers: {},
     api: { previewShow: async () => { rendered++; return true; } },
     nativeWanted: () => true, nativeAvailable: async () => true, prefetchAround() {},
     nativeRects: () => visible ? { host: {}, inner: {} } : null,
@@ -210,4 +211,52 @@ test('[IT-031/BUG-014] column previews load when the slide column scrolls into v
   await pending;
   assert.equal(rendered, 1);
   assert.equal(media.dataset.kind, 'native');
+});
+
+test('[IT-032/BUG-015] a hung native preview stops loading and cannot overwrite the fallback', async () => {
+  const timers = new Map();
+  const pendingShow = deferred();
+  const hidden = [];
+  let tracked = 0;
+  const context = createContext({ native: { gen: 0 }, previewHelpers: {},
+    setTimeout: (fn, ms) => { timers.set(ms, fn); return ms; }, clearTimeout: (id) => timers.delete(id),
+    api: { previewHide: async (gen) => hidden.push(gen), previewShow: () => pendingShow.promise },
+    prefetchAround() {}, nativeWanted: () => true, nativeAvailable: async () => true,
+    nativeRects: () => ({ host: {}, inner: {} }), isDark: () => true, trackNative: () => { tracked++; },
+    window: { Preview: { fill: (media) => { media.dataset.kind = 'media'; } } } });
+  vm.runInContext(fn('fillPreview'), context);
+  const media = { isConnected: true, dataset: {} };
+  const pending = context.fillPreview(media, { path: 'slides.pptx', ext: 'pptx' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(timers.size, 1, 'the native request has a UI deadline');
+  timers.values().next().value();
+  await pending;
+  assert.equal(media.dataset.kind, 'media');
+  assert.ok(hidden.at(-1) > hidden[0], 'timeout invalidates the pending native host');
+  pendingShow.resolve(true);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(media.dataset.kind, 'media');
+  assert.equal(tracked, 0);
+});
+
+test('[IT-033/BUG-015] a hung slide thumbnail resolves to an unavailable preview', async () => {
+  const preview = fs.readFileSync(new URL('../renderer/preview.js', import.meta.url), 'utf8');
+  const timers = [];
+  const context = createContext({
+    setTimeout: (fn) => { timers.push(fn); return 1; }, clearTimeout() {},
+    window: {
+      Icons: { esc: String, category: () => 'slides', kindLabel: () => 'PowerPoint', file: () => '' },
+      fsApi: { contentThumbnail: () => new Promise(() => {}) },
+    },
+  });
+  vm.runInContext(preview, context);
+  const pane = { dataset: {}, querySelector: () => null };
+  const pending = context.window.Preview.fill(pane, { path: 'slides.pptx', ext: 'pptx' }, {
+    helpers: { fmtSize: String }, slideThumbnail: true,
+  });
+  assert.equal(timers.length, 1, 'the thumbnail request has a UI deadline');
+  timers.pop()();
+  await pending;
+  assert.match(pane.innerHTML, /無法顯示投影片版面/);
+  assert.equal(pane.dataset.kind, 'info');
 });

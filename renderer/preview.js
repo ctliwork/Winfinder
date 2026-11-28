@@ -199,7 +199,18 @@
       return;
     }
     if (slideThumbnail) {
-      const slide = await api.contentThumbnail?.(e.path, 1024);
+      let timer;
+      let slide;
+      try {
+        slide = await Promise.race([
+          api.contentThumbnail?.(e.path, 1024),
+          new Promise((resolve) => { timer = setTimeout(() => resolve(null), 3000); }),
+        ]);
+      } catch {
+        slide = null;
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
+      }
       if (!alive()) return;
       if (slide) {
         set(`<img src="${esc(slide)}" alt="投影片縮圖" draggable="false"><div class="pv-kind">Windows 投影片縮圖</div>`, 'media');

@@ -1435,32 +1435,47 @@
     } else {
       fallback();
     }
-    await hidden;
-    if (gen !== native.gen || !media.isConnected) return;
-    const wanted = nativeWanted(e) && await nativeAvailable(e.ext);
-    if (gen !== native.gen || !media.isConnected) return;
-    if (!wanted) {
-      native.el = null;
-      if (slides) await fallback();
-      return;
-    }
-    native.el = media;
-    native.rect = '';
-    let r = nativeRects(media);
-    if (slides && !r) {
-      // The rightmost preview column can start outside the scrolling viewport.
-      const deadline = performance.now() + 400;
-      while (!r && performance.now() < deadline) {
-        await new Promise((resolve) => requestAnimationFrame(resolve));
-        if (gen !== native.gen || !media.isConnected) return;
-        r = nativeRects(media);
+    const isCurrent = () => gen === native.gen && media.isConnected;
+    async function showNative() {
+      await hidden;
+      if (!isCurrent()) return 'STALE';
+      if (!nativeWanted(e) || !(await nativeAvailable(e.ext))) return 'UNAVAILABLE';
+      if (!isCurrent()) return 'STALE';
+      native.rect = '';
+      let r = nativeRects(media);
+      if (slides && !r) {
+        // The rightmost preview column can start outside the scrolling viewport.
+        const deadline = performance.now() + 400;
+        while (!r && performance.now() < deadline) {
+          await new Promise((resolve) => requestAnimationFrame(resolve));
+          if (!isCurrent()) return 'STALE';
+          r = nativeRects(media);
+        }
       }
+      return r ? api.previewShow(e.path, gen, r.host, r.inner, isDark()) : 'HIDDEN';
     }
-    const res = r ? await api.previewShow(e.path, gen, r.host, r.inner, isDark()) : 'HIDDEN';
-    if (gen !== native.gen || !media.isConnected) return;
+    let timer;
+    let res;
+    try {
+      const result = showNative();
+      // Include handler discovery and IPC in the deadline, not just Show.
+      res = slides ? await Promise.race([
+        result,
+        new Promise((resolve) => { timer = setTimeout(() => resolve('TIMEOUT'), 8000); }),
+      ]) : await result;
+    } catch {
+      res = 'PREVIEW_ERROR';
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
+    if (!isCurrent()) return;
+    if (res === 'TIMEOUT') {
+      // The shell call can finish later. Advance its generation before using the fallback.
+      api.previewHide?.(++native.gen);
+    }
     if (res !== true) {
       native.el = null;
-      if (!['HIDDEN', 'STALE'].includes(res)) {
+      if (!['HIDDEN', 'STALE', 'UNAVAILABLE'].includes(res)) {
         media.dataset.nativeError = String(res);
         media.dataset.nativeStatus = 'Windows 預覽無法載入，目前顯示替代預覽';
         media.title = String(res);
