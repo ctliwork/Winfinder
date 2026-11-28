@@ -57,7 +57,7 @@ enum Cmd {
     Show { parent: isize, path: String, gen: u64, host: Rect, inner: Rect, dark: bool, reply: Sender<Result<(), String>> },
     /// None: hide for now (something is drawn over the preview), keeping it loaded.
     Move(Option<(Rect, Rect)>),
-    Hide,
+    Hide(u64),
     /// Start the handlers for these extensions while nothing else is waiting.
     Warm(Vec<String>),
 }
@@ -153,7 +153,7 @@ pub fn move_to(rects: Option<(Rect, Rect)>) -> Result<(), String> {
 /// Unloads the preview; shows queued before `gen` are dropped.
 pub fn hide(gen: u64) -> Result<(), String> {
     LATEST.fetch_max(gen, Ordering::SeqCst);
-    send(Cmd::Hide).map(drop)
+    send(Cmd::Hide(gen)).map(drop)
 }
 
 /// Starts (and keeps) the handlers for `exts`, so their first preview is quick.
@@ -247,7 +247,8 @@ fn handle(st: &mut State, cmd: Cmd) {
             }
         }
         Cmd::Move(None) => hide_host(st),
-        Cmd::Hide => {
+        Cmd::Hide(gen) => {
+            if gen < LATEST.load(Ordering::SeqCst) { return; }
             hide_host(st);
             unload(st);
         }

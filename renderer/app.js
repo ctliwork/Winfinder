@@ -1421,11 +1421,14 @@
     const gen = ++native.gen;
     if (native.raf) cancelAnimationFrame(native.raf);
     native.el = media;
-    api.previewHide?.(gen);
+    const hidden = api.previewHide?.(gen);
+    if (media.dataset.nativeError) media.removeAttribute?.('title');
     delete media.dataset.nativeStatus;
     delete media.dataset.nativeError;
     prefetchAround(e);
     window.Preview.fill(media, e, { helpers: previewHelpers });
+    await hidden;
+    if (gen !== native.gen || !media.isConnected) return;
     const wanted = nativeWanted(e) && await nativeAvailable(e.ext);
     if (gen !== native.gen || !media.isConnected) return;
     if (!wanted) { native.el = null; return; }

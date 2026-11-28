@@ -122,7 +122,7 @@ test('[IT-026/CHG-009] showing a preview waits until the previous native host is
     trackNative() {}, window: { Preview: { fill() {} } } });
   vm.runInContext(fn('fillPreview'), context);
   const pending = context.fillPreview({ isConnected: true, dataset: {} }, { path: 'current.pptx', ext: 'pptx' });
-  await Promise.resolve(); await Promise.resolve();
+  await new Promise((resolve) => setImmediate(resolve));
   assert.equal(shown.length, 0, 'late hide completion must not hide an already shown preview');
   hidden.resolve(); await pending;
   assert.deepEqual(shown, ['current.pptx']);
