@@ -90,7 +90,7 @@
 
 ## BUG-010：非同步原生預覽回應覆蓋新選取，或關閉後重新出現
 
-- 嚴重度：Major；狀態：NOT_VERIFIED（待本輪完整 CI）。
+- 嚴重度：Major；狀態：VERIFIED（自動化範圍，RUN-005）。
 - 根因：fillPreview 在等待處理程式查詢後才產生請求序號；nativeHide 在 native.el 尚未設定時直接返回，不能取消查詢中的請求。
 - 修正：先產生序號並隱藏舊宿主，所有 await 後確認序號與 DOM 連線；關閉時即使沒有現存宿主也使請求失效。
 - 修正前證據：Windows [46100777843](https://github.com/ctliwork/Winfinder/actions/runs/46100777843)，IT-020、022 失敗。
@@ -98,7 +98,7 @@
 
 ## BUG-011：缺少原生預覽處理程式的結果持續快取
 
-- 嚴重度：Minor；狀態：NOT_VERIFIED（待本輪完整 CI）。
+- 嚴重度：Minor；狀態：VERIFIED（自動化範圍，RUN-005）。
 - 根因：nativeAvailable 將 false Promise 永久保留到關閉應用，之後無法重新偵測。
 - 修正：只快取成功可用的結果；缺少或查詢失敗時移除快取，下次重新檢查。
 - 修正前證據：同次 Windows 執行，IT-021 實際 false、預期 true。
@@ -106,7 +106,7 @@
 
 ## BUG-012：直欄右鍵或 Ctrl 選取資料夾造成意外導覽
 
-- 嚴重度：Major；狀態：NOT_VERIFIED（待本輪完整 CI）。
+- 嚴重度：Major；狀態：VERIFIED（自動化範圍，RUN-005）。
 - 根因：contextmenu 呼叫 columnClick；columnModifierClick 未禁用 selectInColumn 的 openFolder 預設值。
 - 修正：這兩種選取均明確指定 openFolder=false；保留既有一般單擊的欄式導覽。
 - 修正前證據：同次 Windows 執行，IT-024、025；右鍵實際呼叫開啟一次、預期零次。
@@ -114,7 +114,7 @@
 
 ## BUG-013：原生預覽失敗時靜默顯示替代內容
 
-- 嚴重度：Minor；狀態：NOT_VERIFIED（待本輪完整 CI）。
+- 嚴重度：Minor；狀態：VERIFIED（自動化範圍，RUN-005）。
 - 根因：fillPreview 對 previewShow 的非成功回應直接返回，未顯示失敗及替代標示；後端錯誤缺少失敗階段。
 - 修正：保留階段及 HRESULT；失敗時顯示替代預覽標示，原始錯誤置於預覽區 title 與 data-native-error。STALE、HIDDEN 不顯示失敗。
 - 修正前證據：同次 Windows 執行，IT-023 無錯誤資料、預期 DO_PREVIEW 0x80070005。
@@ -125,3 +125,5 @@
 - 狀態：MANUAL_VERIFY_REQUIRED；不宣稱已修復 Office 預覽。
 - 本機唯讀探測：.pptx 的 AssocQueryStringW 成功解析 Microsoft PowerPoint previewer；於受限執行環境以 CLSCTX_LOCAL_SERVER 啟動時，CoCreateInstance 回傳 0x80070005。
 - 此結果僅說明目前探測程序遭拒，不能證明一般使用者身分執行 Winfinder 的失敗根因。尚未取得使用者同一份成功／失敗檔案的比較證據；不得修改 Office 註冊、停用隔離或改權限來掩蓋問題。
+
+本輪驗證證據：[RUN-005](reports/RUN-005.md)。使用者後續確認 PPT 為只有文字；Office 實際顯示及預覽位置仍待確認，狀態不因其他測試通過而變更。

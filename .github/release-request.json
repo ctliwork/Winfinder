@@ -1,6 +1,6 @@
 {
-  "request_id": "2026-11-27-native-traditional-menu",
-  "validation_run_id": 45946874548,
-  "validated_sha": "619a59b86c169fe1271150e233ab6c466c9c6c42",
-  "notes": "Windows 右鍵選單改為檔案總管「顯示更多選項」的傳統完整原生選單，移除原先插在上方的 Winfinder 自訂項目，保留系統與已註冊的第三方 Shell 擴充。\n支援單檔、多選、資料夾、目錄空白處、Shift 右鍵及鍵盤選單；保留新增資料夾後立即改名的流程，並讓系統選單提供重新命名。\n更新後可至「設定 → 外觀 → 右鍵選單」選擇「Windows（傳統完整選單）」。已有 Finder 風格設定不強制重設。\n已通過 20 項回歸、37 項 Rust 測試及 6 組真實 Windows 原生選單操作檢查。"
+  "request_id": "2026-11-28-native-preview-first-batch",
+  "validation_run_id": 46101456857,
+  "validated_sha": "8ec0ef02e0c2c72ba05ccd880b2335b7e6b293f7",
+  "notes": "第一批 Windows 操作相容修正：直欄預覽欄及右側預覽窗格改為優先使用系統註冊的預覽處理程式；修正快速切檔、關閉窗格後舊預覽回來、處理程式缺少結果持續快取的問題。\n修正直欄右鍵及 Ctrl 多選意外開啟資料夾。原生預覽失敗時明確標示替代內容，並保留錯誤階段與 HRESULT 供診斷。\n驗證：28 項 JavaScript、37 項 Rust，以及既有介面／檔案互動／原生右鍵回歸通過；新增 3 項真實 Windows RTF 預覽宿主測試通過。\n限制（EX-001）：使用者的 PPT「只有文字」仍需 Office 實機驗證，本版未宣稱已修好 PPT 顯示。快速預覽與圖庫仍有既有內建流程；原生複製／搬移、重新命名及全面 Explorer 操作對齊尚未完成。"
 }
