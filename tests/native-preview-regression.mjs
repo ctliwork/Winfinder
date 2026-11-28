@@ -111,3 +111,19 @@ test('[IT-025/CHG-009] right-click selects a column folder without opening it', 
   assert.equal(selected.opts.openFolder, false);
   assert.equal(selected.paths[0], '/parent/Folder');
 });
+
+test('[IT-026/CHG-009] showing a preview waits until the previous native host is hidden', async () => {
+  const hidden = deferred();
+  const shown = [];
+  const context = vm.createContext({ native: { gen: 0 }, previewHelpers: {},
+    api: { previewHide: () => hidden.promise, previewShow: async (path) => { shown.push(path); return true; } },
+    prefetchAround() {}, nativeWanted: () => true, nativeAvailable: async () => true,
+    nativeRects: () => ({ host: {}, inner: {} }), isDark: () => true,
+    trackNative() {}, window: { Preview: { fill() {} } } });
+  vm.runInContext(fn('fillPreview'), context);
+  const pending = context.fillPreview({ isConnected: true, dataset: {} }, { path: 'current.pptx', ext: 'pptx' });
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal(shown.length, 0, 'late hide completion must not hide an already shown preview');
+  hidden.resolve(); await pending;
+  assert.deepEqual(shown, ['current.pptx']);
+});
