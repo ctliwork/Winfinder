@@ -1401,38 +1401,48 @@
   // The column view's preview column and the preview pane show what Explorer's
   // preview pane shows:
   // the file type's registered preview handler (Office, PDF, text, PowerToys…)
-  // in a native window over the preview area, for Office files and other types
-  // the built-in previews can't show. Images, video, audio, PDF, text and code
-  // keep the built-in previews: they appear at once and zoom, while those
-  // handlers (Edge's PDF engine, PowerToys' code viewer…) take a second to
-  // start. Types without a handler fall back to them too. A native window draws over the page, so it steps aside while a
-  // menu, dialog or Quick Look is open and is clipped to the visible area.
+  // Prefer registered Windows preview handlers; built-in rendering is a fallback.
   const native = { el: null, gen: 0, rect: '', raf: 0, avail: new Map() };
-  const BUILTIN_FIRST = new Set(['image', 'video', 'audio', 'pdf', 'text', 'code', 'font', 'archive']);
   function nativeWanted(e) {
-    return !!api.previewShow && prefs.nativePreview && !e.isDir && e.ext && !BUILTIN_FIRST.has(I.category(e.ext)) && !['csv', 'tsv'].includes(e.ext);
+    return !!api.previewShow && prefs.nativePreview && !e.isDir && !!e.ext;
   }
   function nativeAvailable(ext) {
-    if (!native.avail.has(ext)) native.avail.set(ext, api.previewAvailable(ext));
+    if (!native.avail.has(ext)) {
+      const pending = Promise.resolve(api.previewAvailable(ext)).then((available) => {
+        if (!available) native.avail.delete(ext);
+        return available;
+      }, () => { native.avail.delete(ext); return false; });
+      native.avail.set(ext, pending);
+    }
     return native.avail.get(ext);
   }
-  // The built-in preview shows at once; when the file's handler has drawn its
-  // preview (prevhost keeps it hidden until then), that is laid over it. If
-  // the handler fails, the built-in one is already there.
+  // Invalidate older requests before any asynchronous handler discovery.
   async function fillPreview(media, e) {
-    prefetchAround(e);
-    const wanted = nativeWanted(e) && await nativeAvailable(e.ext);
-    if (!media.isConnected) return;
-    window.Preview.fill(media, e, { helpers: previewHelpers });
-    if (!wanted) return;
     const gen = ++native.gen;
+    native.el = null;
+    api.previewHide?.(gen);
+    delete media.dataset.nativeStatus;
+    delete media.dataset.nativeError;
+    prefetchAround(e);
+    window.Preview.fill(media, e, { helpers: previewHelpers });
+    const wanted = nativeWanted(e) && await nativeAvailable(e.ext);
+    if (gen !== native.gen || !media.isConnected) return;
+    if (!wanted) return;
     native.el = media;
     native.rect = '';
     const r = nativeRects(media);
     const res = r ? await api.previewShow(e.path, gen, r.host, r.inner, isDark()) : 'HIDDEN';
-    if (gen !== native.gen) return; // another file took over
-    if (res !== true) { native.el = null; return; }
-    media._tok = (media._tok || 0) + 1; // a built-in preview still loading must not change the box now
+    if (gen !== native.gen || !media.isConnected) return;
+    if (res !== true) {
+      native.el = null;
+      if (!['HIDDEN', 'STALE'].includes(res)) {
+        media.dataset.nativeError = String(res);
+        media.dataset.nativeStatus = 'Windows 預覽無法載入，目前顯示替代預覽';
+        media.title = String(res);
+      }
+      return;
+    }
+    media._tok = (media._tok || 0) + 1;
     media.dataset.kind = 'native';
     trackNative();
   }
@@ -1464,11 +1474,10 @@
     }, 150);
   }
   function nativeHide() {
-    if (!native.el) return;
     native.el = null;
     native.gen++;
     cancelAnimationFrame(native.raf);
-    api.previewHide(native.gen);
+    api.previewHide?.(native.gen);
   }
   function isDark() {
     const t = document.documentElement.dataset.theme;
@@ -2117,7 +2126,7 @@
       return selectInColumn(j, next, { focus: entry.path, anchor, openFolder: false });
     }
     const next = current.includes(entry.path) ? current.filter((p) => p !== entry.path) : [...current, entry.path];
-    return selectInColumn(j, next, { focus: entry.path, anchor: entry.path });
+    return selectInColumn(j, next, { focus: entry.path, anchor: entry.path, openFolder: false });
   }
 
   // Finder's slow click: click the name of the item that is already the only
@@ -2999,7 +3008,7 @@
       // Right-clicking inside the selection keeps it, so the menu acts on all of
       // it (as in Finder and Explorer); elsewhere it selects just that item.
       const inSel = state.sel.has(it.entry.path) && (it.col == null || it.col === state.colActive);
-      if (it.col != null && !inSel) await columnClick(it.entry, it.col);
+      if (it.col != null && !inSel) await selectInColumn(it.col, [it.entry.path], { focus: it.entry.path, anchor: it.entry.path, openFolder: false });
       else if (!inSel) { state.anchor = it.entry.path; setSelection([it.entry.path]); }
       const entries = it.col != null && !inSel ? [it.entry] : selectedEntries();
       if (!(native && await nativeMenu(entries, { shift: ev.shiftKey }))) itemMenu(entries, ev.clientX, ev.clientY);
@@ -4159,7 +4168,7 @@
         ['列表密度', '列表與直欄的行高', sel('density', [['compact', '精簡'], ['normal', '標準'], ['roomy', '寬鬆']])],
         ['顯示側邊欄', null, sw('sidebarHidden', true)],
         ['預覽窗格', '在圖像、列表與常用頁的右側顯示', sw('previewPane')],
-        api.previewShow && ['使用檔案總管的預覽', '直欄的預覽欄與預覽窗格：Office 等檔案用 Windows 註冊的預覽處理常式，跟檔案總管一樣；圖片、影片、PDF、文字與程式碼用內建預覽，比較快', sw('nativePreview')],
+        api.previewShow && ['使用檔案總管的預覽', '直欄的預覽欄與預覽窗格：優先使用 Windows 註冊的預覽處理程式；未提供或載入失敗時才使用內建替代預覽', sw('nativePreview')],
       ] },
       { id: 'files', title: '檔案與資料夾', rows: [
         ['顯示隱藏的項目', null, sw('showHidden')],

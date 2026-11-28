@@ -275,7 +275,7 @@ fn create(clsid: &GUID) -> Result<IPreviewHandler, String> {
     // Out of process in prevhost.exe, like Explorer (asking for both lets COM
     // pick in-process); in-process only for a handler registered without it.
     unsafe { CoCreateInstance(clsid, None, CLSCTX_LOCAL_SERVER).or_else(|_| CoCreateInstance(clsid, None, CLSCTX_INPROC_SERVER)) }
-        .map_err(|e| e.message())
+        .map_err(|e| format!("CREATE_HANDLER 0x{:08X}: {}", e.code().0 as u32, e.message()))
 }
 
 fn hide_host(st: &State) {
@@ -310,16 +310,16 @@ fn load(st: &mut State, parent: isize, path: &str, gen: u64, host: Rect, inner: 
             Some(i) => st.kept.remove(i).1,
             None => create(&clsid)?,
         };
-        init(&ph, path)?;
+        init(&ph, path).map_err(|e| format!("INITIALIZE: {e}"))?;
         let h = host_window(st, HWND(parent as _))?;
         SetWindowPos(h, Some(HWND_TOP), host.x, host.y, host.w, host.h, SWP_NOACTIVATE).map_err(|e| e.message())?;
-        ph.SetWindow(h, &inner.win()).map_err(|e| e.message())?;
+        ph.SetWindow(h, &inner.win()).map_err(|e| format!("SET_WINDOW 0x{:08X}: {}", e.code().0 as u32, e.message()))?;
         if let Ok(v) = ph.cast::<IPreviewHandlerVisuals>() {
             let _ = v.SetBackgroundColor(COLORREF(bg));
             let _ = v.SetTextColor(COLORREF(fg));
         }
         st.handler = Some(ph.clone());
-        ph.DoPreview().map_err(|e| e.message())?;
+        ph.DoPreview().map_err(|e| format!("DO_PREVIEW 0x{:08X}: {}", e.code().0 as u32, e.message()))?;
         // Kept in place of the older one of its type; the oldest type is let go.
         st.kept.retain(|(c, ..)| *c != clsid);
         st.kept.insert(0, (clsid, ph, false));
@@ -336,23 +336,26 @@ fn load(st: &mut State, parent: isize, path: &str, gen: u64, host: Rect, inner: 
 /// Handlers take the file one of three ways; try each, as Explorer does.
 unsafe fn init(ph: &IPreviewHandler, path: &str) -> Result<(), String> {
     let p = wide(path);
+    let mut errors = Vec::new();
     if let Ok(i) = ph.cast::<IInitializeWithFile>() {
-        if i.Initialize(PCWSTR(p.as_ptr()), 0).is_ok() {
-            return Ok(());
+        match i.Initialize(PCWSTR(p.as_ptr()), 0) {
+            Ok(()) => return Ok(()),
+            Err(e) => errors.push(format!("FILE 0x{:08X}", e.code().0 as u32)),
         }
     }
     if let Ok(i) = ph.cast::<IInitializeWithItem>() {
         if let Ok(item) = SHCreateItemFromParsingName::<_, _, IShellItem>(PCWSTR(p.as_ptr()), None) {
-            if i.Initialize(&item, 0).is_ok() {
-                return Ok(());
+            match i.Initialize(&item, 0) {
+                Ok(()) => return Ok(()),
+                Err(e) => errors.push(format!("ITEM 0x{:08X}", e.code().0 as u32)),
             }
         }
     }
     if let Ok(i) = ph.cast::<IInitializeWithStream>() {
         let stream = SHCreateStreamOnFileEx(PCWSTR(p.as_ptr()), 0, 0, false, None).map_err(|e| e.message())?;
-        return i.Initialize(&stream, 0).map_err(|e| e.message());
+        return i.Initialize(&stream, 0).map_err(|e| format!("STREAM 0x{:08X}: {}", e.code().0 as u32, e.message()));
     }
-    Err("NO_INIT".into())
+    Err(format!("NO_INIT {}", errors.join("; ")))
 }
 
 unsafe extern "system" fn host_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {

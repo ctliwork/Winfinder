@@ -12,3 +12,5 @@
 CHG-008：Windows 右鍵選單調整為傳統完整選單；[RUN-004](sdlc/test/reports/RUN-004.md) 自動化驗證通過。
 
 [CHG-009 異動計畫](sdlc/changes/CHG-009.md)：Windows Shell 優先與 Explorer 互動對齊；規劃中，尚未實作或驗證。
+
+CHG-009 第一切片已實作，待 CI：原生預覽優先、非同步請求及直欄選取修正；Office 實機、核心檔案操作與全面互動相容仍未完成。缺陷 BUG-010～013 及限制見缺陷紀錄。
