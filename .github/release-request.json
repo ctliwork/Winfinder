@@ -1,6 +1,6 @@
 {
-  "request_id": "2026-11-28-powerpoint-column-preview",
-  "validation_run_id": 46108523689,
-  "validated_sha": "458d29b9327ea91444caff70ccbde04332829403",
-  "notes": "修正直欄模式最右側的 PowerPoint 預覽仍顯示擷取文字。直欄預覽與列表／圖像的預覽窗格均優先使用 Windows 原生處理程式，失敗時提供 Windows 投影片縮圖。預覽欄滑入畫面時會重新取得可見區域再載入。\n33 項 JavaScript、37 項 Rust 與 Windows 介面回歸通過。完整 PowerPoint 原始版面仍待 Office 實機對照。"
+  "request_id": "2026-11-28-powerpoint-preview-deadline",
+  "validation_run_id": 46118212927,
+  "validated_sha": "448a8ac37df1e759e71e42be65bfffe863d9e995",
+  "notes": "修正右側 PowerPoint 預覽可能一直顯示載入中。原生預覽最多等待 8 秒，逾時後縮圖最多再等 3 秒。若無法取得畫面，窗格顯示無法預覽，較晚完成的原生請求不會蓋掉目前結果。\nWindows CI 通過 35 項 JavaScript、37 項 Rust、介面操作與原生預覽回歸。Office 原生畫面本身是否卡住，以及 Word 的原始版面，仍需實機驗證。"
 }
