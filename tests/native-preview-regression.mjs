@@ -47,3 +47,65 @@ test('[IT-021/CHG-009] missing handlers are rechecked after availability changes
   assert.equal(await context.nativeAvailable('pptx'), true);
   assert.equal(calls, 2);
 });
+
+test('[IT-022/CHG-009] hiding during handler discovery prevents the pending preview from opening', async () => {
+  const availability = deferred();
+  const shown = [];
+  const context = vm.createContext({ native: { gen: 0, el: null }, previewHelpers: {},
+    api: { previewHide() {}, previewShow: async (path) => { shown.push(path); return true; } },
+    cancelAnimationFrame() {}, prefetchAround() {}, nativeWanted: () => true,
+    nativeAvailable: () => availability.promise, nativeRects: () => ({ host: {}, inner: {} }),
+    isDark: () => true, trackNative() {}, window: { Preview: { fill() {} } } });
+  vm.runInContext(fn('fillPreview') + '\n' + fn('nativeHide'), context);
+  const pending = context.fillPreview({ isConnected: true, dataset: {} }, { path: 'closed.pptx', ext: 'pptx' });
+  context.nativeHide();
+  availability.resolve(true); await pending;
+  assert.deepEqual(shown, []);
+});
+
+test('[IT-023/CHG-009] a native failure is labelled as fallback without discarding its error', async () => {
+  const context = vm.createContext({ native: { gen: 0 }, previewHelpers: {},
+    api: { previewShow: async () => 'DO_PREVIEW 0x80070005' }, prefetchAround() {},
+    nativeWanted: () => true, nativeAvailable: async () => true,
+    nativeRects: () => ({ host: {}, inner: {} }), isDark: () => true,
+    trackNative() {}, window: { Preview: { fill() {} } } });
+  vm.runInContext(fn('fillPreview'), context);
+  const media = { isConnected: true, dataset: {} };
+  await context.fillPreview(media, { path: 'failed.pptx', ext: 'pptx' });
+  assert.equal(media.dataset.nativeError, 'DO_PREVIEW 0x80070005');
+  assert.ok(media.dataset.nativeStatus.includes('替代預覽'));
+  assert.notEqual(media.dataset.kind, 'native');
+});
+
+function listener(target, event) {
+  const marker = `  ${target}.addEventListener('${event}',`;
+  const start = source.indexOf(marker);
+  assert.ok(start >= 0);
+  return source.slice(start, source.indexOf('\n  });', start) + '\n  });'.length);
+}
+
+test('[IT-024/CHG-009] Ctrl-click leaving one column folder selected never opens it', async () => {
+  let options;
+  const context = vm.createContext({ state: { cwd: '/parent', colRoot: '/', colLists: [[{ path: '/parent/Folder' }]] },
+    columnSelection: () => [], selectInColumn: async (j, paths, opts) => { options = opts; }, Set });
+  vm.runInContext(fn('columnModifierClick'), context);
+  await context.columnModifierClick({ path: '/parent/Folder', isDir: true }, 0, { ctrlKey: true });
+  assert.equal(options.openFolder, false);
+});
+
+test('[IT-025/CHG-009] right-click selects a column folder without opening it', async () => {
+  let handler, opened = 0, selected;
+  const context = vm.createContext({
+    content: { addEventListener: (name, cb) => { handler = cb; } },
+    state: { cwd: '/parent', sel: new Set(), colActive: 0 }, api: {},
+    itemFromEl: () => ({ col: 0, entry: { path: '/parent/Folder', isDir: true } }),
+    useWinMenu: () => true, columnClick: async () => { opened++; },
+    selectInColumn: async (j, paths, opts) => { selected = { j, paths, opts }; },
+    nativeMenu: async () => true, selectedEntries: () => [], setSelection() {}, itemMenu() {},
+  });
+  vm.runInContext(listener('content', 'contextmenu'), context);
+  await handler({ preventDefault() {}, target: { closest: () => null } });
+  assert.equal(opened, 0);
+  assert.equal(selected.opts.openFolder, false);
+  assert.equal(selected.paths[0], '/parent/Folder');
+});
