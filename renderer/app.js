@@ -1426,12 +1426,12 @@
     delete media.dataset.nativeStatus;
     delete media.dataset.nativeError;
     prefetchAround(e);
-    const slides = media.id === 'pv-media' && !e.isDir && /^(ppt|pptx|pptm|pps|ppsx|ppsm|pot|potx|potm)$/i.test(e.ext);
+    const slides = !e.isDir && /^(ppt|pptx|pptm|pps|ppsx|ppsm|pot|potx|potm)$/i.test(e.ext);
     const fallback = () => window.Preview.fill(media, e, { helpers: previewHelpers, slideThumbnail: slides });
     if (slides) {
       media._tok = (media._tok || 0) + 1;
       media.innerHTML = '<div class="pv-kind">正在載入投影片預覽…</div>';
-      media.dataset.kind = '';
+      media.dataset.kind = 'slide-loading';
     } else {
       fallback();
     }
@@ -1446,7 +1446,16 @@
     }
     native.el = media;
     native.rect = '';
-    const r = nativeRects(media);
+    let r = nativeRects(media);
+    if (slides && !r) {
+      // The rightmost preview column can start outside the scrolling viewport.
+      const deadline = performance.now() + 400;
+      while (!r && performance.now() < deadline) {
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        if (gen !== native.gen || !media.isConnected) return;
+        r = nativeRects(media);
+      }
+    }
     const res = r ? await api.previewShow(e.path, gen, r.host, r.inner, isDark()) : 'HIDDEN';
     if (gen !== native.gen || !media.isConnected) return;
     if (res !== true) {

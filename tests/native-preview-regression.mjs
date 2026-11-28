@@ -176,3 +176,38 @@ test('[IT-029/BUG-014] the right pane draws the shell slide image and never subs
   assert.equal(pane.dataset.kind, 'info');
   assert.equal(extracted, 0);
 });
+
+test('[IT-030/BUG-014] the rightmost column uses the slide image instead of extracted text', async () => {
+  const options = [];
+  const context = vm.createContext({ native: { gen: 0 }, previewHelpers: {}, api: {},
+    prefetchAround() {}, nativeWanted: () => false,
+    window: { Preview: { fill: (_media, _entry, optionsUsed) => options.push(optionsUsed) } } });
+  vm.runInContext(fn('fillPreview'), context);
+  await context.fillPreview({ isConnected: true, dataset: {} }, { path: 'slides.pptx', ext: 'pptx' });
+  assert.equal(options.length, 1);
+  assert.equal(options[0].slideThumbnail, true);
+});
+
+test('[IT-031/BUG-014] column previews load when the slide column scrolls into view', async () => {
+  const frames = [];
+  let visible = false;
+  let rendered = 0;
+  const context = vm.createContext({ native: { gen: 0 }, previewHelpers: {},
+    api: { previewShow: async () => { rendered++; return true; } },
+    nativeWanted: () => true, nativeAvailable: async () => true, prefetchAround() {},
+    nativeRects: () => visible ? { host: {}, inner: {} } : null,
+    requestAnimationFrame: (callback) => frames.push(callback),
+    performance: { now: () => 0 }, isDark: () => true, trackNative() {},
+    window: { Preview: { fill() {} } } });
+  vm.runInContext(fn('fillPreview'), context);
+  const media = { isConnected: true, dataset: {} };
+  const pending = context.fillPreview(media, { path: 'slides.pptx', ext: 'pptx' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(rendered, 0);
+  assert.equal(frames.length, 1);
+  visible = true;
+  frames.shift()();
+  await pending;
+  assert.equal(rendered, 1);
+  assert.equal(media.dataset.kind, 'native');
+});
