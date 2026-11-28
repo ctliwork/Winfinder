@@ -231,7 +231,12 @@ fn run(rx: Receiver<Cmd>, shared_host: Arc<AtomicIsize>) {
 fn handle(st: &mut State, cmd: Cmd) {
     match cmd {
         Cmd::Show { parent, path, gen, host, inner, dark, reply } => {
-            let r = if gen < LATEST.load(Ordering::SeqCst) { Err("STALE".into()) } else { load(st, parent, &path, gen, host, inner, dark) };
+            // Reject stale queued work without unloading a newer preview.
+            if gen < LATEST.load(Ordering::SeqCst) {
+                let _ = reply.send(Err("STALE".into()));
+                return;
+            }
+            let r = load(st, parent, &path, gen, host, inner, dark);
             if r.is_err() {
                 hide_host(st);
                 unload(st);
