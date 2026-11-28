@@ -57,7 +57,9 @@ test('[IT-022/CHG-009] hiding during handler discovery prevents the pending prev
     nativeAvailable: () => availability.promise, nativeRects: () => ({ host: {}, inner: {} }),
     isDark: () => true, trackNative() {}, window: { Preview: { fill() {} } } });
   vm.runInContext(fn('fillPreview') + '\n' + fn('nativeHide'), context);
-  const pending = context.fillPreview({ isConnected: true, dataset: {} }, { path: 'closed.pptx', ext: 'pptx' });
+  const media = { isConnected: true, dataset: {} };
+  const pending = context.fillPreview(media, { path: 'closed.pptx', ext: 'pptx' });
+  assert.equal(context.native.el, media, 'pane closure must recognize the pending media owner');
   context.nativeHide();
   availability.resolve(true); await pending;
   assert.deepEqual(shown, []);

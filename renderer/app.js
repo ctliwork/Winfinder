@@ -1419,7 +1419,8 @@
   // Invalidate older requests before any asynchronous handler discovery.
   async function fillPreview(media, e) {
     const gen = ++native.gen;
-    native.el = null;
+    if (native.raf) cancelAnimationFrame(native.raf);
+    native.el = media;
     api.previewHide?.(gen);
     delete media.dataset.nativeStatus;
     delete media.dataset.nativeError;
@@ -1427,7 +1428,7 @@
     window.Preview.fill(media, e, { helpers: previewHelpers });
     const wanted = nativeWanted(e) && await nativeAvailable(e.ext);
     if (gen !== native.gen || !media.isConnected) return;
-    if (!wanted) return;
+    if (!wanted) { native.el = null; return; }
     native.el = media;
     native.rect = '';
     const r = nativeRects(media);
