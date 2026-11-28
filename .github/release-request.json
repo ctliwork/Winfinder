@@ -1,6 +1,6 @@
 {
-  "request_id": "2026-11-28-native-preview-first-batch",
-  "validation_run_id": 46101456857,
-  "validated_sha": "8ec0ef02e0c2c72ba05ccd880b2335b7e6b293f7",
-  "notes": "第一批 Windows 操作相容修正：直欄預覽欄及右側預覽窗格改為優先使用系統註冊的預覽處理程式；修正快速切檔、關閉窗格後舊預覽回來、處理程式缺少結果持續快取的問題。\n修正直欄右鍵及 Ctrl 多選意外開啟資料夾。原生預覽失敗時明確標示替代內容，並保留錯誤階段與 HRESULT 供診斷。\n驗證：28 項 JavaScript、37 項 Rust，以及既有介面／檔案互動／原生右鍵回歸通過；新增 3 項真實 Windows RTF 預覽宿主測試通過。\n限制（EX-001）：使用者的 PPT「只有文字」仍需 Office 實機驗證，本版未宣稱已修好 PPT 顯示。快速預覽與圖庫仍有既有內建流程；原生複製／搬移、重新命名及全面 Explorer 操作對齊尚未完成。"
+  "request_id": "2026-11-28-powerpoint-right-preview",
+  "validation_run_id": 46106848600,
+  "validated_sha": "7e8dcc21d37c01160390cfb6d214c2fbbdc53ec3",
+  "notes": "右側預覽窗格選取 PPT／PPTX 時，先等 Windows 原生預覽。若載入失敗，改用 Windows 提供的投影片縮圖。有縮圖時可看到投影片畫面，否則顯示無法呈現版面。\n31 項 JavaScript、37 項 Rust、Windows 建置與介面回歸通過。本機也已驗證 Shell 能從測試 PPTX 取得縮圖。\n完整 PowerPoint 原生投影片與 Word 原始版面仍待實機比對。縮圖為單張備援。"
 }
