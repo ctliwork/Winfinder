@@ -84,8 +84,15 @@ async fn folder_count(dir: String) -> Option<usize> {
 }
 
 #[tauri::command]
-async fn thumbnail(path: String, size: i32, icon: Option<bool>) -> Option<String> {
-    blocking(move || thumb::thumbnail(&path, size.clamp(16, 1024), icon.unwrap_or(false))).await.ok().flatten()
+async fn thumbnail(path: String, size: i32, icon: Option<bool>, content_only: Option<bool>) -> Option<String> {
+    blocking(move || {
+        let size = size.clamp(16, 1024);
+        if content_only.unwrap_or(false) {
+            thumb::content_thumbnail(&path, size)
+        } else {
+            thumb::thumbnail(&path, size, icon.unwrap_or(false))
+        }
+    }).await.ok().flatten()
 }
 
 /// The page lost the keyboard while the window is still in front (Windows: a

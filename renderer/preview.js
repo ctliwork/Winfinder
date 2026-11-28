@@ -185,7 +185,7 @@
       <div class="pv-kind">${esc(I.kindLabel(e))}${e.isDir ? '' : ` — ${h.fmtSize(e.size)}`}</div>${extra}</div>`;
   }
 
-  async function fill(el, e, { autoplay = false, helpers: h }) {
+  async function fill(el, e, { autoplay = false, helpers: h, slideThumbnail = false }) {
     const token = (el._tok = (el._tok || 0) + 1);
     const alive = () => el._tok === token;
     el.innerHTML = '';
@@ -198,6 +198,17 @@
       set(infoCard(e, h, `<div class="pv-kind">${count == null ? '' : `${count} 個項目`}</div>`), 'info');
       return;
     }
+    if (slideThumbnail) {
+      const slide = await api.contentThumbnail?.(e.path, 1024);
+      if (!alive()) return;
+      if (slide) {
+        set(`<img src="${esc(slide)}" alt="投影片縮圖" draggable="false"><div class="pv-kind">Windows 投影片縮圖</div>`, 'media');
+      } else {
+        set(infoCard(e, h, '<div class="pv-kind">無法顯示投影片版面</div>'), 'info');
+      }
+      return;
+    }
+
     const url = h.fileUrl(e.path);
     if (bigPhoto(e)) {
       // Whichever is ready first, Windows' thumbnail or the photo itself; then the photo in its place.

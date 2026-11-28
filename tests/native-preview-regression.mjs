@@ -127,3 +127,52 @@ test('[IT-026/CHG-009] showing a preview waits until the previous native host is
   hidden.resolve(); await pending;
   assert.deepEqual(shown, ['current.pptx']);
 });
+
+test('[IT-027/BUG-014] right pane prioritizes the PowerPoint handler and uses a shell slide thumbnail on failure', async () => {
+  const events = [];
+  const context = vm.createContext({ native: { gen: 0 }, previewHelpers: {},
+    api: { previewShow: async () => { events.push('native'); return 'DO_PREVIEW 0x80070005'; } },
+    prefetchAround() {}, nativeWanted: () => true, nativeAvailable: async () => true,
+    nativeRects: () => ({ host: {}, inner: {} }), isDark: () => true, trackNative() {},
+    window: { Preview: { fill: async (_media, _entry, options) => events.push(options.slideThumbnail ? 'slide-thumbnail' : 'text') } } });
+  vm.runInContext(fn('fillPreview'), context);
+  await context.fillPreview({ isConnected: true, dataset: {}, id: 'pv-media' }, { path: 'slides.pptx', ext: 'pptx' });
+  assert.deepEqual(events, ['native', 'slide-thumbnail']);
+});
+
+test('[IT-028/BUG-014] right pane never extracts slide text before a successful native preview', async () => {
+  let filled = 0;
+  const context = vm.createContext({ native: { gen: 0 }, previewHelpers: {},
+    api: { previewShow: async () => true }, prefetchAround() {}, nativeWanted: () => true,
+    nativeAvailable: async () => true, nativeRects: () => ({ host: {}, inner: {} }), isDark: () => true,
+    trackNative() {}, window: { Preview: { fill: () => { filled++; } } } });
+  vm.runInContext(fn('fillPreview'), context);
+  const media = { isConnected: true, dataset: {}, id: 'pv-media' };
+  await context.fillPreview(media, { path: 'slides.pptx', ext: 'pptx' });
+  assert.equal(filled, 0);
+  assert.equal(media.dataset.kind, 'native');
+});
+
+test('[IT-029/BUG-014] the right pane draws the shell slide image and never substitutes text', async () => {
+  const preview = fs.readFileSync(new URL('../renderer/preview.js', import.meta.url), 'utf8');
+  let extracted = 0;
+  let image = 'data:image/png;base64,fixture';
+  const context = vm.createContext({
+    window: {
+      Icons: { esc: String, category: () => 'slides', kindLabel: () => 'PowerPoint', file: () => '' },
+      fsApi: { contentThumbnail: async () => image, richPreview: async () => { extracted++; } },
+    },
+  });
+  vm.runInContext(preview, context);
+  const pane = { dataset: {}, querySelector: () => null };
+  const helpers = { icon: () => '', badge: () => '', fmtSize: String, fmtDate: String };
+  const entry = { path: 'slides.pptx', name: 'slides.pptx', ext: 'pptx', isDir: false };
+  await context.window.Preview.fill(pane, entry, { helpers, slideThumbnail: true });
+  assert.match(pane.innerHTML, /data:image\/png;base64,fixture/);
+  assert.equal(pane.dataset.kind, 'media');
+  image = null;
+  await context.window.Preview.fill(pane, entry, { helpers, slideThumbnail: true });
+  assert.match(pane.innerHTML, /無法顯示投影片版面/);
+  assert.equal(pane.dataset.kind, 'info');
+  assert.equal(extracted, 0);
+});

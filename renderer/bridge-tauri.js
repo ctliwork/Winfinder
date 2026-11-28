@@ -76,6 +76,7 @@
     resolveLink: (path) => invoke('resolve_link', { path }).catch(() => null),
     folderCount: (dir) => invoke('folder_count', { dir }),
     thumb: (path, size) => invoke('thumbnail', { path, size: Math.round(size) }).catch(() => null),
+    ...(isWin ? { contentThumbnail: (path, size) => invoke('thumbnail', { path, size, contentOnly: true }).catch(() => null) } : {}),
     nativeIcon: (path) => invoke('thumbnail', { path, size: 96 }).catch(() => null),
     shellIcon: (path, size) => invoke('thumbnail', { path, size: Math.round(size), icon: true }).catch(() => null),
     ...(isWin ? { folderIcon: (size) => invoke('folder_icon', { size: Math.round(size) }).catch(() => null) } : {}),

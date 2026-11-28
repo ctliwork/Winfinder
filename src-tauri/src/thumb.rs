@@ -10,11 +10,19 @@ static CACHE: Mutex<Option<HashMap<String, Option<String>>>> = Mutex::new(None);
 /// `icon_only` asks for the icon Explorer shows (e.g. a folder's own icon,
 /// including custom desktop.ini icons) rather than a content preview.
 pub fn thumbnail(path: &str, size: i32, icon_only: bool) -> Option<String> {
-    let key = format!("{path}|{size}|{icon_only}");
+    cached_thumbnail(path, size, icon_only, false)
+}
+
+pub fn content_thumbnail(path: &str, size: i32) -> Option<String> {
+    cached_thumbnail(path, size, false, true)
+}
+
+fn cached_thumbnail(path: &str, size: i32, icon_only: bool, content_only: bool) -> Option<String> {
+    let key = format!("{path}|{size}|{icon_only}|{content_only}");
     if let Some(hit) = CACHE.lock().unwrap().get_or_insert_with(HashMap::new).get(&key) {
         return hit.clone();
     }
-    let value = platform_thumbnail(path, size, icon_only);
+    let value = platform_thumbnail(path, size, icon_only, content_only);
     let mut cache = CACHE.lock().unwrap();
     let map = cache.get_or_insert_with(HashMap::new);
     if map.len() > 4000 {
@@ -39,7 +47,7 @@ fn encode_png(rgba: &[u8], w: u32, h: u32) -> Option<String> {
 }
 
 #[cfg(windows)]
-fn platform_thumbnail(path: &str, size: i32, icon_only: bool) -> Option<String> {
+fn platform_thumbnail(path: &str, size: i32, icon_only: bool, content_only: bool) -> Option<String> {
     use std::ffi::c_void;
     use windows::core::PCWSTR;
     use windows::Win32::Foundation::SIZE;
@@ -48,14 +56,20 @@ fn platform_thumbnail(path: &str, size: i32, icon_only: bool) -> Option<String> 
         DIB_RGB_COLORS, HGDIOBJ,
     };
     use windows::Win32::System::Com::{CoInitializeEx, COINIT_APARTMENTTHREADED};
-    use windows::Win32::UI::Shell::{IShellItemImageFactory, SHCreateItemFromParsingName, SIIGBF_BIGGERSIZEOK, SIIGBF_ICONONLY};
+    use windows::Win32::UI::Shell::{IShellItemImageFactory, SHCreateItemFromParsingName, SIIGBF_BIGGERSIZEOK, SIIGBF_ICONONLY, SIIGBF_THUMBNAILONLY};
 
     unsafe {
         // Each worker thread needs COM; repeated calls on the same thread are harmless.
         let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
         let wide: Vec<u16> = path.encode_utf16().chain(Some(0)).collect();
         let factory: IShellItemImageFactory = SHCreateItemFromParsingName(PCWSTR(wide.as_ptr()), None).ok()?;
-        let flags = if icon_only { SIIGBF_BIGGERSIZEOK | SIIGBF_ICONONLY } else { SIIGBF_BIGGERSIZEOK };
+        let flags = SIIGBF_BIGGERSIZEOK | if content_only {
+            SIIGBF_THUMBNAILONLY
+        } else if icon_only {
+            SIIGBF_ICONONLY
+        } else {
+            Default::default()
+        };
         let hbmp = factory.GetImage(SIZE { cx: size, cy: size }, flags).ok()?;
         let obj = HGDIOBJ(hbmp.0);
 
@@ -99,7 +113,7 @@ fn platform_thumbnail(path: &str, size: i32, icon_only: bool) -> Option<String> 
 }
 
 #[cfg(not(windows))]
-fn platform_thumbnail(_path: &str, _size: i32, _icon_only: bool) -> Option<String> {
+fn platform_thumbnail(_path: &str, _size: i32, _icon_only: bool, _content_only: bool) -> Option<String> {
     None
 }
 
@@ -120,7 +134,7 @@ mod tests {
         let bytes = base64::engine::general_purpose::STANDARD.decode(url.split(',').nth(1).unwrap()).unwrap();
         let file = std::env::temp_dir().join(format!("winfinder-thumb-{}.png", std::process::id()));
         std::fs::write(&file, bytes).unwrap();
-        let thumb = super::platform_thumbnail(file.to_str().unwrap(), 48, false);
+        let thumb = super::platform_thumbnail(file.to_str().unwrap(), 48, false, false);
         assert!(thumb.is_some_and(|t| t.starts_with("data:image/png;base64,")));
     }
 
@@ -128,7 +142,7 @@ mod tests {
     #[test]
     fn shell_icon_for_folder() {
         let dir = std::env::temp_dir();
-        let icon = super::platform_thumbnail(dir.to_str().unwrap(), 64, true);
+        let icon = super::platform_thumbnail(dir.to_str().unwrap(), 64, true, false);
         assert!(icon.is_some_and(|t| t.starts_with("data:image/png;base64,")));
     }
 
@@ -137,9 +151,9 @@ mod tests {
     #[test]
     fn shell_icon_for_app_and_this_pc() {
         let windir = std::env::var("WINDIR").unwrap_or_else(|_| r"C:\Windows".into());
-        let app = super::platform_thumbnail(&format!(r"{windir}\explorer.exe"), 32, true);
+        let app = super::platform_thumbnail(&format!(r"{windir}\explorer.exe"), 32, true, false);
         assert!(app.is_some_and(|t| t.starts_with("data:image/png;base64,")));
-        let pc = super::platform_thumbnail("shell:::{20D04FE0-3AEA-1069-A2D8-08002B30309D}", 32, true);
+        let pc = super::platform_thumbnail("shell:::{20D04FE0-3AEA-1069-A2D8-08002B30309D}", 32, true, false);
         assert!(pc.is_some_and(|t| t.starts_with("data:image/png;base64,")));
     }
 }

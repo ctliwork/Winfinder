@@ -1426,12 +1426,24 @@
     delete media.dataset.nativeStatus;
     delete media.dataset.nativeError;
     prefetchAround(e);
-    window.Preview.fill(media, e, { helpers: previewHelpers });
+    const slides = media.id === 'pv-media' && !e.isDir && /^(ppt|pptx|pptm|pps|ppsx|ppsm|pot|potx|potm)$/i.test(e.ext);
+    const fallback = () => window.Preview.fill(media, e, { helpers: previewHelpers, slideThumbnail: slides });
+    if (slides) {
+      media._tok = (media._tok || 0) + 1;
+      media.innerHTML = '<div class="pv-kind">正在載入投影片預覽…</div>';
+      media.dataset.kind = '';
+    } else {
+      fallback();
+    }
     await hidden;
     if (gen !== native.gen || !media.isConnected) return;
     const wanted = nativeWanted(e) && await nativeAvailable(e.ext);
     if (gen !== native.gen || !media.isConnected) return;
-    if (!wanted) { native.el = null; return; }
+    if (!wanted) {
+      native.el = null;
+      if (slides) await fallback();
+      return;
+    }
     native.el = media;
     native.rect = '';
     const r = nativeRects(media);
@@ -1444,6 +1456,7 @@
         media.dataset.nativeStatus = 'Windows 預覽無法載入，目前顯示替代預覽';
         media.title = String(res);
       }
+      if (slides) await fallback();
       return;
     }
     media._tok = (media._tok || 0) + 1;
@@ -3721,7 +3734,7 @@
     const on = !!paneVisible();
     document.body.classList.toggle('pane-open', on);
     $('#btn-preview').classList.toggle('on', inColumnsMode() ? !!prefs.colPreview : !!prefs.previewPane);
-    if (!on) { if (paneShown) { if (native.el === $('#pv-media')) nativeHide(); $('#pv-media').innerHTML = ''; paneShown = null; } return; }
+    if (!on) { clearTimeout(paneTimer); if (paneShown) { const media = $('#pv-media'); if (native.el === media) nativeHide(); media._tok = (media._tok || 0) + 1; media.innerHTML = ''; paneShown = null; } return; }
     clearTimeout(paneTimer);
     paneTimer = setTimeout(renderPane, 90);
   }
@@ -3748,6 +3761,7 @@
   }
 
   async function renderPane() {
+    if (!paneVisible()) return;
     const sel = selectedEntries();
     const media = $('#pv-media');
     const info = $('#pv-info');
@@ -3781,6 +3795,7 @@
     }
     paneShown = null;
     nativeHide();
+    media._tok = (media._tok || 0) + 1;
     if (sel.length > 1) {
       const files = sel.filter((e) => !e.isDir);
       const total = files.reduce((n, e) => n + (e.size || 0), 0);
